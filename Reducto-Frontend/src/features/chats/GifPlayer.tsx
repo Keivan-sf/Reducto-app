@@ -1,13 +1,15 @@
-import { useCallback } from 'react';
+import { useEffect } from 'react';
 import { ActivityIndicator, AppState, StyleSheet, Text } from 'react-native';
 import { useEvent } from 'expo';
-import { useFocusEffect } from 'expo-router';
+import { useIsFocused } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { colors } from '../../components/ui';
 import { MediaPreview } from './MediaPreview';
+import { watchGifPlayback } from '../../lib/gif-playback';
 
 /** The backend converts GIFs to silent MP4s. Keep their playback inline and automatic. */
 export function GifPlayer({ uri, active = true }: { uri: string; active?: boolean }) {
+  const focused = useIsFocused();
   const player = useVideoPlayer({ uri, contentType: 'progressive' }, (video) => {
     video.muted = true;
     video.loop = true;
@@ -20,19 +22,17 @@ export function GifPlayer({ uri, active = true }: { uri: string; active?: boolea
     loaded?.availableVideoTracks[0]?.size ??
     player.availableVideoTracks[0]?.size;
 
-  useFocusEffect(
-    useCallback(() => {
-      const update = () => {
-        if (active && AppState.currentState === 'active') player.play();
-        else player.pause();
-      };
-      update();
-      const subscription = AppState.addEventListener('change', update);
-      return () => {
-        subscription.remove();
-        player.pause();
-      };
-    }, [player, active]),
+  useEffect(
+    () =>
+      watchGifPlayback(
+        player,
+        () => focused && active && AppState.currentState === 'active',
+        (update) => {
+          const subscription = AppState.addEventListener('change', update);
+          return () => subscription.remove();
+        },
+      ),
+    [player, active, focused],
   );
 
   return (
