@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Linking, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { api } from '../../context/SessionContext';
 import type { Gif } from '../../api/types';
 import { Button, Dialog, Field, Notice, styles } from '../../components/ui';
 import { fileForm } from '../../lib/uploads';
-import { objectUrl } from '../../lib/config';
+import { GifPreview } from './GifPreview';
+import { useGifs } from '../../context/GifsContext';
 
 export function GifDialog({
   visible,
@@ -16,12 +17,14 @@ export function GifDialog({
   onClose: () => void;
   onSend: (id: string) => Promise<void>;
 }) {
+  const cache = useGifs();
   const [gifs, setGifs] = useState<Gif[]>([]);
   const [gifId, setGifId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   async function load() {
     const result = await api.get<{ gifs: Gif[] }>('/api/gifs');
+    result.gifs.forEach((gif) => cache.remember(gif));
     setGifs(result.gifs);
   }
   useEffect(() => {
@@ -29,12 +32,15 @@ export function GifDialog({
     const controller = new AbortController();
     void api
       .get<{ gifs: Gif[] }>('/api/gifs', controller.signal)
-      .then((result) => setGifs(result.gifs))
+      .then((result) => {
+        result.gifs.forEach((gif) => cache.remember(gif));
+        setGifs(result.gifs);
+      })
       .catch((err) => {
         if (!controller.signal.aborted) setError(err.message);
       });
     return () => controller.abort();
-  }, [visible]);
+  }, [visible, cache]);
   async function run(action: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
@@ -58,7 +64,12 @@ export function GifDialog({
       if ((file.size ?? 0) > 50 * 1024 * 1024)
         throw new Error('Choose a GIF or video smaller than 50 MB.');
       const body = await fileForm('gif', file);
-      await api.request('/api/gifs', { method: 'POST', body, signal: AbortSignal.timeout(120000) });
+      const { gif } = await api.request<{ gif: Gif }>('/api/gifs', {
+        method: 'POST',
+        body,
+        signal: AbortSignal.timeout(120000),
+      });
+      cache.remember(gif);
       await load();
     });
   }
@@ -104,17 +115,7 @@ export function GifDialog({
             {gif.id}
           </Text>
           <Text style={styles.subtitle}>{(gif.fileSize / 1024 / 1024).toFixed(1)} MB</Text>
-          {objectUrl(gif.objectKey) && (
-            <Button
-              title="Open GIF"
-              secondary
-              onPress={() =>
-                void Linking.openURL(objectUrl(gif.objectKey)!).catch((err) =>
-                  setError(err.message),
-                )
-              }
-            />
-          )}
+          <GifPreview gifId={gif.id} active={visible} />
           <Button
             title="Send GIF"
             disabled={busy}

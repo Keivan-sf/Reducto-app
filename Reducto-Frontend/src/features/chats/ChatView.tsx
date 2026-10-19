@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -10,6 +10,7 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type ViewToken,
 } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -26,7 +27,7 @@ import {
   Notice,
   styles,
 } from '../../components/ui';
-import { EMOJIS, type Attachment, type Emoji, type Message } from '../../api/types';
+import { EMOJIS, type Attachment, type Emoji, type Gif, type Message } from '../../api/types';
 import { conversationName, profileName, timeLabel } from '../../lib/messages';
 import { useProfiles } from '../../context/ProfilesContext';
 import { fileForm } from '../../lib/uploads';
@@ -35,6 +36,8 @@ import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
 import { GifDialog } from './GifDialog';
 import { MessageText } from './MessageText';
+import { GifPreview } from './GifPreview';
+import { useGifs } from '../../context/GifsContext';
 
 export default function ChatView({ id }: { id?: string }) {
   const { session } = useSession();
@@ -62,6 +65,14 @@ export default function ChatView({ id }: { id?: string }) {
   const [attachment, setAttachment] = useState<Attachment | undefined>();
   const [attachmentName, setAttachmentName] = useState('');
   const [search, setSearch] = useState<string | null>(null);
+  const gifCache = useGifs();
+  const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken<Message>[] }) => {
+      setVisibleMessages(new Set(viewableItems.map(({ item }) => item.id)));
+    },
+    [],
+  );
   const list = useRef<FlatList<Message>>(null);
   const wide = useWindowDimensions().width >= 850;
   const peerId = id
@@ -113,11 +124,12 @@ export default function ChatView({ id }: { id?: string }) {
     try {
       if (file.mimeType === 'image/gif') {
         const body = await fileForm('gif', file);
-        const { gif } = await api.request<{ gif: { id: string } }>('/api/gifs', {
+        const { gif } = await api.request<{ gif: Gif }>('/api/gifs', {
           method: 'POST',
           body,
           signal: AbortSignal.timeout(120000),
         });
+        gifCache.remember(gif);
         setAttachment({ type: 'gif', gifId: gif.id });
       } else {
         const body = await fileForm('file', file);
@@ -253,6 +265,7 @@ export default function ChatView({ id }: { id?: string }) {
         data={shown}
         keyExtractor={(message) => message.id}
         keyboardShouldPersistTaps="handled"
+        onViewableItemsChanged={onViewableItemsChanged}
         ListFooterComponent={
           <View style={{ alignItems: 'center', padding: 14, gap: 10 }}>
             {hasOlder(id) && (
@@ -324,13 +337,9 @@ export default function ChatView({ id }: { id?: string }) {
                       accessibilityLabel={`Open ${message.attachment.type} attachment`}
                       onPress={() => {
                         if (message.attachment!.type === 'gif') {
-                          void Clipboard.setStringAsync(message.attachment!.gifId)
-                            .then(() => {
-                              setError('');
-                              setActionMessage(message);
-                              setForward(false);
-                            })
-                            .catch((err) => setError(err.message));
+                          setError('');
+                          setActionMessage(message);
+                          setForward(false);
                         } else
                           void downloadAttachment(id, message.attachment!.mediaId).catch((err) =>
                             setError(err.message),
@@ -344,6 +353,12 @@ export default function ChatView({ id }: { id?: string }) {
                     >
                       {message.attachment.type === 'image' && (
                         <AttachmentImage conversationId={id} mediaId={message.attachment.mediaId} />
+                      )}
+                      {message.attachment.type === 'gif' && (
+                        <GifPreview
+                          gifId={message.attachment.gifId}
+                          active={!gifs && visibleMessages.has(message.id)}
+                        />
                       )}
                       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
                         <Icon
@@ -694,7 +709,6 @@ const s = StyleSheet.create({
   },
   emptyText: { color: '#7F96A7', fontSize: 13, textAlign: 'center', lineHeight: 20 },
   attachment: { gap: 10, marginBottom: 6, padding: 4 },
-  image: { width: 230, height: 180, maxWidth: '100%', borderRadius: 10 },
   reactions: { flexDirection: 'row', gap: 5, flexWrap: 'wrap', paddingTop: 5 },
   reaction: {
     paddingVertical: 4,

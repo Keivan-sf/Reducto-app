@@ -1,6 +1,242 @@
 import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
+import path from 'node:path';
 const inviteToken = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
 const inviteUri = `reducto:///api/groups/join/${inviteToken}`;
+
+test('GIF previews autoplay muted, loop, and never expose video controls', async ({ page }) => {
+  const mediaBase = 'https://media.example';
+  let lookups = 0;
+  const gifId = '55555555-5555-4555-8555-555555555555';
+  await mockApi(page, [{ ...first, attachment: { type: 'gif', gifId } }]);
+  await page.route(`**/api/gifs/${gifId}`, (route) => {
+    lookups++;
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    return route.fulfill({
+      json: {
+        gif: {
+          id: gifId,
+          objectKey: 'gifs/test.mp4',
+          fileSize: 9000,
+          createdAt: first.createdAt,
+          playbackUrl: `${mediaBase}/gifs/test.mp4`,
+        },
+      },
+    });
+  });
+  await page.route(`${mediaBase}/gifs/test.mp4`, (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/loop.mp4'),
+      contentType: 'video/mp4',
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const video = page.locator('video');
+  await expect(video).toBeVisible();
+  await expect
+    .poll(() =>
+      video.evaluate((element: HTMLVideoElement) => ({
+        playing: !element.paused,
+        muted: element.muted,
+        loop: element.loop,
+        controls: element.controls,
+        inline: element.playsInline,
+        decoded: element.videoWidth > 0,
+      })),
+    )
+    .toEqual({
+      playing: true,
+      muted: true,
+      loop: true,
+      controls: false,
+      inline: true,
+      decoded: true,
+    });
+  await video.evaluate((element: HTMLVideoElement & { wraps?: number }) => {
+    element.wraps = 0;
+    let previous = element.currentTime;
+    element.addEventListener('timeupdate', () => {
+      if (element.currentTime < previous) element.wraps!++;
+      previous = element.currentTime;
+    });
+  });
+  await expect
+    .poll(() => video.evaluate((element: HTMLVideoElement & { wraps?: number }) => element.wraps), {
+      timeout: 10000,
+    })
+    .toBeGreaterThan(1);
+  await page.getByRole('button', { name: 'Open gif attachment' }).click();
+  await expect(page.getByRole('button', { name: 'Save GIF to library' })).toBeVisible();
+  expect(lookups).toBe(1);
+});
+
+test('sending a library GIF reuses its signed playback link without a details lookup', async ({
+  page,
+}) => {
+  const gifId = '55555555-5555-4555-8555-555555555555';
+  const playbackUrl = 'https://media.example/library.mp4';
+  let lookups = 0;
+  await mockApi(page);
+  await page.route('**/api/gifs', (route) =>
+    route.fulfill({
+      json: {
+        gifs: [
+          {
+            id: gifId,
+            objectKey: 'gifs/library.mp4',
+            playbackUrl,
+            fileSize: 9000,
+            createdAt: first.createdAt,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(`**/api/gifs/${gifId}`, (route) => {
+    lookups++;
+    return route.fulfill({ status: 500, json: { error: 'Library metadata should be cached' } });
+  });
+  await page.route(playbackUrl, (route) => {
+    expect(route.request().headers().authorization).toBeUndefined();
+    return route.fulfill({
+      path: path.join(__dirname, '../fixtures/loop.mp4'),
+      contentType: 'video/mp4',
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Open GIF library' }).click();
+  await expect(page.locator('video')).toBeVisible();
+  await page.getByRole('button', { name: 'Send GIF', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Open gif attachment' })).toBeVisible();
+  const sentVideo = page.getByRole('button', { name: 'Open gif attachment' }).locator('video');
+  await expect(sentVideo).toHaveAttribute('src', playbackUrl);
+  await expect
+    .poll(() =>
+      sentVideo.evaluate((video: HTMLVideoElement) => !video.paused && video.videoWidth > 0),
+    )
+    .toBe(true);
+  expect(lookups).toBe(0);
+});
+
+test('visible GIF previews renew cached signed links before expiry', async ({ page }) => {
+  await page.clock.install();
+  const gifId = '55555555-5555-4555-8555-555555555555';
+  let lookups = 0;
+  await mockApi(page, [{ ...first, attachment: { type: 'gif', gifId } }]);
+  await page.route(`**/api/gifs/${gifId}`, (route) =>
+    route.fulfill({
+      json: {
+        gif: {
+          id: gifId,
+          objectKey: 'gifs/test.mp4',
+          fileSize: 9000,
+          createdAt: first.createdAt,
+          playbackUrl: `https://media.example/test.mp4?v=${++lookups}`,
+        },
+      },
+    }),
+  );
+  await page.route('https://media.example/test.mp4*', (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/loop.mp4'),
+      contentType: 'video/mp4',
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.locator('video')).toHaveAttribute('src', 'https://media.example/test.mp4?v=1');
+  await page.clock.fastForward(10 * 60 * 1000 + 1000);
+  await expect(page.locator('video')).toHaveAttribute('src', 'https://media.example/test.mp4?v=2');
+  expect(lookups).toBe(2);
+});
+
+for (const portrait of [false, true]) {
+  test(`GIF previews fit their frame and preserve ${portrait ? 'portrait' : 'landscape'} proportions`, async ({
+    page,
+  }) => {
+    const gifId = '55555555-5555-4555-8555-555555555555';
+    await mockApi(page, [{ ...first, attachment: { type: 'gif', gifId } }]);
+    await page.route(`**/api/gifs/${gifId}`, (route) =>
+      route.fulfill({
+        json: {
+          gif: {
+            id: gifId,
+            playbackUrl: 'https://media.example/shape.mp4',
+          },
+        },
+      }),
+    );
+    await page.route('https://media.example/shape.mp4', (route) =>
+      route.fulfill({
+        path: path.join(__dirname, `../fixtures/${portrait ? 'portrait' : 'loop'}.mp4`),
+        contentType: 'video/mp4',
+      }),
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const video = page.locator('video');
+    await expect
+      .poll(() =>
+        video.evaluate((element: HTMLVideoElement) => {
+          const rect = element.getBoundingClientRect();
+          const frame = element.parentElement!.getBoundingClientRect();
+          return (
+            element.videoWidth > 0 &&
+            Math.abs(rect.width / rect.height - element.videoWidth / element.videoHeight) < 0.02 &&
+            Math.abs(rect.width - frame.width) < 1 &&
+            Math.abs(rect.height - frame.height) < 1 &&
+            frame.width <= 260 &&
+            frame.height <= 280 &&
+            frame.left >= 0 &&
+            frame.right <= window.innerWidth
+          );
+        }),
+      )
+      .toBe(true);
+    await expect(video).toHaveCSS('object-fit', 'contain');
+  });
+}
+
+for (const panorama of [false, true]) {
+  test(`image previews adapt to ${panorama ? 'extreme panorama' : 'portrait'} dimensions without cropping`, async ({
+    page,
+  }) => {
+    await mockApi(page, [{ ...first, attachment: { type: 'image', mediaId: 'photo' } }]);
+    await page.route('**/api/conversations/*/attachments/photo', (route) =>
+      route.fulfill({
+        path: path.join(__dirname, `../fixtures/${panorama ? 'panorama' : 'portrait'}.png`),
+        contentType: 'image/png',
+      }),
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const frame = page.getByLabel('Image preview', { exact: true });
+    await expect
+      .poll(async () => {
+        const box = await frame.boundingBox();
+        return box ? box.width / box.height : 0;
+      })
+      .toBeCloseTo(panorama ? 2.5 : 0.6, 1);
+    await expect
+      .poll(() =>
+        frame.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          // React Native Web renders an Image as a background sized to contain.
+          const image = element.querySelector('[style*="background-image"]');
+          return (
+            box.width <= 260 &&
+            box.height <= 280 &&
+            box.left >= 0 &&
+            box.right <= window.innerWidth &&
+            !!image &&
+            getComputedStyle(image).backgroundSize === 'contain'
+          );
+        }),
+      )
+      .toBe(true);
+  });
+}
 
 const user = {
   id: '11111111-1111-4111-8111-111111111111',

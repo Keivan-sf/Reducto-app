@@ -59,6 +59,7 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 export interface Gif {
+  playbackUrl: string;
   id: string;
   objectKey: string;
   fileSize: number;
