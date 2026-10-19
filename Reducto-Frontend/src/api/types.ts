@@ -20,6 +20,7 @@ export interface Tokens {
   refreshToken: string;
 }
 export interface Session extends Tokens {
+  serverUrl: string;
   user: User;
 }
 export interface Conversation {

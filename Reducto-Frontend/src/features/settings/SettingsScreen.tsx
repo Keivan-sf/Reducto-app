@@ -144,6 +144,9 @@ export default function SettingsScreen() {
             <Icon name="person-circle-outline" color={colors.blue} />
             <Text style={styles.title}>Your account</Text>
           </View>
+          <Text selectable style={s.hint}>
+            Server: {session!.serverUrl}
+          </Text>
           <Text style={s.hint}>
             {user.username
               ? 'Share your username so friends can easily start a chat with you.'

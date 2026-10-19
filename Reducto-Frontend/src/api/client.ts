@@ -22,6 +22,7 @@ export class ApiClient {
     },
   ) {}
   setSession(session: Session | null) {
+    if (session) this.baseUrl = session.serverUrl;
     this.session = session;
   }
   getSession() {
@@ -35,11 +36,18 @@ export class ApiClient {
         if (this.coordination && expected) {
           const stored = await this.coordination.readSession();
           // A waiting tab must use the tokens another tab just rotated.
-          if (!stored || stored.user.id !== expected.user.id) {
+          if (
+            !stored ||
+            stored.serverUrl !== expected.serverUrl ||
+            stored.user.id !== expected.user.id
+          ) {
             throw new ApiError(401, 'Your session changed. Please try again.');
           }
           if (stored.refreshToken !== expected.refreshToken) {
-            if (this.session?.user.id === stored.user.id) {
+            if (
+              this.session?.serverUrl === stored.serverUrl &&
+              this.session?.user.id === stored.user.id
+            ) {
               this.session = stored;
               await this.onSession(stored);
             }
@@ -60,6 +68,7 @@ export class ApiClient {
           // A logout during refresh must never restore the old account.
           if (
             this.session?.refreshToken !== previous.refreshToken ||
+            this.session.serverUrl !== previous.serverUrl ||
             this.session.user.id !== previous.user.id
           )
             return;
@@ -69,6 +78,7 @@ export class ApiClient {
           if (
             error instanceof ApiError &&
             (error.status === 401 || error.status === 403) &&
+            this.session?.serverUrl === previous.serverUrl &&
             this.session?.refreshToken === previous.refreshToken
           ) {
             this.session = null;
@@ -92,7 +102,11 @@ export class ApiClient {
     authenticated = true,
     retry = true,
   ): Promise<T> {
+    const requestBaseUrl = this.baseUrl;
+    if (!requestBaseUrl) throw new ApiError(0, 'Choose a server URL before signing in.');
     const requestSession = authenticated ? this.session : null;
+    if (requestSession && requestSession.serverUrl !== requestBaseUrl)
+      throw new ApiError(401, 'Sign in to this server first.');
     const headers = new Headers(options.headers);
     if (options.body && !(options.body instanceof FormData))
       headers.set('Content-Type', 'application/json');
@@ -100,7 +114,7 @@ export class ApiClient {
       headers.set('Authorization', `Bearer ${this.session.accessToken}`);
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, {
+      response = await fetch(`${requestBaseUrl}${path}`, {
         ...options,
         headers,
         signal: options.signal ?? AbortSignal.timeout(20000),
@@ -109,11 +123,15 @@ export class ApiClient {
       if (options.signal?.aborted) throw error;
       throw new ApiError(0, 'Could not reach Reducto. Check your connection and server address.');
     }
+    if (this.baseUrl !== requestBaseUrl)
+      throw new ApiError(0, 'The server changed. Please try again.');
     if (response.status === 401 && authenticated && retry && this.session) {
       if (this.session.user.id !== requestSession?.user.id)
         throw new ApiError(401, 'Your session changed. Please try again.');
       // Another request/tab may have renewed while this old-token response was in flight.
       if (this.session.accessToken === requestSession.accessToken) await this.refresh();
+      if (this.baseUrl !== requestBaseUrl)
+        throw new ApiError(0, 'The server changed. Please try again.');
       return this.request<T>(path, options, authenticated, false);
     }
     if (!response.ok) {

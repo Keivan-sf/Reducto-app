@@ -3,7 +3,17 @@ import https from 'node:https';
 import { pathToFileURL } from 'node:url';
 
 // Development-only CORS adapter; forward auth and bytes without logging secrets.
-export function createProxy(target = new URL(process.env.API_TARGET ?? 'http://127.0.0.1:3000')) {
+export function createProxy(target) {
+  if (
+    !(target instanceof URL) ||
+    !['http:', 'https:'].includes(target.protocol) ||
+    target.username ||
+    target.password ||
+    target.pathname !== '/' ||
+    target.search ||
+    target.hash
+  )
+    throw new Error('Provide a server origin, such as https://chat.example.com');
   const transport = target.protocol === 'https:' ? https : http;
   return http
     .createServer((request, response) => {
@@ -78,7 +88,8 @@ export function createProxy(target = new URL(process.env.API_TARGET ?? 'http://1
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PROXY_PORT ?? 3001);
-  createProxy().listen(port, '0.0.0.0', () =>
+  if (!process.argv[2]) throw new Error('Usage: pnpm proxy <server-url>');
+  createProxy(new URL(process.argv[2])).listen(port, '0.0.0.0', () =>
     console.log(`Reducto web API proxy: http://localhost:${port}`),
   );
 }

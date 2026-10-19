@@ -267,7 +267,16 @@ const friend = {
   username: 'grace',
   avatarUrl: 'https://avatars.example/grace.png',
 };
-async function mockApi(page: Page, initialMessages: object[] = [first]) {
+async function mockApi(
+  page: Page,
+  initialMessages: object[] = [first],
+  selectedServer: string | null = 'http://localhost:3001',
+) {
+  if (selectedServer)
+    await page.addInitScript((serverUrl) => {
+      if (!localStorage.getItem('reducto.server.v1'))
+        localStorage.setItem('reducto.server.v1', serverUrl);
+    }, selectedServer);
   const messages = [...initialMessages];
   await page.route('https://avatars.example/**', (route) =>
     route.fulfill({
@@ -278,7 +287,7 @@ async function mockApi(page: Page, initialMessages: object[] = [first]) {
       ),
     }),
   );
-  await page.route('**:3001/api/**', async (route) => {
+  await page.route(`${selectedServer ?? 'http://localhost:3001'}/api/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     let body: unknown = {};
@@ -327,6 +336,63 @@ async function signIn(page: Page) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 }
+
+test('login requires a server URL and remembers the chosen server for HTTP and realtime', async ({
+  page,
+}) => {
+  const server = 'http://localhost:4321';
+  await mockApi(page, [first], server);
+  await page.addInitScript(() => localStorage.removeItem('reducto.server.v1'));
+  const realtime = await mockRealtime(page);
+  await page.goto('/login');
+  await expect(page.getByRole('textbox', { name: 'Server URL', exact: true })).toHaveValue('');
+  await page.getByPlaceholder('you@example.com').fill('ada@example.com');
+  await page.getByPlaceholder('Enter your password').fill('goodpassword');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(
+    page.getByText(
+      'Enter the server address, including http:// or https://, without /api or another path.',
+    ),
+  ).toBeVisible();
+  await page.getByRole('textbox', { name: 'Server URL', exact: true }).fill(` ${server}/ `);
+  const signedIn = page.waitForRequest(`${server}/api/auth/sign-in`);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await signedIn;
+  await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+  await expect.poll(realtime.url).toContain('localhost:4321/socket.io/');
+  expect(
+    await page.evaluate(() => JSON.parse(localStorage.getItem('reducto.session.v1')!).serverUrl),
+  ).toBe(server);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).last().click();
+  await expect(page.getByRole('textbox', { name: 'Server URL', exact: true })).toHaveValue(server);
+});
+
+test('sessions without a known server ask for login instead of sending saved credentials', async ({
+  page,
+}) => {
+  await mockApi(page, [first], null);
+  let requests = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/')) requests++;
+  });
+  await page.addInitScript(
+    ({ user }) => {
+      localStorage.setItem(
+        'reducto.session.v1',
+        JSON.stringify({ user, accessToken: 'old', refreshToken: 'old-refresh' }),
+      );
+    },
+    { user },
+  );
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Server URL', exact: true })).toHaveValue('');
+  expect(requests).toBe(0);
+});
 
 test('web sessions survive closing the tab and restore expired access tokens on restart', async ({
   page,
@@ -390,7 +456,12 @@ test('existing tab sessions migrate to persistent storage and logout reaches oth
     ({ key, user }) => {
       sessionStorage.setItem(
         key,
-        JSON.stringify({ user, accessToken: 'access-token', refreshToken: 'refresh-token' }),
+        JSON.stringify({
+          user,
+          serverUrl: 'http://localhost:3001',
+          accessToken: 'access-token',
+          refreshToken: 'refresh-token',
+        }),
       );
     },
     { key, user },
@@ -435,6 +506,7 @@ async function mockRealtime(page: Page, accessToken = 'access-token') {
     },
     disconnect: () => socket!.close(),
     connections: () => connections,
+    url: () => socket?.url(),
   };
 }
 

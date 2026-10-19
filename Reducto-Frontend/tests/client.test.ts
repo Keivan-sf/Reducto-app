@@ -8,6 +8,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 const session: Session = {
+  serverUrl: 'http://test',
   accessToken: 'expired',
   refreshToken: 'refresh-1',
   user: { id: 'user-1', name: 'Ada', email: 'ada@example.com', username: null, avatarKey: null },
@@ -157,4 +158,33 @@ test('a late unauthorized response reuses tokens already refreshed by another re
   releaseLate();
   await delayed;
   assert.equal(refreshes, 1);
+});
+
+test('restored sessions select their server and never forward tokens to a changed endpoint', async () => {
+  const client = new ApiClient('http://unrelated');
+  client.setSession(session);
+  let calls = 0;
+  globalThis.fetch = async (url) => {
+    calls++;
+    assert.equal(url, 'http://test/api/auth/me');
+    return json({ ok: true });
+  };
+  await client.get('/api/auth/me');
+  client.baseUrl = 'https://different.example';
+  await assert.rejects(client.get('/api/auth/me'), /Sign in to this server first/);
+  assert.equal(calls, 1);
+});
+
+test('a response from a previous server cannot establish a session after switching servers', async () => {
+  const client = new ApiClient('http://first');
+  let complete!: (response: Response) => void;
+  globalThis.fetch = () =>
+    new Promise((resolve) => {
+      complete = resolve;
+    });
+  const request = client.request('/api/auth/sign-in', { method: 'POST' }, false);
+  client.baseUrl = 'http://second';
+  complete(json({ ...session, serverUrl: 'http://first' }));
+  await assert.rejects(request, /server changed/);
+  assert.equal(client.getSession(), null);
 });

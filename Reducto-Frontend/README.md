@@ -4,7 +4,7 @@ A Telegram-inspired messenger built with **Expo SDK 57**, React Native, TypeScri
 
 ## Run locally
 
-With the reference backend running on port 3000:
+Start the client:
 
 ```sh
 cd Reducto-Frontend
@@ -12,19 +12,19 @@ pnpm install
 pnpm dev
 ```
 
-Open **http://localhost:8081** on web. Scan the terminal QR code with **Expo Go compatible with SDK 57** on Android. This SDK was selected following Expo’s [physical-device guidance](https://docs.expo.dev/get-started/create-a-project/). No custom native build is needed for the implemented features.
+Open **http://localhost:8081** on web, or scan the QR code with **Expo Go compatible with SDK 57** on Android. No custom native build is required.
 
-`pnpm dev` starts Expo and a development API proxy on port 3001. The reference backend does not send CORS headers; the proxy adds them for local web origins and forwards Socket.IO WebSockets. Backend source remains unchanged. `BROWSER=none pnpm dev` starts without opening a browser.
+On the sign-in or sign-up screen, enter your **Server URL**, including `http://` or `https://` and the port if needed. Enter the server origin without `/api` or another path. The app remembers the address and stores it with the authenticated session. REST requests, uploads, downloads, token refresh, and Socket.IO use that selected server. No API URL environment variable or rebuild is required. Sign out to choose another server; the previous address remains editable on the login screen.
 
-For an Android phone, use the same Wi-Fi network as your computer. The app automatically uses Metro’s LAN hostname and port 3000 for the API. The backend and port 8081 must be reachable from the phone. For an Android emulator, set `EXPO_PUBLIC_API_URL=http://10.0.2.2:3000`. You can also run `pnpm android` or `pnpm start --go` when a web proxy is not needed.
+For a physical Android phone, use a server address reachable from that phone, such as your computer’s LAN address on the same Wi-Fi network. `localhost` on a phone refers to the phone itself. Old saved sessions without a server address require signing in again, so tokens are never guessed to belong to a different server.
 
-Copy `.env.example` to `.env` to override automatic addresses, then restart Expo:
+For web, the selected server must allow the frontend’s origin through CORS. An HTTPS frontend requires an HTTPS server. `pnpm dev` starts only Expo. If the reference backend has no CORS support, you can explicitly run the optional development proxy in another terminal:
 
-```dotenv
-EXPO_PUBLIC_API_URL=http://192.168.1.10:3000
+```sh
+pnpm proxy http://YOUR_BACKEND_HOST:3000
 ```
 
-For web, use the proxy address (`http://localhost:3001`) or an API that supports your web origin. `API_TARGET` and `PROXY_PORT` configure the development proxy; changing its port also requires changing `EXPO_PUBLIC_API_URL`. The proxy reads process environment variables; run it with `node --env-file=.env scripts/dev.mjs` if overriding those values in `.env`.
+Then enter the proxy’s address (port 3001 by default) as the **Server URL** on the web login screen. The proxy target is supplied as a command argument; it is never taken from `API_TARGET`. `PROXY_PORT` controls only the local listening port. This proxy is a local development tool, not required for servers that support CORS.
 
 ## Features
 
@@ -48,7 +48,7 @@ User profiles are fetched by ID and username and shared across the chat list, co
 
 Avatars use signed URLs from the user profile API; the backend’s `S3_ENDPOINT` must be reachable from the web browser or Android phone. No public storage URL is needed for avatars. GIF previews use `playbackUrl` from the library/upload responses or authenticated `GET /api/gifs/:gifId` for received messages. Signed links play directly without a bearer header. A bounded, session-local cache shares requests and reuses library/upload metadata; links renew after ten minutes or one minute before their signed expiry, whichever comes first. Visible previews recheck on app resume; offscreen chat GIFs pause. Image and GIF previews adapt to their media dimensions, stay within 260 × 280 logical pixels and the available bubble width, and contain the full media without cropping. Extremely tall or wide media uses padding within a bounded frame. No public storage base URL is required for GIFs. Conversation attachments use the API’s authenticated download endpoint and do not require public storage. Videos/audio/documents download or open through the device share sheet; inline playback for ordinary video/audio attachments and push notifications are not implemented.
 
-Native credentials use Expo SecureStore. Web credentials persist in localStorage across tab and browser restarts; existing sessionStorage entries migrate automatically. Refresh tokens rotate on renewal, with Web Locks coordinating tabs where available, and sign-out synchronizes across open tabs. Browser storage remains scoped to the same scheme, hostname, and port. Messages are held in memory and synchronized from the server. For hosted deployment, configure HTTPS, API CORS/WebSocket origin handling, a reachable API URL, and a host that routes application paths to the web entry point; the included proxy is for local development.
+Native credentials use Expo SecureStore. Web credentials persist in localStorage across tab and browser restarts; existing sessionStorage entries migrate automatically. Refresh tokens rotate on renewal, with Web Locks coordinating tabs where available, and sign-out synchronizes across open tabs. Browser storage remains scoped to the same scheme, hostname, and port. Messages are held in memory and synchronized from the server. For hosted deployment, configure HTTPS, API CORS/WebSocket origin handling, a server address reachable by clients, and a host that routes application paths to the web entry point; the included proxy is for local development.
 
 ## Project layout
 

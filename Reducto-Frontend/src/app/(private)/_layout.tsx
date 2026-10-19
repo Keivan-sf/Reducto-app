@@ -14,7 +14,7 @@ export default function PrivateLayout() {
   const { session } = useSession();
   const token = inviteTokenFromPath(usePathname());
   return session ? (
-    <ProfilesProvider key={session.user.id}>
+    <ProfilesProvider key={`${session.serverUrl}:${session.user.id}`}>
       <GifsProvider>
         <ChatsProvider>
           <Slot />

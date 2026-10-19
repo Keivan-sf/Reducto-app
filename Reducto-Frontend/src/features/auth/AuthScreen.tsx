@@ -16,9 +16,11 @@ import type { Session } from '../../api/types';
 import { Button, colors, Field, Icon, Notice } from '../../components/ui';
 import { isValidUsername, normalizeUsername } from '../../lib/usernames';
 import { groupJoinPath } from '../../lib/links';
+import { normalizeServerUrl } from '../../lib/server';
 
 export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
-  const { establish } = useSession();
+  const { establish, serverUrl, configureServer } = useSession();
+  const [server, setServer] = useState(serverUrl);
   const [signup, setSignup] = useState(false);
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
@@ -31,6 +33,12 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
   async function submit() {
     if (busy) return;
     setError('');
+    let selectedServer: string;
+    try {
+      selectedServer = normalizeServerUrl(server);
+    } catch (err) {
+      return setError((err as Error).message);
+    }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
       return setError('Enter a valid email address.');
     if (password.length < 8 || password.length > 128)
@@ -41,7 +49,8 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
       return setError('Username must contain 1–32 letters, numbers, or underscores.');
     setBusy(true);
     try {
-      const session = await api.request<Session>(
+      await configureServer(selectedServer);
+      const session = await api.request<Omit<Session, 'serverUrl'>>(
         `/api/auth/${signup ? 'sign-up' : 'sign-in'}`,
         {
           method: 'POST',
@@ -54,7 +63,7 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
         },
         false,
       );
-      await establish(session);
+      await establish({ ...session, serverUrl: selectedServer });
       router.replace(inviteToken ? groupJoinPath(inviteToken) : '/');
     } catch (err) {
       setError((err as Error).message);
@@ -131,6 +140,21 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
             ))}
           </View>
           <View style={{ gap: 20 }}>
+            <View style={{ gap: 7 }}>
+              <Field
+                label="Server URL"
+                placeholder="https://chat.example.com"
+                value={server}
+                onChangeText={setServer}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                editable={!busy}
+              />
+              <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18 }}>
+                Enter your Reducto server’s address. It will be remembered on this device.
+              </Text>
+            </View>
             {signup && (
               <View style={{ gap: 7 }}>
                 <Field
