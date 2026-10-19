@@ -34,6 +34,7 @@ import { downloadAttachment } from '../../lib/download';
 import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
 import { GifDialog } from './GifDialog';
+import { MessageText } from './MessageText';
 
 export default function ChatView({ id }: { id?: string }) {
   const { session } = useSession();
@@ -364,6 +365,17 @@ export default function ChatView({ id }: { id?: string }) {
                       </View>
                     </Pressable>
                   )}
+                  {!!message.text && (
+                    <MessageText
+                      text={message.text}
+                      style={s.messageText}
+                      onError={setError}
+                      onMessagePress={() => {
+                        setActionMessage(message);
+                        setForward(false);
+                      }}
+                    />
+                  )}
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Message actions"
@@ -381,11 +393,6 @@ export default function ChatView({ id }: { id?: string }) {
                         : undefined
                     }
                   >
-                    {!!message.text && (
-                      <Text selectable style={s.messageText}>
-                        {message.text}
-                      </Text>
-                    )}
                     <View style={s.meta}>
                       <Text style={s.time}>{timeLabel(message.createdAt)}</Text>
                       {mine && <Icon name="checkmark" size={15} color="#6D9D62" />}

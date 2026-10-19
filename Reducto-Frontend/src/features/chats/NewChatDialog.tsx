@@ -7,6 +7,7 @@ import { Button, colors, Dialog, Field, Notice, styles } from '../../components/
 import type { Conversation } from '../../api/types';
 import { isValidUsername, normalizeUsername } from '../../lib/usernames';
 import { useProfiles } from '../../context/ProfilesContext';
+import { groupInviteToken, groupJoinPath } from '../../lib/links';
 
 export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { refresh } = useChats();
@@ -38,10 +39,9 @@ export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose:
         path = '/api/groups';
         body = { name: value.trim() };
       } else {
-        const token = value.trim().replace(/\/$/, '').split('/').pop()!;
-        if (!/^[a-f0-9]{64}$/.test(token))
-          throw new Error('Enter a valid group invite link or token.');
-        path = `/api/groups/join/${token}`;
+        const token = groupInviteToken(value);
+        if (!token) throw new Error('Enter a valid group invite link or token.');
+        path = groupJoinPath(token);
       }
       const { conversation } = await api.post<{ conversation: Conversation }>(path, body);
       await refresh();

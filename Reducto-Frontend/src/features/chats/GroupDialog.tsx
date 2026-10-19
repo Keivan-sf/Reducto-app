@@ -8,6 +8,7 @@ import { Avatar, Button, colors, Dialog, Field, Notice, styles } from '../../com
 import type { Conversation } from '../../api/types';
 import { useProfiles } from '../../context/ProfilesContext';
 import { conversationName, profileName } from '../../lib/messages';
+import { groupInviteToken, groupInviteUri } from '../../lib/links';
 
 export function GroupDialog({
   chat,
@@ -86,7 +87,9 @@ export function GroupDialog({
                 const { inviteLink } = await api.get<{ inviteLink: string }>(
                   `/api/groups/${chat.id}/invite`,
                 );
-                await Clipboard.setStringAsync(`${api.baseUrl}${inviteLink}`);
+                const token = groupInviteToken(inviteLink);
+                if (!token) throw new Error('The server returned an invalid invite link.');
+                await Clipboard.setStringAsync(groupInviteUri(token));
               }, 'Invite link copied. Share it with your friends.')
             }
           />

@@ -15,8 +15,9 @@ import { api, useSession } from '../../context/SessionContext';
 import type { Session } from '../../api/types';
 import { Button, colors, Field, Icon, Notice } from '../../components/ui';
 import { isValidUsername, normalizeUsername } from '../../lib/usernames';
+import { groupJoinPath } from '../../lib/links';
 
-export default function AuthScreen() {
+export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
   const { establish } = useSession();
   const [signup, setSignup] = useState(false);
   const [name, setName] = useState('');
@@ -54,7 +55,7 @@ export default function AuthScreen() {
         false,
       );
       await establish(session);
-      router.replace('/');
+      router.replace(inviteToken ? groupJoinPath(inviteToken) : '/');
     } catch (err) {
       setError((err as Error).message);
     } finally {

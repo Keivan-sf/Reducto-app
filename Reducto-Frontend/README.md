@@ -34,10 +34,15 @@ For web, use the proxy address (`http://localhost:3001`) or an API that supports
 - Paginated history, text messages, message search, real-time delivery, reconnect synchronization, and session-local unread counts.
 - Attachment upload and authenticated download, image previews, message forwarding, and all eight supported emoji reactions.
 - Group renaming, invitations, adding/removing members, owner/admin roles, leaving groups, and confirmed group deletion.
+- Blue, clickable HTTP(S), FTP, `www.` and `reducto://` links in messages. Web links open separately; Reducto group invites stay inside the app.
 - GIF/video upload, GIF library add/remove, and sending GIF references.
 - Profile name/username editing, square avatar crop/resize/upload, and copying your user ID.
 
 ## Backend boundaries
+
+Copied group invitations use `reducto:///api/groups/join/<token>`. Clicking one in a conversation opens the internal join screen, which submits an authenticated request and opens the group. Signed-out users are sent to sign-in and then returned to their invitation. Only the group-join action is supported for Reducto URIs; other actions show an unsupported-link message. The Join group field also accepts these URIs and existing backend invite links.
+
+In-app links work in Expo Go. Launching an app from an external `reducto://` URI requires an installed native build with the configured scheme. Expo Go uses `exp://<host>:8081/--/api/groups/join/<token>` for external deep links, as described in [Expo’s linking documentation](https://docs.expo.dev/versions/v57.0.0/sdk/linking/). On web, `/api/groups/join/<token>` is the corresponding frontend route and must be served by the frontend host.
 
 User profiles are fetched by ID and username and shared across the chat list, conversation headers, group senders, member lists, and forwarded messages. Private chats show display names and usernames. Profiles are cached for ten minutes and renewed periodically and when the app resumes to refresh the backend’s fifteen-minute signed avatar URLs. Missing photos show initials, and failed profile lookups do not block messaging. Share your username from Settings so friends can start a conversation. The API does not provide user search, presence, read receipts, or persistent read positions. Unread counts track events received during the current app session; a sent checkmark means the server accepted a message.
 

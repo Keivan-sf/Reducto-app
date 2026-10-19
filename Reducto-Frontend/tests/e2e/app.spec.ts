@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+const inviteToken = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
+const inviteUri = `reducto:///api/groups/join/${inviteToken}`;
 
 const user = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -77,6 +79,8 @@ async function mockApi(page: Page, initialMessages: object[] = [first]) {
     } else if (path.endsWith('/messages')) body = { messages, nextCursor: null };
     else if (path.endsWith('/profile')) body = { user: { ...user, ...request.postDataJSON() } };
     else if (path.endsWith('/sign-out')) return route.fulfill({ status: 204 });
+    else if (path.endsWith('/invite')) body = { inviteLink: `/api/groups/join/${inviteToken}` };
+    else if (path.startsWith('/api/groups/join/')) body = { conversation: chat };
     return route.fulfill({ json: body });
   });
 }
@@ -313,4 +317,94 @@ test('unavailable avatar images fall back to the profile initials', async ({ pag
   await expect(row.getByText('GH', { exact: true })).toBeVisible();
   await expect(row.getByRole('img')).toHaveCount(0);
   await expect(row.getByText('@grace', { exact: true })).toBeVisible();
+});
+
+test('chat URLs are blue links and Reducto invites join internally with authorization', async ({
+  page,
+}) => {
+  await mockApi(page, [
+    {
+      ...first,
+      text: `Read https://example.org/docs. Visit www.example.com, join ${inviteUri}! Unsupported: reducto:///unknown`,
+    },
+  ]);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const external = page.getByRole('link', { name: 'https://example.org/docs', exact: true });
+  await expect(external).toHaveAttribute('href', 'https://example.org/docs');
+  await expect(external).toHaveAttribute('target', '_blank');
+  await expect(external).toHaveCSS('color', 'rgb(51, 144, 236)');
+  await expect(page.getByRole('link', { name: 'www.example.com', exact: true })).toHaveAttribute(
+    'href',
+    'https://www.example.com',
+  );
+  await expect(page.locator('button a, button button')).toHaveCount(0);
+  await page.route('https://example.org/docs', (route) =>
+    route.fulfill({ body: 'External documentation' }),
+  );
+  const opening = page.waitForEvent('popup');
+  await external.click();
+  const popup = await opening;
+  await expect(popup).toHaveURL('https://example.org/docs');
+  await popup.close();
+  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'reducto:///unknown', exact: true }).click();
+  await expect(page.getByText('Unsupported Reducto link', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const joining = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === `/api/groups/join/${inviteToken}`,
+  );
+  await page.getByRole('link', { name: inviteUri, exact: true }).click();
+  const request = await joining;
+  expect(request.method()).toBe('POST');
+  expect(request.headers().authorization).toBe('Bearer access-token');
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/chat/${chat.id}$`));
+});
+
+test('a group invite survives sign-in and displays join errors with retry', async ({ page }) => {
+  await mockApi(page);
+  let joins = 0;
+  await page.route(`**:3001/api/groups/join/${inviteToken}`, (route) => {
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    joins++;
+    return joins === 1
+      ? route.fulfill({ status: 404, json: { error: 'Invalid group invite' } })
+      : route.fulfill({ json: { conversation: chat } });
+  });
+  await page.goto(`/api/groups/join/${inviteToken}`);
+  await expect(page.getByText('Welcome to Reducto')).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/login\\?invite=${inviteToken}$`));
+  expect(joins).toBe(0);
+  await page.getByPlaceholder('you@example.com').fill('ada@example.com');
+  await page.getByPlaceholder('Enter your password').fill('goodpassword');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByText('Invalid group invite', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  expect(joins).toBe(2);
+});
+
+test('copied group invitations use the Reducto URI', async ({ page }) => {
+  await mockApi(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as unknown as { copiedInvite: string }).copiedInvite = text;
+        },
+      },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Conversation details', exact: true }).click();
+  await page.getByRole('button', { name: 'Copy invite link', exact: true }).click();
+  await expect(page.getByText('Invite link copied. Share it with your friends.')).toBeVisible();
+  expect(
+    await page.evaluate(() => (window as unknown as { copiedInvite: string }).copiedInvite),
+  ).toBe(inviteUri);
 });
