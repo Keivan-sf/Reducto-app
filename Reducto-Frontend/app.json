@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Reducto",
+    "slug": "reducto",
+    "scheme": "reducto",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "app.reducto.messenger",
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "backgroundColor": "#3390EC",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a profile photo for Reducto.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}
