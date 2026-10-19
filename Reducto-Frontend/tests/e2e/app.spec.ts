@@ -328,7 +328,89 @@ async function signIn(page: Page) {
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 }
 
-async function mockRealtime(page: Page) {
+test('web sessions survive closing the tab and restore expired access tokens on restart', async ({
+  page,
+  context,
+  browser,
+}) => {
+  await mockApi(page);
+  await signIn(page);
+  const key = 'reducto.session.v1';
+  await expect.poll(() => page.evaluate((key) => !!localStorage.getItem(key), key)).toBe(true);
+  expect(await page.evaluate((key) => sessionStorage.getItem(key), key)).toBeNull();
+  await page.evaluate((key) => {
+    const stored = JSON.parse(localStorage.getItem(key)!);
+    stored.accessToken = 'expired';
+    localStorage.setItem(key, JSON.stringify(stored));
+  }, key);
+  const saved = await context.storageState();
+  await page.close();
+  const restarted = await browser.newContext({ storageState: saved });
+  try {
+    const reopened = await restarted.newPage();
+    await mockApi(reopened);
+    await mockRealtime(reopened, 'renewed');
+    let refreshes = 0;
+    await reopened.route('**/api/auth/me', (route) =>
+      route.fulfill(
+        route.request().headers().authorization === 'Bearer renewed'
+          ? { json: { user } }
+          : { status: 401, json: { error: 'Access token expired' } },
+      ),
+    );
+    await reopened.route('**/api/auth/refresh', (route) => {
+      refreshes++;
+      expect(route.request().postDataJSON()).toEqual({ refreshToken: 'refresh-token' });
+      return route.fulfill({ json: { accessToken: 'renewed', refreshToken: 'rotated' } });
+    });
+    await reopened.goto('http://localhost:8081/');
+    await expect(reopened.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+    expect(refreshes).toBe(1);
+    expect(
+      await reopened.evaluate((key) => JSON.parse(localStorage.getItem(key)!).refreshToken, key),
+    ).toBe('rotated');
+    await reopened.getByRole('button', { name: 'Settings', exact: true }).click();
+    await reopened.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await reopened.getByRole('button', { name: 'Sign out', exact: true }).last().click();
+    await expect(reopened.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+    expect(await reopened.evaluate((key) => localStorage.getItem(key), key)).toBeNull();
+    await reopened.reload();
+    await expect(reopened.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+  } finally {
+    await restarted.close();
+  }
+});
+
+test('existing tab sessions migrate to persistent storage and logout reaches other tabs', async ({
+  page,
+  context,
+}) => {
+  const key = 'reducto.session.v1';
+  await page.addInitScript(
+    ({ key, user }) => {
+      sessionStorage.setItem(
+        key,
+        JSON.stringify({ user, accessToken: 'access-token', refreshToken: 'refresh-token' }),
+      );
+    },
+    { key, user },
+  );
+  await mockApi(page);
+  await mockRealtime(page);
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+  expect(await page.evaluate((key) => sessionStorage.getItem(key), key)).toBeNull();
+  const second = await context.newPage();
+  await mockApi(second);
+  await mockRealtime(second);
+  await second.goto('/');
+  await expect(second.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+  await second.evaluate((key) => localStorage.removeItem(key), key);
+  await page.bringToFront();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+});
+
+async function mockRealtime(page: Page, accessToken = 'access-token') {
   let socket: WebSocketRoute | undefined;
   let connections = 0;
   await page.routeWebSocket(/\/socket\.io\//, (route) => {
@@ -341,7 +423,7 @@ async function mockRealtime(page: Page) {
     route.onMessage((message) => {
       const packet = message.toString();
       if (packet.startsWith('40')) {
-        expect(JSON.parse(packet.slice(2)).token).toBe('access-token');
+        expect(JSON.parse(packet.slice(2)).token).toBe(accessToken);
         route.send(`40${JSON.stringify({ sid: `socket-${connections}` })}`);
       }
     });

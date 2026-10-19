@@ -14,7 +14,13 @@ export class ApiClient {
   private session: Session | null = null;
   private refreshFlight: Promise<void> | null = null;
   onSession: (session: Session | null) => Promise<void> = async () => {};
-  constructor(public baseUrl: string) {}
+  constructor(
+    public baseUrl: string,
+    private coordination?: {
+      readSession(): Promise<Session | null>;
+      withRefreshLock<T>(action: () => Promise<T>): Promise<T>;
+    },
+  ) {}
   setSession(session: Session | null) {
     this.session = session;
   }
@@ -24,7 +30,22 @@ export class ApiClient {
 
   async refresh() {
     if (!this.refreshFlight) {
-      this.refreshFlight = (async () => {
+      const expected = this.session;
+      const run = async () => {
+        if (this.coordination && expected) {
+          const stored = await this.coordination.readSession();
+          // A waiting tab must use the tokens another tab just rotated.
+          if (!stored || stored.user.id !== expected.user.id) {
+            throw new ApiError(401, 'Your session changed. Please try again.');
+          }
+          if (stored.refreshToken !== expected.refreshToken) {
+            if (this.session?.user.id === stored.user.id) {
+              this.session = stored;
+              await this.onSession(stored);
+            }
+            return;
+          }
+        }
         const previous = this.session;
         if (!previous) throw new ApiError(401, 'Please sign in again.');
         try {
@@ -37,17 +58,28 @@ export class ApiClient {
             false,
           );
           // A logout during refresh must never restore the old account.
-          if (this.session !== previous) return;
-          this.session = { ...previous, ...tokens };
+          if (
+            this.session?.refreshToken !== previous.refreshToken ||
+            this.session.user.id !== previous.user.id
+          )
+            return;
+          this.session = { ...this.session, ...tokens };
           await this.onSession(this.session);
         } catch (error) {
-          if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          if (
+            error instanceof ApiError &&
+            (error.status === 401 || error.status === 403) &&
+            this.session?.refreshToken === previous.refreshToken
+          ) {
             this.session = null;
             await this.onSession(null);
           }
           throw error;
         }
-      })().finally(() => {
+      };
+      this.refreshFlight = (
+        this.coordination ? this.coordination.withRefreshLock(run) : run()
+      ).finally(() => {
         this.refreshFlight = null;
       });
     }
@@ -60,6 +92,7 @@ export class ApiClient {
     authenticated = true,
     retry = true,
   ): Promise<T> {
+    const requestSession = authenticated ? this.session : null;
     const headers = new Headers(options.headers);
     if (options.body && !(options.body instanceof FormData))
       headers.set('Content-Type', 'application/json');
@@ -77,7 +110,10 @@ export class ApiClient {
       throw new ApiError(0, 'Could not reach Reducto. Check your connection and server address.');
     }
     if (response.status === 401 && authenticated && retry && this.session) {
-      await this.refresh();
+      if (this.session.user.id !== requestSession?.user.id)
+        throw new ApiError(401, 'Your session changed. Please try again.');
+      // Another request/tab may have renewed while this old-token response was in flight.
+      if (this.session.accessToken === requestSession.accessToken) await this.refresh();
       return this.request<T>(path, options, authenticated, false);
     }
     if (!response.ok) {

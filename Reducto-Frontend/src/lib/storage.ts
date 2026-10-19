@@ -3,6 +3,10 @@ import * as SecureStore from 'expo-secure-store';
 import type { Session } from '../api/types';
 
 const KEY = 'reducto.session.v1';
+// Web resolves storage.web.ts, which persists sessions across browser restarts.
+export const sessionCoordination = undefined;
+export const withSessionLock = <T>(action: () => Promise<T>) => action();
+export const watchStoredSession = (_onChange: (session: Session | null) => void) => () => {};
 export async function readSession(): Promise<Session | null> {
   const raw =
     Platform.OS === 'web' ? sessionStorage.getItem(KEY) : await SecureStore.getItemAsync(KEY);

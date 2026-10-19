@@ -97,3 +97,64 @@ test('validation errors expose the backend error and do not refresh', async () =
   );
   assert.equal(calls, 1);
 });
+
+test('two tabs coordinate refresh rotation and reuse the newest persisted tokens', async () => {
+  let stored = session;
+  let tail = Promise.resolve();
+  const coordination = {
+    readSession: async () => stored,
+    withRefreshLock<T>(action: () => Promise<T>): Promise<T> {
+      const next = tail.then(action);
+      tail = next.then(
+        () => {},
+        () => {},
+      );
+      return next;
+    },
+  };
+  const clients = [
+    new ApiClient('http://test', coordination),
+    new ApiClient('http://test', coordination),
+  ];
+  for (const client of clients) {
+    client.setSession(session);
+    client.onSession = async (next) => {
+      assert.ok(next);
+      stored = next;
+    };
+  }
+  let refreshes = 0;
+  globalThis.fetch = async (_url, options) => {
+    refreshes++;
+    assert.equal(JSON.parse(options!.body as string).refreshToken, 'refresh-1');
+    return json({ accessToken: 'fresh', refreshToken: 'refresh-2' });
+  };
+  await Promise.all(clients.map((client) => client.refresh()));
+  assert.equal(refreshes, 1);
+  for (const client of clients) assert.equal(client.getSession()?.refreshToken, 'refresh-2');
+});
+
+test('a late unauthorized response reuses tokens already refreshed by another request', async () => {
+  const client = new ApiClient('http://test');
+  client.setSession(session);
+  let refreshes = 0;
+  let releaseLate!: () => void;
+  const late = new Promise<void>((resolve) => {
+    releaseLate = resolve;
+  });
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith('/refresh')) {
+      refreshes++;
+      return json({ accessToken: 'fresh', refreshToken: 'refresh-2' });
+    }
+    if (new Headers(options!.headers).get('Authorization') === 'Bearer fresh')
+      return json({ ok: true });
+    if (String(url).endsWith('/late')) await late;
+    return json({ error: 'Expired' }, 401);
+  };
+  const delayed = client.get('/late');
+  await client.get('/first');
+  releaseLate();
+  await delayed;
+  assert.equal(refreshes, 1);
+});
