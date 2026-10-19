@@ -23,8 +23,8 @@ const first = {
   createdAt: '2026-10-18T12:01:00Z',
   reactions: [],
 };
-async function mockApi(page: Page) {
-  const messages: object[] = [first];
+async function mockApi(page: Page, initialMessages: object[] = [first]) {
+  const messages = [...initialMessages];
   await page.route('**:3001/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -177,4 +177,45 @@ test('sign-up allows leaving the optional username blank', async ({ page }) => {
   await page.getByRole('button', { name: 'Create account', exact: true }).click();
   expect((await signup).postDataJSON()).not.toHaveProperty('username');
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+});
+
+test('attachment downloads and message actions use separate buttons', async ({ page }) => {
+  const nestingErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /nested|descendant|contain|hydration/i.test(message.text()))
+      nestingErrors.push(message.text());
+  });
+  await mockApi(page, [
+    { ...first, text: 'Read the notes', attachment: { type: 'document', mediaId: 'notes-file' } },
+  ]);
+  await page.route('**:3001/api/conversations/*/attachments/notes-file', (route) =>
+    route.fulfill({
+      body: 'Meeting notes',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="notes.txt"',
+        'Access-Control-Expose-Headers': 'Content-Disposition',
+      },
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByRole('button', { name: 'Open document attachment' })).toBeVisible();
+  await expect(page.locator('button button')).toHaveCount(0);
+  expect(nestingErrors).toEqual([]);
+
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Open document attachment' }).click();
+  expect((await downloading).suggestedFilename()).toBe('notes.txt');
+  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Message actions', exact: true }).click();
+  await expect(page.getByText('Message options', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Forward message', exact: true })).toBeVisible();
+  const reaction = page.waitForRequest((request) => request.url().endsWith('/reactions'));
+  await page.getByRole('button', { name: 'React 👍', exact: true }).click();
+  const request = await reaction;
+  expect(request.method()).toBe('PUT');
+  expect(request.postDataJSON()).toEqual({ emoji: '👍' });
+  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  expect(nestingErrors).toEqual([]);
 });

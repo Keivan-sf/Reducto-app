@@ -296,19 +296,7 @@ export default function ChatView({ id }: { id?: string }) {
                 </View>
               )}
               <View style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Message actions"
-                  onPress={() => {
-                    setActionMessage(message);
-                    setForward(false);
-                  }}
-                  onLongPress={() => {
-                    setActionMessage(message);
-                    setForward(false);
-                  }}
-                  style={[s.bubble, mine ? s.outgoing : s.incoming]}
-                >
+                <View style={[s.bubble, mine ? s.outgoing : s.incoming]}>
                   {!mine && chat.type === 'group' && (
                     <Text style={s.sender}>User {message.senderId.slice(0, 8)}</Text>
                   )}
@@ -321,19 +309,23 @@ export default function ChatView({ id }: { id?: string }) {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Open ${message.attachment.type} attachment`}
-                      onPress={(event) => {
-                        event.stopPropagation();
+                      onPress={() => {
                         if (message.attachment!.type === 'gif') {
                           void Clipboard.setStringAsync(message.attachment!.gifId)
                             .then(() => {
                               setError('');
                               setActionMessage(message);
+                              setForward(false);
                             })
                             .catch((err) => setError(err.message));
                         } else
                           void downloadAttachment(id, message.attachment!.mediaId).catch((err) =>
                             setError(err.message),
                           );
+                      }}
+                      onLongPress={() => {
+                        setActionMessage(message);
+                        setForward(false);
                       }}
                       style={s.attachment}
                     >
@@ -360,25 +352,46 @@ export default function ChatView({ id }: { id?: string }) {
                       </View>
                     </Pressable>
                   )}
-                  {!!message.text && (
-                    <Text selectable style={s.messageText}>
-                      {message.text}
-                    </Text>
-                  )}
-                  <View style={s.meta}>
-                    <Text style={s.time}>{timeLabel(message.createdAt)}</Text>
-                    {mine && <Icon name="checkmark" size={15} color="#6D9D62" />}
-                  </View>
-                  {!!reactions.length && (
-                    <View style={s.reactions}>
-                      {reactions.map((reaction) => (
-                        <Text key={reaction.emoji} style={s.reaction}>
-                          {reaction.emoji} {reaction.count}
-                        </Text>
-                      ))}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Message actions"
+                    onPress={() => {
+                      setActionMessage(message);
+                      setForward(false);
+                    }}
+                    onLongPress={() => {
+                      setActionMessage(message);
+                      setForward(false);
+                    }}
+                    style={
+                      message.attachment && !message.text
+                        ? { minHeight: 44, justifyContent: 'center' }
+                        : undefined
+                    }
+                  >
+                    {!!message.text && (
+                      <Text selectable style={s.messageText}>
+                        {message.text}
+                      </Text>
+                    )}
+                    <View style={s.meta}>
+                      <Text style={s.time}>{timeLabel(message.createdAt)}</Text>
+                      {mine && <Icon name="checkmark" size={15} color="#6D9D62" />}
+                      {message.attachment && (
+                        <Icon name="ellipsis-horizontal" size={18} color={colors.muted} />
+                      )}
                     </View>
-                  )}
-                </Pressable>
+                    {!!reactions.length && (
+                      <View style={s.reactions}>
+                        {reactions.map((reaction) => (
+                          <Text key={reaction.emoji} style={s.reaction}>
+                            {reaction.emoji} {reaction.count}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+                  </Pressable>
+                </View>
               </View>
             </View>
           );
