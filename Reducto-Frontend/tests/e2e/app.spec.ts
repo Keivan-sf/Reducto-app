@@ -101,9 +101,80 @@ test('authentication failures and sign-up fields are usable', async ({ page }, t
   await expect(page.getByText('Invalid credentials')).toBeVisible();
   await page.getByRole('tab', { name: 'Create account', exact: true }).click();
   await page.getByPlaceholder('How should we call you?').fill('Ada');
+  await page
+    .getByRole('textbox', { name: 'Username (optional)', exact: true })
+    .fill('invalid name');
+  await page.getByRole('button', { name: 'Create account', exact: true }).click();
+  await expect(
+    page.getByText('Username must contain 1–32 letters, numbers, or underscores.'),
+  ).toBeVisible();
+  await page.getByRole('textbox', { name: 'Username (optional)', exact: true }).fill(' @Ada_123 ');
   await page.getByRole('button', { name: 'Show password' }).click();
   await expect(page.getByPlaceholder('At least 8 characters')).toHaveJSProperty('type', 'text');
   await page.getByPlaceholder('At least 8 characters').fill('goodpassword');
+  const signup = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/auth/sign-up',
+  );
   await page.getByRole('button', { name: 'Create account', exact: true }).click();
+  expect((await signup).postDataJSON()).toEqual({
+    email: 'ada@example.com',
+    password: 'goodpassword',
+    name: 'Ada',
+    username: 'ada_123',
+  });
+  await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+});
+
+test('start a chat by username, show lookup errors, and retain user ID fallback', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page);
+  const recipients: object[] = [];
+  await page.route('**:3001/api/conversations/private', async (route) => {
+    const recipient = route.request().postDataJSON();
+    recipients.push(recipient);
+    if (recipient.username === 'missing')
+      return route.fulfill({ status: 404, json: { error: 'User not found' } });
+    return route.fulfill({ json: { conversation: chat } });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+  const recipient = page.getByRole('textbox', { name: 'Recipient’s username', exact: true });
+  await recipient.fill('invalid name');
+  await page.getByRole('button', { name: 'Open chat', exact: true }).click();
+  await expect(
+    page.getByText('Enter a username with 1–32 letters, numbers, or underscores.'),
+  ).toBeVisible();
+  expect(recipients).toEqual([]);
+  await recipient.fill('@missing');
+  await page.getByRole('button', { name: 'Open chat', exact: true }).click();
+  await expect(page.getByText('User not found', { exact: true })).toBeVisible();
+  await recipient.fill(' @ALICE_123 ');
+  await page.getByRole('button', { name: 'Open chat', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  expect(recipients).toEqual([{ username: 'missing' }, { username: 'alice_123' }]);
+
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+  await page.getByRole('button', { name: 'Use user ID instead', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Recipient’s user ID', exact: true }).fill(user.id);
+  await page.getByRole('button', { name: 'Open chat', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  expect(recipients.at(-1)).toEqual({ userId: user.id });
+});
+
+test('sign-up allows leaving the optional username blank', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/login');
+  await page.getByRole('tab', { name: 'Create account', exact: true }).click();
+  await page.getByPlaceholder('How should we call you?').fill('Ada');
+  await page.getByPlaceholder('you@example.com').fill('ada@example.com');
+  await page.getByPlaceholder('At least 8 characters').fill('goodpassword');
+  const signup = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/auth/sign-up',
+  );
+  await page.getByRole('button', { name: 'Create account', exact: true }).click();
+  expect((await signup).postDataJSON()).not.toHaveProperty('username');
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 });

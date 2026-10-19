@@ -28,9 +28,9 @@ For web, use the proxy address (`http://localhost:3001`) or an API that supports
 
 ## Features
 
-- Email/password sign-in and sign-up with validation, show/hide password, session restore, sign-out, and coordinated refresh-token rotation.
+- Email/password sign-in and sign-up with an optional username, validation, show/hide password, session restore, sign-out, and coordinated refresh-token rotation.
 - Searchable conversation list with group and unread filters, desktop split view, and phone navigation.
-- Private conversations by recipient user ID; create groups and join by invite link/token.
+- Private conversations by username (with or without `@`), with user ID as a fallback; create groups and join by invite link/token.
 - Paginated history, text messages, message search, real-time delivery, reconnect synchronization, and session-local unread counts.
 - Attachment upload and authenticated download, image previews, message forwarding, and all eight supported emoji reactions.
 - Group renaming, invitations, adding/removing members, owner/admin roles, leaving groups, and confirmed group deletion.
@@ -39,7 +39,7 @@ For web, use the proxy address (`http://localhost:3001`) or an API that supports
 
 ## Backend boundaries
 
-The API does not provide user search, participant profiles, presence, read receipts, or persistent read positions. Private chats and other participants therefore use their user IDs. Share your ID from Settings to start a conversation. Unread counts track events received during the current app session; a sent checkmark means the server accepted a message.
+The API supports exact, case-insensitive username lookup when starting a private chat, but does not provide user search, participant profiles, presence, read receipts, or persistent read positions. Existing private chat titles and participant labels therefore still use user IDs. Share your username from Settings so friends can start a conversation. Unread counts track events received during the current app session; a sent checkmark means the server accepted a message.
 
 Avatars and GIF records contain object-storage keys without a download endpoint. Set `EXPO_PUBLIC_MEDIA_BASE_URL` to a readable storage base URL to display avatars and open GIFs from the library. Without it, avatars show initials and GIFs remain available as sendable library entries. Conversation attachments use the API’s authenticated download endpoint and do not require public storage. Videos/audio/documents download or open through the device share sheet; inline video/audio playback and push notifications are not implemented.
 

@@ -14,11 +14,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { api, useSession } from '../../context/SessionContext';
 import type { Session } from '../../api/types';
 import { Button, colors, Field, Icon, Notice } from '../../components/ui';
+import { isValidUsername, normalizeUsername } from '../../lib/usernames';
 
 export default function AuthScreen() {
   const { establish } = useSession();
   const [signup, setSignup] = useState(false);
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [visible, setVisible] = useState(false);
@@ -33,6 +35,9 @@ export default function AuthScreen() {
     if (password.length < 8 || password.length > 128)
       return setError('Use a password between 8 and 128 characters.');
     if (signup && !name.trim()) return setError('Enter your display name.');
+    const normalizedUsername = normalizeUsername(username);
+    if (signup && username.trim() && !isValidUsername(normalizedUsername))
+      return setError('Username must contain 1–32 letters, numbers, or underscores.');
     setBusy(true);
     try {
       const session = await api.request<Session>(
@@ -43,6 +48,7 @@ export default function AuthScreen() {
             email: email.trim(),
             password,
             ...(signup ? { name: name.trim() } : {}),
+            ...(signup && normalizedUsername ? { username: normalizedUsername } : {}),
           }),
         },
         false,
@@ -124,6 +130,21 @@ export default function AuthScreen() {
             ))}
           </View>
           <View style={{ gap: 20 }}>
+            {signup && (
+              <View style={{ gap: 7 }}>
+                <Field
+                  label="Username (optional)"
+                  placeholder="@your_username"
+                  value={username}
+                  onChangeText={setUsername}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18 }}>
+                  Choose a username so friends can easily start a chat with you.
+                </Text>
+              </View>
+            )}
             {signup && (
               <Field
                 label="Display name"

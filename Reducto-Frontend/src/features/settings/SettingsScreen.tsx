@@ -138,7 +138,27 @@ export default function SettingsScreen() {
             <Icon name="person-circle-outline" color={colors.blue} />
             <Text style={styles.title}>Your account</Text>
           </View>
-          <Text style={s.hint}>Share your user ID so friends can start a chat with you.</Text>
+          <Text style={s.hint}>
+            {user.username
+              ? 'Share your username so friends can easily start a chat with you.'
+              : 'Add a username above so friends can easily find you, or share your user ID.'}
+          </Text>
+          {user.username && (
+            <View style={s.id}>
+              <Text selectable style={{ flex: 1, color: colors.dark, fontSize: 14 }}>
+                @{user.username}
+              </Text>
+              <IconButton
+                name="copy-outline"
+                label="Copy username"
+                onPress={() =>
+                  void Clipboard.setStringAsync(`@${user.username}`)
+                    .then(() => setSuccess('Username copied.'))
+                    .catch((err) => setError(err.message))
+                }
+              />
+            </View>
+          )}
           <View style={s.id}>
             <Text selectable style={{ flex: 1, color: colors.muted, fontSize: 12 }}>
               {user.id}
