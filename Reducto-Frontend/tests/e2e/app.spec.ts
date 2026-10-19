@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
 const inviteToken = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
 const inviteUri = `reducto:///api/groups/join/${inviteToken}`;
 
@@ -90,6 +90,34 @@ async function signIn(page: Page) {
   await page.getByPlaceholder('Enter your password').fill('goodpassword');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+}
+
+async function mockRealtime(page: Page) {
+  let socket: WebSocketRoute | undefined;
+  let connections = 0;
+  await page.routeWebSocket(/\/socket\.io\//, (route) => {
+    socket = route;
+    connections++;
+    // Engine.IO open packet, then Socket.IO authenticated namespace handshake.
+    route.send(
+      `0${JSON.stringify({ sid: `engine-${connections}`, upgrades: [], pingInterval: 25000, pingTimeout: 20000, maxPayload: 1000000 })}`,
+    );
+    route.onMessage((message) => {
+      const packet = message.toString();
+      if (packet.startsWith('40')) {
+        expect(JSON.parse(packet.slice(2)).token).toBe('access-token');
+        route.send(`40${JSON.stringify({ sid: `socket-${connections}` })}`);
+      }
+    });
+  });
+  return {
+    emit: (event: string, payload: unknown) => {
+      if (!socket) throw new Error('Socket has not connected');
+      socket.send(`42${JSON.stringify([event, payload])}`);
+    },
+    disconnect: () => socket!.close(),
+    connections: () => connections,
+  };
 }
 
 test('sign in, send a message, edit profile, and sign out', async ({ page }, testInfo) => {
@@ -407,4 +435,115 @@ test('copied group invitations use the Reducto URI', async ({ page }) => {
   expect(
     await page.evaluate(() => (window as unknown as { copiedInvite: string }).copiedInvite),
   ).toBe(inviteUri);
+});
+
+test('profile notifications update names, usernames and avatars everywhere without reloading', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page, [
+    {
+      ...first,
+      forwardedFrom: { senderId: friend.id, messageId: first.id, conversationId: chat.id },
+    },
+  ]);
+  const realtime = await mockRealtime(page);
+  let current: { id: string; name: string; username: string | null; avatarUrl: string | null } = {
+    ...friend,
+  };
+  let profileReads = 0;
+  await page.route('**:3001/api/users/friend', (route) => {
+    profileReads++;
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    return route.fulfill({ json: { user: current } });
+  });
+  const privateChat = {
+    ...chat,
+    id: '55555555-5555-4555-8555-555555555555',
+    type: 'private',
+    name: null,
+  };
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [chat, privateChat] } }),
+  );
+  await signIn(page);
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open Grace Hopper', exact: true }).click();
+  const header = page.getByRole('button', { name: 'View conversation details' });
+  await expect(header.getByText('Grace Hopper', { exact: true })).toBeVisible();
+  const readsBefore = profileReads;
+  current = {
+    ...current,
+    name: 'Grace Murray Hopper',
+    username: 'amazing_grace',
+    avatarUrl: 'https://avatars.example/new-grace.png',
+  };
+  realtime.emit('user.profile_updated', {
+    userId: friend.id,
+    changedFields: ['name', 'username', 'avatar'],
+  });
+  await expect(header.getByText('Grace Murray Hopper', { exact: true })).toBeVisible();
+  await expect(header.getByText('@amazing_grace', { exact: true })).toBeVisible();
+  await expect(header.getByRole('img')).toHaveAttribute('src', current.avatarUrl!);
+  expect(profileReads).toBeGreaterThan(readsBefore);
+  if (testInfo.project.name === 'desktop')
+    await expect(
+      page.getByRole('button', { name: 'Open Grace Murray Hopper', exact: true }),
+    ).toBeVisible();
+
+  await header.click();
+  current = { ...current, username: null, avatarUrl: null };
+  realtime.emit('user.profile_updated', {
+    userId: friend.id,
+    changedFields: ['username', 'avatar'],
+  });
+  await expect(page.getByText('@amazing_grace', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('img', { name: 'Grace Murray Hopper profile photo' })).toHaveCount(0);
+  await expect(page.getByText('Grace Murray Hopper', { exact: true }).last()).toBeVisible();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats' }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  current = {
+    ...current,
+    name: 'Grace Live',
+    username: 'live_grace',
+    avatarUrl: 'https://avatars.example/live-grace.png',
+  };
+  realtime.emit('user.profile_updated', {
+    userId: friend.id,
+    changedFields: ['name', 'username', 'avatar'],
+  });
+  await expect(page.getByText('Grace Live', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('Forwarded from Grace Live', { exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Grace Live profile photo' }).last()).toHaveAttribute(
+    'src',
+    current.avatarUrl!,
+  );
+  await page.getByRole('button', { name: 'Conversation details', exact: true }).click();
+  await expect(page.getByText('@live_grace', { exact: true }).last()).toBeVisible();
+});
+
+test('reconnecting refreshes profile changes missed while offline', async ({ page }) => {
+  await mockApi(page);
+  const realtime = await mockRealtime(page);
+  let current = { ...friend };
+  await page.route('**:3001/api/users/friend', (route) =>
+    route.fulfill({ json: { user: current } }),
+  );
+  await signIn(page);
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByText('Grace Hopper', { exact: true }).last()).toBeVisible();
+  current = {
+    ...current,
+    name: 'Updated while offline',
+    username: 'back_online',
+    avatarUrl: 'https://avatars.example/reconnected.png',
+  };
+  await realtime.disconnect();
+  await expect.poll(realtime.connections).toBeGreaterThan(1);
+  await expect(page.getByText('Updated while offline', { exact: true }).last()).toBeVisible();
+  await expect(
+    page.getByRole('img', { name: 'Updated while offline profile photo' }).last(),
+  ).toHaveAttribute('src', current.avatarUrl);
 });

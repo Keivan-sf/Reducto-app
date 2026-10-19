@@ -9,7 +9,14 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 import { io } from 'socket.io-client';
-import type { Conversation, Emoji, Member, Message, MessagePage } from '../api/types';
+import type {
+  Conversation,
+  Emoji,
+  Member,
+  Message,
+  MessagePage,
+  ProfileUpdatedEvent,
+} from '../api/types';
 import { api, useSession } from './SessionContext';
 import { mergeMessages } from '../lib/messages';
 import { useProfiles } from './ProfilesContext';
@@ -147,7 +154,11 @@ export function ChatsProvider({ children }: PropsWithChildren) {
     const socket = io(api.baseUrl, { auth: { token }, transports: ['websocket'] });
     socket.on('connect', () => {
       setConnection('Connected');
+      void directory.refreshKnown(true);
       sync();
+    });
+    socket.on('user.profile_updated', (event: ProfileUpdatedEvent) => {
+      void directory.refreshUser(event.userId).catch(report);
     });
     socket.on('disconnect', (reason) => {
       setConnection('Reconnecting');
@@ -229,7 +240,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       socket.disconnect();
       subscription.remove();
     };
-  }, [token, userId, acceptMessage, refresh]);
+  }, [token, userId, acceptMessage, refresh, directory]);
   return (
     <Context.Provider
       value={{

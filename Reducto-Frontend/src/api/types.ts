@@ -4,6 +4,10 @@ export interface UserProfile {
   username: string | null;
   avatarUrl: string | null;
 }
+export interface ProfileUpdatedEvent {
+  userId: string;
+  changedFields: ('name' | 'username' | 'avatar')[];
+}
 export interface User {
   id: string;
   email: string;

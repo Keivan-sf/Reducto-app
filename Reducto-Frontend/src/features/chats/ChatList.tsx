@@ -60,7 +60,7 @@ export default function ChatList() {
     setRefreshing(true);
     try {
       await refresh();
-      await directory.refreshKnown();
+      await directory.refreshKnown(true);
     } catch (err) {
       setError((err as Error).message);
     } finally {

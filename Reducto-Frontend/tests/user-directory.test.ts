@@ -120,3 +120,87 @@ test('an old request cannot overwrite a profile edited while it was loading', as
   assert.deepEqual(published, [updated]);
   assert.deepEqual(await directory.get(user.id), updated);
 });
+
+test('a profile notification bypasses the TTL and replaces all changed details', async () => {
+  let current = user;
+  const published: UserProfile[] = [];
+  const directory = new UserDirectory(
+    async () => ({ user: current }),
+    (profile) => published.push(profile),
+  );
+  await directory.get(user.id);
+  current = {
+    ...user,
+    name: 'Alice Updated',
+    username: 'alice_updated',
+    avatarUrl: 'https://storage/new-avatar',
+  };
+  assert.deepEqual(await directory.refreshUser(user.id), current);
+  current = { ...current, username: null, avatarUrl: null };
+  await directory.refreshUser(user.id);
+  assert.deepEqual(published.at(-1), current);
+});
+
+test('a username lookup started before a notification cannot restore stale details', async () => {
+  let complete!: (result: { user: UserProfile }) => void;
+  const updated = { ...user, username: 'renamed' };
+  const published: UserProfile[] = [];
+  const directory = new UserDirectory(
+    (path) =>
+      path.includes('/by-username/')
+        ? new Promise((resolve) => {
+            complete = resolve;
+          })
+        : Promise.resolve({ user: updated }),
+    (profile) => published.push(profile),
+  );
+  const stale = directory.byUsername(user.username!);
+  await directory.refreshUser(user.id);
+  complete({ user });
+  await stale;
+  assert.deepEqual(published, [updated]);
+  assert.deepEqual(await directory.get(user.id), updated);
+});
+
+test('rapid notifications cannot publish responses in the wrong order', async () => {
+  const complete: ((result: { user: UserProfile }) => void)[] = [];
+  const published: UserProfile[] = [];
+  const directory = new UserDirectory(
+    () => new Promise((resolve) => complete.push(resolve)),
+    (profile) => published.push(profile),
+  );
+  const first = directory.refreshUser(user.id);
+  const second = directory.refreshUser(user.id);
+  const latest = { ...user, name: 'Latest name', avatarUrl: 'https://storage/latest' };
+  complete[1]({ user: latest });
+  await second;
+  complete[0]({ user });
+  await first;
+  assert.deepEqual(published, [latest]);
+});
+
+test('reconnection refreshes fresh cached profiles and retries failed notification requests', async () => {
+  let current = user;
+  let failing = false;
+  let calls = 0;
+  const published: UserProfile[] = [];
+  const directory = new UserDirectory(
+    async () => {
+      calls++;
+      if (failing) throw new Error('offline');
+      return { user: current };
+    },
+    (profile) => published.push(profile),
+  );
+  await directory.get(user.id);
+  current = { ...user, name: 'Changed while offline' };
+  await directory.refreshKnown(true);
+  assert.equal(calls, 2);
+  assert.deepEqual(published.at(-1), current);
+  failing = true;
+  await assert.rejects(directory.refreshUser(user.id), /offline/);
+  failing = false;
+  current = { ...current, avatarUrl: 'https://storage/new' };
+  await directory.refreshKnown();
+  assert.deepEqual(published.at(-1), current);
+});

@@ -24,8 +24,7 @@ export function ProfilesProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     if (!ownId) return;
     // Refresh the signed image URL after profile edits as well as initial sign-in.
-    directory.invalidate(ownId);
-    void directory.get(ownId).catch(() => {});
+    void directory.refreshUser(ownId).catch(() => {});
   }, [directory, ownId, ownName, ownUsername, ownAvatar]);
   useEffect(() => {
     const renew = () => {
@@ -33,7 +32,7 @@ export function ProfilesProvider({ children }: PropsWithChildren) {
     };
     const timer = setInterval(renew, 60000);
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') renew();
+      if (state === 'active') void directory.refreshKnown(true);
     });
     return () => {
       clearInterval(timer);
