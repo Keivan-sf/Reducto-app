@@ -1,4 +1,4 @@
-import type { ComponentProps, PropsWithChildren } from 'react';
+import { useState, type ComponentProps, type PropsWithChildren } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -59,6 +59,7 @@ export function IconButton({
   );
 }
 export function Avatar({ name, uri, size = 48 }: { name: string; uri?: string; size?: number }) {
+  const [failedUri, setFailedUri] = useState<string>();
   const palette = ['#62A6E9', '#9A83DA', '#E4A55C', '#65B7A3', '#DC8096'];
   const tint = palette[[...name].reduce((sum, c) => sum + c.charCodeAt(0), 0) % palette.length];
   return (
@@ -73,8 +74,13 @@ export function Avatar({ name, uri, size = 48 }: { name: string; uri?: string; s
         overflow: 'hidden',
       }}
     >
-      {uri ? (
-        <Image source={{ uri }} style={{ width: size, height: size }} />
+      {uri && uri !== failedUri ? (
+        <Image
+          accessibilityLabel={`${name} profile photo`}
+          source={{ uri }}
+          style={{ width: size, height: size }}
+          onError={() => setFailedUri(uri)}
+        />
       ) : (
         <Text style={{ color: 'white', fontSize: size * 0.34, fontWeight: '600' }}>
           {initials(name)}

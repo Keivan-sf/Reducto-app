@@ -1,4 +1,4 @@
-import type { Conversation, Message } from '../api/types';
+import type { Conversation, Message, UserProfile } from '../api/types';
 
 export function mergeMessages(current: Message[], incoming: Message[]) {
   const merged = new Map(current.map((message) => [message.id, message]));
@@ -7,8 +7,11 @@ export function mergeMessages(current: Message[], incoming: Message[]) {
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   );
 }
-export function conversationName(chat: Conversation, peerId?: string) {
-  return chat.name || (peerId ? `User ${peerId.slice(0, 8)}` : 'Private chat');
+export function profileName(profile?: Pick<UserProfile, 'name' | 'username'>) {
+  return profile?.name.trim() || (profile?.username ? `@${profile.username}` : 'Unknown user');
+}
+export function conversationName(chat: Conversation, peer?: UserProfile) {
+  return chat.type === 'group' ? chat.name || 'Group' : peer ? profileName(peer) : 'Private chat';
 }
 export function initials(name: string) {
   return (

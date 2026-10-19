@@ -27,7 +27,8 @@ import {
   styles,
 } from '../../components/ui';
 import { EMOJIS, type Attachment, type Emoji, type Message } from '../../api/types';
-import { conversationName, timeLabel } from '../../lib/messages';
+import { conversationName, profileName, timeLabel } from '../../lib/messages';
+import { useProfiles } from '../../context/ProfilesContext';
 import { fileForm } from '../../lib/uploads';
 import { downloadAttachment } from '../../lib/download';
 import { AttachmentImage } from './AttachmentImage';
@@ -36,6 +37,7 @@ import { GifDialog } from './GifDialog';
 
 export default function ChatView({ id }: { id?: string }) {
   const { session } = useSession();
+  const { profiles } = useProfiles();
   const {
     conversations,
     messages,
@@ -61,12 +63,11 @@ export default function ChatView({ id }: { id?: string }) {
   const [search, setSearch] = useState<string | null>(null);
   const list = useRef<FlatList<Message>>(null);
   const wide = useWindowDimensions().width >= 850;
-  const title = chat
-    ? conversationName(
-        chat,
-        members[chat.id]?.find((member) => member.userId !== session!.user.id)?.userId,
-      )
-    : '';
+  const peerId = id
+    ? members[id]?.find((member) => member.userId !== session!.user.id)?.userId
+    : undefined;
+  const peer = chat?.type === 'private' && peerId ? profiles[peerId] : undefined;
+  const title = chat ? conversationName(chat, peer) : '';
   useEffect(() => {
     activate(id ?? null);
     if (id) void loadMessages(id).catch((err) => setError(err.message));
@@ -205,7 +206,7 @@ export default function ChatView({ id }: { id?: string }) {
           onPress={() => setDetails(true)}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}
         >
-          <Avatar name={title} size={44} />
+          <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={44} />
           <View style={{ flex: 1 }}>
             <Text numberOfLines={1} style={s.headerTitle}>
               {title}
@@ -213,7 +214,9 @@ export default function ChatView({ id }: { id?: string }) {
             <Text style={s.headerSubtitle}>
               {chat.type === 'group'
                 ? `${members[id]?.length ?? 0} members`
-                : 'Private conversation'}
+                : peer?.username
+                  ? `@${peer.username}`
+                  : 'Private conversation'}
             </Text>
           </View>
         </Pressable>
@@ -296,13 +299,22 @@ export default function ChatView({ id }: { id?: string }) {
                 </View>
               )}
               <View style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}>
+                {!mine && chat.type === 'group' && (
+                  <View style={{ marginRight: 8, alignSelf: 'flex-end' }}>
+                    <Avatar
+                      name={profileName(profiles[message.senderId])}
+                      uri={profiles[message.senderId]?.avatarUrl ?? undefined}
+                      size={32}
+                    />
+                  </View>
+                )}
                 <View style={[s.bubble, mine ? s.outgoing : s.incoming]}>
                   {!mine && chat.type === 'group' && (
-                    <Text style={s.sender}>User {message.senderId.slice(0, 8)}</Text>
+                    <Text style={s.sender}>{profileName(profiles[message.senderId])}</Text>
                   )}
                   {!!message.forwardedFrom && (
                     <Text style={s.forwarded}>
-                      Forwarded from {message.forwardedFrom.senderId.slice(0, 8)}
+                      Forwarded from {profileName(profiles[message.forwardedFrom.senderId])}
                     </Text>
                   )}
                   {message.attachment && (
@@ -484,7 +496,13 @@ export default function ChatView({ id }: { id?: string }) {
           conversations.map((destination) => (
             <Button
               key={destination.id}
-              title={conversationName(destination)}
+              title={conversationName(
+                destination,
+                profiles[
+                  members[destination.id]?.find((member) => member.userId !== session!.user.id)
+                    ?.userId ?? ''
+                ],
+              )}
               secondary
               disabled={busy}
               onPress={() => {

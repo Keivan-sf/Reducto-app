@@ -17,12 +17,14 @@ import {
 } from '../../components/ui';
 import { api, useSession } from '../../context/SessionContext';
 import type { User } from '../../api/types';
+import { useProfiles } from '../../context/ProfilesContext';
 import { objectUrl } from '../../lib/config';
 import { fileForm } from '../../lib/uploads';
 
 export default function SettingsScreen() {
   const { session, updateUser, signOut } = useSession();
   const user = session!.user;
+  const { profiles } = useProfiles();
   const [name, setName] = useState(user.name);
   const [username, setUsername] = useState(user.username ?? '');
   const [busy, setBusy] = useState(false);
@@ -105,7 +107,11 @@ export default function SettingsScreen() {
         <View style={s.card}>
           <Text style={s.section}>YOUR PROFILE</Text>
           <View style={s.profile}>
-            <Avatar name={user.name} uri={localAvatar ?? objectUrl(user.avatarKey)} size={88} />
+            <Avatar
+              name={user.name}
+              uri={localAvatar ?? profiles[user.id]?.avatarUrl ?? objectUrl(user.avatarKey)}
+              size={88}
+            />
             <View style={{ gap: 7, flex: 1 }}>
               <Text style={styles.title}>{user.name}</Text>
               <Text style={styles.subtitle}>{user.email}</Text>

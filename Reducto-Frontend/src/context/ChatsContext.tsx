@@ -12,6 +12,7 @@ import { io } from 'socket.io-client';
 import type { Conversation, Emoji, Member, Message, MessagePage } from '../api/types';
 import { api, useSession } from './SessionContext';
 import { mergeMessages } from '../lib/messages';
+import { useProfiles } from './ProfilesContext';
 
 interface ChatsState {
   conversations: Conversation[];
@@ -32,6 +33,7 @@ interface ChatsState {
 const Context = createContext<ChatsState>(null!);
 export function ChatsProvider({ children }: PropsWithChildren) {
   const { session } = useSession();
+  const { directory } = useProfiles();
   const token = session?.accessToken;
   const userId = session?.user.id;
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -51,25 +53,38 @@ export function ChatsProvider({ children }: PropsWithChildren) {
     setActiveId(id);
     if (id) setUnread((current) => ({ ...current, [id]: 0 }));
   }, []);
-  const acceptMessage = useCallback((message: Message) => {
-    setMessages((current) => ({
-      ...current,
-      [message.conversationId]: mergeMessages(current[message.conversationId] ?? [], [message]),
-    }));
-  }, []);
-  const loadMessages = useCallback(async (id: string, older = false) => {
-    const cursor = older ? cursors.current[id] : undefined;
-    if (older && !cursor) return;
-    const page = await api.get<MessagePage>(
-      `/api/conversations/${id}/messages?limit=50${cursor ? `&before=${cursor}` : ''}`,
-    );
-    // Refreshing the newest page must not overwrite the older-history cursor.
-    if (older || !(id in cursors.current)) cursors.current[id] = page.nextCursor;
-    setMessages((current) => ({
-      ...current,
-      [id]: mergeMessages(current[id] ?? [], page.messages),
-    }));
-  }, []);
+  const acceptMessage = useCallback(
+    (message: Message) => {
+      void directory.getMany([message.senderId, message.forwardedFrom?.senderId ?? '']);
+      setMessages((current) => ({
+        ...current,
+        [message.conversationId]: mergeMessages(current[message.conversationId] ?? [], [message]),
+      }));
+    },
+    [directory],
+  );
+  const loadMessages = useCallback(
+    async (id: string, older = false) => {
+      const cursor = older ? cursors.current[id] : undefined;
+      if (older && !cursor) return;
+      const page = await api.get<MessagePage>(
+        `/api/conversations/${id}/messages?limit=50${cursor ? `&before=${cursor}` : ''}`,
+      );
+      void directory.getMany(
+        page.messages.flatMap((message) => [
+          message.senderId,
+          message.forwardedFrom?.senderId ?? '',
+        ]),
+      );
+      // Refreshing the newest page must not overwrite the older-history cursor.
+      if (older || !(id in cursors.current)) cursors.current[id] = page.nextCursor;
+      setMessages((current) => ({
+        ...current,
+        [id]: mergeMessages(current[id] ?? [], page.messages),
+      }));
+    },
+    [directory],
+  );
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
     const { conversations: chats } = await api.get<{ conversations: Conversation[] }>(
@@ -97,6 +112,13 @@ export function ChatsProvider({ children }: PropsWithChildren) {
     for (const outcome of outcomes) {
       if (outcome.status === 'fulfilled') {
         const { id, page, people } = outcome.value;
+        void directory.getMany([
+          ...people.members.map((member) => member.userId),
+          ...page.messages.flatMap((message) => [
+            message.senderId,
+            message.forwardedFrom?.senderId ?? '',
+          ]),
+        ]);
         // Reconnects can reveal an offline gap; pagination starts at the new page.
         cursors.current[id] = page.nextCursor;
         setMessages((current) => ({
@@ -107,7 +129,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       } else failed = true;
     }
     setError(failed ? 'Some conversations could not be synced. Refresh to try again.' : '');
-  }, [activate]);
+  }, [activate, directory]);
   useEffect(() => {
     if (!token || !userId) return;
     let alive = true;

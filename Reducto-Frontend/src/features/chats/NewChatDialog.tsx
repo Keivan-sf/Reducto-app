@@ -6,9 +6,11 @@ import { useChats } from '../../context/ChatsContext';
 import { Button, colors, Dialog, Field, Notice, styles } from '../../components/ui';
 import type { Conversation } from '../../api/types';
 import { isValidUsername, normalizeUsername } from '../../lib/usernames';
+import { useProfiles } from '../../context/ProfilesContext';
 
 export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { refresh } = useChats();
+  const { directory } = useProfiles();
   const [mode, setMode] = useState<'private' | 'group' | 'join'>('private');
   const [value, setValue] = useState('');
   const [useUserId, setUseUserId] = useState(false);
@@ -30,6 +32,7 @@ export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose:
           if (!isValidUsername(username))
             throw new Error('Enter a username with 1–32 letters, numbers, or underscores.');
           body = { username };
+          void directory.byUsername(username).catch(() => {});
         }
       } else if (mode === 'group') {
         path = '/api/groups';

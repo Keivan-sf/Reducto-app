@@ -23,8 +23,23 @@ const first = {
   createdAt: '2026-10-18T12:01:00Z',
   reactions: [],
 };
+const friend = {
+  id: 'friend',
+  name: 'Grace Hopper',
+  username: 'grace',
+  avatarUrl: 'https://avatars.example/grace.png',
+};
 async function mockApi(page: Page, initialMessages: object[] = [first]) {
   const messages = [...initialMessages];
+  await page.route('https://avatars.example/**', (route) =>
+    route.fulfill({
+      contentType: 'image/png',
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1cAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    }),
+  );
   await page.route('**:3001/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -33,7 +48,14 @@ async function mockApi(page: Page, initialMessages: object[] = [first]) {
       if (request.postDataJSON().password === 'wrongpassword')
         return route.fulfill({ status: 401, json: { error: 'Invalid credentials' } });
       body = { user, accessToken: 'access-token', refreshToken: 'refresh-token' };
-    } else if (path.endsWith('/me')) body = { user };
+    } else if (path.startsWith('/api/users/by-username/')) body = { user: friend };
+    else if (path.startsWith('/api/users/'))
+      body = {
+        user: path.endsWith(user.id)
+          ? { id: user.id, name: user.name, username: user.username, avatarUrl: null }
+          : friend,
+      };
+    else if (path.endsWith('/me')) body = { user };
     else if (path === '/api/conversations') body = { conversations: [chat] };
     else if (path.endsWith('/members'))
       body = {
@@ -218,4 +240,77 @@ test('attachment downloads and message actions use separate buttons', async ({ p
   expect(request.postDataJSON()).toEqual({ emoji: '👍' });
   await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
   expect(nestingErrors).toEqual([]);
+});
+
+test('private chats and group members display fetched names, usernames and signed avatars', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page);
+  const privateChat = {
+    ...chat,
+    id: '55555555-5555-4555-8555-555555555555',
+    type: 'private',
+    name: null,
+  };
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [chat, privateChat] } }),
+  );
+  await signIn(page);
+  const row = page.getByRole('button', { name: 'Open Grace Hopper', exact: true });
+  await expect(row).toBeVisible();
+  await expect(row.getByText('@grace', { exact: true })).toBeVisible();
+  await expect(row.getByRole('img', { name: 'Grace Hopper profile photo' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Search conversations' }).fill('@GRACE');
+  await expect(row).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Search conversations' }).fill('');
+  await row.click();
+  const header = page.getByRole('button', { name: 'View conversation details' });
+  await expect(header.getByText('Grace Hopper', { exact: true })).toBeVisible();
+  await expect(header.getByText('@grace', { exact: true })).toBeVisible();
+  await expect(header.getByRole('img', { name: 'Grace Hopper profile photo' })).toBeVisible();
+  await header.click();
+  await expect(page.getByText('MEMBERS', { exact: true })).toBeVisible();
+  await expect(page.getByText('Grace Hopper', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('@grace', { exact: true }).last()).toBeVisible();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats' }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByText('Grace Hopper', { exact: true }).last()).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Grace Hopper profile photo' }).last()).toBeVisible();
+  await expect(page.getByText('User friend')).toHaveCount(0);
+});
+
+test('missing profiles and avatars keep conversations usable', async ({ page }) => {
+  await mockApi(page);
+  const privateChat = { ...chat, type: 'private', name: null };
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [privateChat] } }),
+  );
+  await page.route('**:3001/api/users/friend', (route) =>
+    route.fulfill({ status: 404, json: { error: 'User not found' } }),
+  );
+  await page.goto('/');
+  await page.getByPlaceholder('you@example.com').fill('ada@example.com');
+  await page.getByPlaceholder('Enter your password').fill('goodpassword');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Private chat', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  await expect(page.getByText('Hello from the group!', { exact: true }).last()).toBeVisible();
+});
+
+test('unavailable avatar images fall back to the profile initials', async ({ page }) => {
+  await mockApi(page);
+  await page.route('https://avatars.example/**', (route) => route.fulfill({ status: 404 }));
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: { conversations: [chat, { ...chat, id: 'private', type: 'private', name: null }] },
+    }),
+  );
+  await signIn(page);
+  const row = page.getByRole('button', { name: 'Open Grace Hopper', exact: true });
+  await expect(row.getByText('GH', { exact: true })).toBeVisible();
+  await expect(row.getByRole('img')).toHaveCount(0);
+  await expect(row.getByText('@grace', { exact: true })).toBeVisible();
 });

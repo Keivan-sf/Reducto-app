@@ -6,6 +6,8 @@ import { api, useSession } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
 import { Avatar, Button, colors, Dialog, Field, Notice, styles } from '../../components/ui';
 import type { Conversation } from '../../api/types';
+import { useProfiles } from '../../context/ProfilesContext';
+import { conversationName, profileName } from '../../lib/messages';
 
 export function GroupDialog({
   chat,
@@ -18,7 +20,11 @@ export function GroupDialog({
 }) {
   const { session } = useSession();
   const { members, refresh } = useChats();
+  const { profiles } = useProfiles();
   const people = members[chat.id] ?? [];
+  const peerId = people.find((member) => member.userId !== session!.user.id)?.userId;
+  const peer = chat.type === 'private' && peerId ? profiles[peerId] : undefined;
+  const title = conversationName(chat, peer);
   const role = people.find((member) => member.userId === session!.user.id)?.role;
   const manager = role === 'owner' || role === 'admin';
   const [editedName, setName] = useState<string | null>(null);
@@ -50,8 +56,9 @@ export function GroupDialog({
       onClose={onClose}
     >
       <View style={{ alignItems: 'center', gap: 14 }}>
-        <Avatar name={chat.name ?? 'Private chat'} size={72} />
-        <Text style={styles.title}>{chat.name ?? 'Private chat'}</Text>
+        <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={72} />
+        <Text style={styles.title}>{title}</Text>
+        {peer?.username && <Text style={styles.subtitle}>@{peer.username}</Text>}
         <Text style={styles.subtitle}>{people.length} members</Text>
       </View>
       <Notice text={error} />
@@ -114,16 +121,22 @@ export function GroupDialog({
               name={
                 member.userId === session!.user.id
                   ? session!.user.name
-                  : `User ${member.userId.slice(0, 8)}`
+                  : profileName(profiles[member.userId])
               }
+              uri={profiles[member.userId]?.avatarUrl ?? undefined}
               size={36}
             />
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.dark, fontSize: 14 }}>
                 {member.userId === session!.user.id
                   ? `${session!.user.name} (you)`
-                  : `User ${member.userId.slice(0, 8)}`}
+                  : profileName(profiles[member.userId])}
               </Text>
+              {profiles[member.userId]?.username && (
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  @{profiles[member.userId].username}
+                </Text>
+              )}
               <Text style={{ color: colors.muted, fontSize: 12 }}>{member.role}</Text>
             </View>
           </View>

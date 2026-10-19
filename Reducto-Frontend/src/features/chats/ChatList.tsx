@@ -14,9 +14,11 @@ import { useSession } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
 import { conversationName, preview, timeLabel } from '../../lib/messages';
 import { NewChatDialog } from './NewChatDialog';
+import { useProfiles } from '../../context/ProfilesContext';
 
 export default function ChatList() {
   const { session } = useSession();
+  const { profiles, directory } = useProfiles();
   const {
     conversations,
     messages,
@@ -33,16 +35,19 @@ export default function ChatList() {
   const [filter, setFilter] = useState('All chats');
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  function peer(chat: (typeof conversations)[number]) {
+    const id = members[chat.id]?.find((member) => member.userId !== session!.user.id)?.userId;
+    return chat.type === 'private' && id ? profiles[id] : undefined;
+  }
   function title(chat: (typeof conversations)[number]) {
-    return conversationName(
-      chat,
-      members[chat.id]?.find((member) => member.userId !== session!.user.id)?.userId,
-    );
+    return conversationName(chat, peer(chat));
   }
   const chats = conversations
     .filter(
       (chat) =>
-        title(chat).toLowerCase().includes(query.toLowerCase()) &&
+        `${title(chat)} @${peer(chat)?.username ?? ''}`
+          .toLowerCase()
+          .includes(query.toLowerCase()) &&
         (filter !== 'Groups' || chat.type === 'group') &&
         (filter !== 'Unread' || unread[chat.id] > 0),
     )
@@ -55,6 +60,7 @@ export default function ChatList() {
     setRefreshing(true);
     try {
       await refresh();
+      await directory.refreshKnown();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -156,7 +162,7 @@ export default function ChatList() {
               onPress={() => router.push(`/chat/${chat.id}`)}
               style={({ pressed }) => [s.row, selected && s.selected, pressed && { opacity: 0.7 }]}
             >
-              <Avatar name={title(chat)} size={52} />
+              <Avatar name={title(chat)} uri={peer(chat)?.avatarUrl ?? undefined} size={52} />
               <View style={{ flex: 1, gap: 7 }}>
                 <View style={s.rowLine}>
                   <Text numberOfLines={1} style={[s.chatName, selected && { color: 'white' }]}>
@@ -166,6 +172,11 @@ export default function ChatList() {
                     {last ? timeLabel(last.createdAt) : ''}
                   </Text>
                 </View>
+                {peer(chat)?.username && (
+                  <Text numberOfLines={1} style={[s.time, selected && { color: '#DDEEFF' }]}>
+                    @{peer(chat)!.username}
+                  </Text>
+                )}
                 <View style={s.rowLine}>
                   <Text numberOfLines={1} style={[s.preview, selected && { color: '#E6F1FE' }]}>
                     {last?.senderId === session!.user.id ? 'You: ' : ''}
