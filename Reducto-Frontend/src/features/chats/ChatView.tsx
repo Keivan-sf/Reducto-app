@@ -61,6 +61,8 @@ export default function ChatView({ id }: { id?: string }) {
   const [details, setDetails] = useState(false);
   const [gifs, setGifs] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
+  // Preserve the selection while Modal fades out; clearing it removes only some buttons.
+  const [actionsVisible, setActionsVisible] = useState(false);
   const [forward, setForward] = useState(false);
   const [attachment, setAttachment] = useState<Attachment | undefined>();
   const [attachmentName, setAttachmentName] = useState('');
@@ -150,7 +152,7 @@ export default function ChatView({ id }: { id?: string }) {
     }
   }
   async function react(emoji: Emoji) {
-    if (!actionMessage || !id || busy) return;
+    if (!actionsVisible || !actionMessage || !id || busy) return;
     const message = actionMessage;
     const remove = message.reactions?.some(
       (reaction) => reaction.emoji === emoji && reaction.userId === session!.user.id,
@@ -162,10 +164,10 @@ export default function ChatView({ id }: { id?: string }) {
         body: JSON.stringify({ emoji }),
       });
       await loadMessages(id);
-      setActionMessage(null);
+      setActionsVisible(false);
     } catch (err) {
       setError((err as Error).message);
-      setActionMessage(null);
+      setActionsVisible(false);
     } finally {
       setBusy(false);
     }
@@ -339,6 +341,7 @@ export default function ChatView({ id }: { id?: string }) {
                         if (message.attachment!.type === 'gif') {
                           setError('');
                           setActionMessage(message);
+                          setActionsVisible(true);
                           setForward(false);
                         } else
                           void downloadAttachment(id, message.attachment!.mediaId).catch((err) =>
@@ -347,6 +350,7 @@ export default function ChatView({ id }: { id?: string }) {
                       }}
                       onLongPress={() => {
                         setActionMessage(message);
+                        setActionsVisible(true);
                         setForward(false);
                       }}
                       style={s.attachment}
@@ -387,6 +391,7 @@ export default function ChatView({ id }: { id?: string }) {
                       onError={setError}
                       onMessagePress={() => {
                         setActionMessage(message);
+                        setActionsVisible(true);
                         setForward(false);
                       }}
                     />
@@ -396,10 +401,12 @@ export default function ChatView({ id }: { id?: string }) {
                     accessibilityLabel="Message actions"
                     onPress={() => {
                       setActionMessage(message);
+                      setActionsVisible(true);
                       setForward(false);
                     }}
                     onLongPress={() => {
                       setActionMessage(message);
+                      setActionsVisible(true);
                       setForward(false);
                     }}
                     style={
@@ -510,9 +517,9 @@ export default function ChatView({ id }: { id?: string }) {
       <GroupDialog chat={chat} visible={details} onClose={() => setDetails(false)} />
       <GifDialog visible={gifs} onClose={() => setGifs(false)} onSend={send} />
       <Dialog
-        visible={!!actionMessage}
+        visible={actionsVisible}
         title={forward ? 'Forward to…' : 'Message options'}
-        onClose={() => setActionMessage(null)}
+        onClose={() => setActionsVisible(false)}
       >
         {forward ? (
           conversations.map((destination) => (
@@ -535,12 +542,12 @@ export default function ChatView({ id }: { id?: string }) {
                   })
                   .then(({ message }) => {
                     acceptMessage(message);
-                    setActionMessage(null);
+                    setActionsVisible(false);
                     router.push(`/chat/${destination.id}`);
                   })
                   .catch((err) => {
                     setError(err.message);
-                    setActionMessage(null);
+                    setActionsVisible(false);
                   })
                   .finally(() => setBusy(false));
               }}
@@ -580,7 +587,7 @@ export default function ChatView({ id }: { id?: string }) {
                 secondary
                 onPress={() =>
                   void Clipboard.setStringAsync(actionMessage.text!)
-                    .then(() => setActionMessage(null))
+                    .then(() => setActionsVisible(false))
                     .catch((err) => setError(err.message))
                 }
               />
@@ -602,10 +609,10 @@ export default function ChatView({ id }: { id?: string }) {
                     setBusy(true);
                     void api
                       .request(`/api/gifs/${gifId}`, { method: 'PUT' })
-                      .then(() => setActionMessage(null))
+                      .then(() => setActionsVisible(false))
                       .catch((err) => {
                         setError(err.message);
-                        setActionMessage(null);
+                        setActionsVisible(false);
                       })
                       .finally(() => setBusy(false));
                   }}

@@ -623,6 +623,57 @@ test('sign-up allows leaving the optional username blank', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 });
 
+for (const gif of [false, true]) {
+  test(`${gif ? 'GIF' : 'text'} message options fade out as one complete dialog`, async ({
+    page,
+  }) => {
+    await mockApi(page, [
+      {
+        ...first,
+        text: gif ? null : 'Copy this message',
+        attachment: gif ? { type: 'gif', gifId: 'test-gif' } : null,
+      },
+    ]);
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const open = () =>
+      gif
+        ? page.getByRole('button', { name: 'Open gif attachment' }).click()
+        : page.getByRole('button', { name: 'Message actions', exact: true }).click();
+    const label = gif ? 'Save GIF to library' : 'Copy text';
+    await open();
+    await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
+    const partialFrames = await page.evaluate(async (label) => {
+      let partial = 0;
+      const start = performance.now();
+      const check = () => {
+        const title = document.body.textContent?.includes('Message options') ?? false;
+        const action = Array.from(document.querySelectorAll('button, [role="button"]')).some(
+          (element) => element.textContent?.trim() === label,
+        );
+        if (title !== action) partial++;
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+      document.querySelector<HTMLElement>('[aria-label="Close dialog"]')!.click();
+      await new Promise<void>((resolve) => {
+        const frame = () => {
+          check();
+          if (performance.now() - start > 500) resolve();
+          else requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      });
+      observer.disconnect();
+      return partial;
+    }, label);
+    expect(partialFrames).toBe(0);
+    await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+    await open();
+    await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
+  });
+}
+
 test('attachment downloads and message actions use separate buttons', async ({ page }) => {
   const nestingErrors: string[] = [];
   page.on('console', (message) => {
