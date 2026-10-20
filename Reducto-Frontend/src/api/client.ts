@@ -121,6 +121,7 @@ export class ApiClient {
       });
     } catch (error) {
       if (options.signal?.aborted) throw error;
+      console.log("could not reach reducto error", error);
       throw new ApiError(0, 'Could not reach Reducto. Check your connection and server address.');
     }
     if (this.baseUrl !== requestBaseUrl)
