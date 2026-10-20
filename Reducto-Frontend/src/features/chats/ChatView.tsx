@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -28,7 +28,7 @@ import {
   styles,
 } from '../../components/ui';
 import { EMOJIS, type Attachment, type Emoji, type Gif, type Message } from '../../api/types';
-import { conversationName, profileName, timeLabel } from '../../lib/messages';
+import { conversationName, profileName, timeLabel, mergeMessages } from '../../lib/messages';
 import { useProfiles } from '../../context/ProfilesContext';
 import { fileForm } from '../../lib/uploads';
 import { downloadAttachment } from '../../lib/download';
@@ -38,6 +38,7 @@ import { GifDialog } from './GifDialog';
 import { MessageText } from './MessageText';
 import { GifPreview } from './GifPreview';
 import { useGifs } from '../../context/GifsContext';
+import { ReplyPreview, ReplyQuote } from './ReplyPreview';
 
 export default function ChatView({ id }: { id?: string }) {
   const { session } = useSession();
@@ -51,9 +52,30 @@ export default function ChatView({ id }: { id?: string }) {
     acceptMessage,
     loadMessages,
     hasOlder,
+    messageCache,
   } = useChats();
   const chat = conversations.find((entry) => entry.id === id);
-  const history = messages[id ?? ''] ?? [];
+  const [jumpWindow, setJumpWindow] = useState<{
+    messages: Message[];
+    hasMoreBefore: boolean;
+    hasMoreAfter: boolean;
+  } | null>(null);
+  const latest = messages[id ?? ''];
+  const history = useMemo(
+    () =>
+      jumpWindow
+        ? jumpWindow.messages.map((message) => messageCache.peek(id ?? '', message.id) ?? message)
+        : (latest ?? []),
+    [jumpWindow, latest, messageCache, id],
+  );
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [jumpTarget, setJumpTarget] = useState<string | null>(null);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const [jumping, setJumping] = useState(false);
+  const jumpSequence = useRef(0);
+  const scrollTarget = useRef<{ id: string; index: number; attempts: number } | null>(null);
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -72,8 +94,17 @@ export default function ChatView({ id }: { id?: string }) {
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<Message>[] }) => {
       setVisibleMessages(new Set(viewableItems.map(({ item }) => item.id)));
+      const target = scrollTarget.current;
+      if (target && viewableItems.some(({ item }) => item.id === target.id)) {
+        scrollTarget.current = null;
+        clearTimeout(scrollTimer.current);
+        setJumpTarget(null);
+        setHighlighted(target.id);
+        clearTimeout(highlightTimer.current);
+        highlightTimer.current = setTimeout(() => setHighlighted(null), 2500);
+      }
     },
-    [],
+    [setJumpTarget, setHighlighted],
   );
   const list = useRef<FlatList<Message>>(null);
   const wide = useWindowDimensions().width >= 850;
@@ -87,6 +118,107 @@ export default function ChatView({ id }: { id?: string }) {
     if (id) void loadMessages(id).catch((err) => setError(err.message));
     return () => activate(null);
   }, [id, activate, loadMessages]);
+  const shown = useMemo(
+    () =>
+      [...history]
+        .filter(
+          (message) =>
+            search === null || (message.text ?? '').toLowerCase().includes(search.toLowerCase()),
+        )
+        .reverse(),
+    [history, search],
+  );
+  useEffect(() => {
+    if (!jumpTarget) return;
+    const index = shown.findIndex((message) => message.id === jumpTarget);
+    if (index < 0) return;
+    scrollTarget.current = { id: jumpTarget, index, attempts: 0 };
+    const frame = requestAnimationFrame(() =>
+      list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [jumpTarget, shown]);
+  useEffect(
+    () => () => {
+      jumpSequence.current++;
+      clearTimeout(scrollTimer.current);
+      clearTimeout(highlightTimer.current);
+    },
+    [],
+  );
+  async function jumpToMessage(messageId: string) {
+    if (!id) return;
+    const sequence = ++jumpSequence.current;
+    setLoadingHistory(false);
+    setJumping(true);
+    setError('');
+    try {
+      if (!history.some((message) => message.id === messageId)) {
+        const page = await messageCache.around(id, messageId);
+        if (sequence !== jumpSequence.current) return;
+        setJumpWindow({
+          messages: mergeMessages([], [...page.before, page.message, ...page.after]),
+          hasMoreBefore: page.hasMoreBefore,
+          hasMoreAfter: page.hasMoreAfter,
+        });
+      }
+      if (sequence !== jumpSequence.current) return;
+      setSearch(null);
+      setJumpTarget(messageId);
+      setHighlighted(messageId);
+      clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => {
+        setHighlighted(null);
+        setJumpTarget(null);
+        scrollTarget.current = null;
+      }, 3000);
+    } catch (err) {
+      if (sequence === jumpSequence.current) setError((err as Error).message);
+    } finally {
+      if (sequence === jumpSequence.current) setJumping(false);
+    }
+  }
+  function showLatest() {
+    jumpSequence.current++;
+    setJumping(false);
+    setLoadingHistory(false);
+    setJumpWindow(null);
+    setJumpTarget(null);
+    scrollTarget.current = null;
+    clearTimeout(scrollTimer.current);
+    clearTimeout(highlightTimer.current);
+    setHighlighted(null);
+    setSearch(null);
+    requestAnimationFrame(() => list.current?.scrollToOffset({ offset: 0, animated: false }));
+  }
+  async function expandWindow(older: boolean) {
+    if (!id || !jumpWindow || loadingHistory) return;
+    const sequence = jumpSequence.current;
+    const edge = older ? jumpWindow.messages[0] : jumpWindow.messages.at(-1);
+    if (!edge) return;
+    setLoadingHistory(true);
+    try {
+      const page = await messageCache.around(id, edge.id, older ? 50 : 0, older ? 0 : 50);
+      if (sequence !== jumpSequence.current) return;
+      setJumpWindow((current) =>
+        current
+          ? {
+              messages: mergeMessages(current.messages, [
+                ...page.before,
+                page.message,
+                ...page.after,
+              ]),
+              hasMoreBefore: older ? page.hasMoreBefore : current.hasMoreBefore,
+              hasMoreAfter: older ? current.hasMoreAfter : page.hasMoreAfter,
+            }
+          : null,
+      );
+    } catch (err) {
+      if (sequence === jumpSequence.current) setError((err as Error).message);
+    } finally {
+      if (sequence === jumpSequence.current) setLoadingHistory(false);
+    }
+  }
   async function send(gifId?: string) {
     if (!id || busy || (!draft.trim() && !attachment && !gifId)) return;
     setBusy(true);
@@ -96,12 +228,15 @@ export default function ChatView({ id }: { id?: string }) {
         `/api/conversations/${id}/messages`,
         {
           ...(draft.trim() && !gifId ? { text: draft.trim() } : {}),
+          ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
           ...(gifId || attachment
             ? { attachment: gifId ? { type: 'gif', gifId } : attachment }
             : {}),
         },
       );
       acceptMessage(message);
+      setReplyTo(null);
+      showLatest();
       if (!gifId) {
         setDraft('');
         setAttachment(undefined);
@@ -163,7 +298,13 @@ export default function ChatView({ id }: { id?: string }) {
         method: remove ? 'DELETE' : 'PUT',
         body: JSON.stringify({ emoji }),
       });
-      await loadMessages(id);
+      messageCache.reaction({
+        conversationId: id,
+        messageId: message.id,
+        userId: session!.user.id,
+        emoji,
+        removed: !!remove,
+      });
       setActionsVisible(false);
     } catch (err) {
       setError((err as Error).message);
@@ -203,12 +344,6 @@ export default function ChatView({ id }: { id?: string }) {
         )}
       </View>
     );
-  const shown = [...history]
-    .filter(
-      (message) =>
-        search === null || (message.text ?? '').toLowerCase().includes(search.toLowerCase()),
-    )
-    .reverse();
   return (
     <KeyboardAvoidingView style={s.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={s.header}>
@@ -259,6 +394,35 @@ export default function ChatView({ id }: { id?: string }) {
           <IconButton name="close" label="Close search" onPress={() => setSearch(null)} />
         </View>
       )}
+      {jumping && (
+        <ActivityIndicator
+          accessibilityLabel="Loading replied message"
+          color={colors.blue}
+          style={{ padding: 8 }}
+        />
+      )}
+      {jumpWindow && (
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 8,
+            padding: 8,
+            backgroundColor: 'white',
+            justifyContent: 'center',
+          }}
+        >
+          <Button title="Back to latest messages" secondary onPress={showLatest} />
+          {jumpWindow.hasMoreAfter && (
+            <Button
+              title="Load newer messages"
+              secondary
+              busy={loadingHistory}
+              onPress={() => void expandWindow(false)}
+            />
+          )}
+        </View>
+      )}
       <FlatList
         ref={list}
         style={{ flex: 1 }}
@@ -268,14 +432,34 @@ export default function ChatView({ id }: { id?: string }) {
         keyExtractor={(message) => message.id}
         keyboardShouldPersistTaps="handled"
         onViewableItemsChanged={onViewableItemsChanged}
+        onScrollToIndexFailed={({ index, averageItemLength }) => {
+          const target = scrollTarget.current;
+          if (!target || target.index !== index) return;
+          list.current?.scrollToOffset({ offset: averageItemLength * index, animated: false });
+          clearTimeout(scrollTimer.current);
+          if (++target.attempts <= 12)
+            scrollTimer.current = setTimeout(() => {
+              if (scrollTarget.current === target)
+                list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
+            }, 150);
+          else {
+            scrollTarget.current = null;
+            setJumpTarget(null);
+            setError('Could not scroll to the message. Tap the reply to try again.');
+          }
+        }}
         ListFooterComponent={
           <View style={{ alignItems: 'center', padding: 14, gap: 10 }}>
-            {hasOlder(id) && (
+            {(jumpWindow ? jumpWindow.hasMoreBefore : hasOlder(id)) && (
               <Button
                 title="Load earlier messages"
                 secondary
                 busy={loadingHistory}
                 onPress={() => {
+                  if (jumpWindow) {
+                    void expandWindow(true);
+                    return;
+                  }
                   setLoadingHistory(true);
                   void loadMessages(id, true)
                     .catch((err) => setError(err.message))
@@ -324,7 +508,14 @@ export default function ChatView({ id }: { id?: string }) {
                     />
                   </View>
                 )}
-                <View style={[s.bubble, mine ? s.outgoing : s.incoming]}>
+                <View
+                  testID={`message-${message.id}`}
+                  style={[
+                    s.bubble,
+                    mine ? s.outgoing : s.incoming,
+                    highlighted === message.id && { backgroundColor: '#FFF0B3' },
+                  ]}
+                >
                   {!mine && chat.type === 'group' && (
                     <Text style={s.sender}>{profileName(profiles[message.senderId])}</Text>
                   )}
@@ -332,6 +523,13 @@ export default function ChatView({ id }: { id?: string }) {
                     <Text style={s.forwarded}>
                       Forwarded from {profileName(profiles[message.forwardedFrom.senderId])}
                     </Text>
+                  )}
+                  {!!message.replyToMessageId && (
+                    <ReplyPreview
+                      conversationId={id}
+                      messageId={message.replyToMessageId}
+                      onJump={(target) => void jumpToMessage(target)}
+                    />
                   )}
                   {message.attachment && (
                     <Pressable
@@ -442,6 +640,14 @@ export default function ChatView({ id }: { id?: string }) {
         {!!error && (
           <View style={{ paddingHorizontal: 10, paddingBottom: 8 }}>
             <Notice text={error} />
+          </View>
+        )}
+        {replyTo && (
+          <View style={s.pending} testID="reply-composer">
+            <View style={{ flex: 1 }}>
+              <ReplyQuote message={replyTo} />
+            </View>
+            <IconButton name="close" label="Cancel reply" onPress={() => setReplyTo(null)} />
           </View>
         )}
         {attachment && (
@@ -581,6 +787,15 @@ export default function ChatView({ id }: { id?: string }) {
                 </Pressable>
               ))}
             </View>
+            <Button
+              title="Reply"
+              secondary
+              disabled={busy}
+              onPress={() => {
+                setReplyTo(actionMessage);
+                setActionsVisible(false);
+              }}
+            />
             {!!actionMessage?.text && (
               <Button
                 title="Copy text"

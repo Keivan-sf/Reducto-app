@@ -35,3 +35,9 @@ export function preview(message?: Message) {
       : 'Start a conversation')
   );
 }
+export function replySnippet(message: Message) {
+  if (message.attachment) return message.attachment.type;
+  const text = (message.text ?? '').replace(/\s+/g, ' ').trim();
+  const characters = Array.from(text);
+  return characters.length > 20 ? `${characters.slice(0, 20).join('')}…` : text || 'Message';
+}

@@ -9,16 +9,9 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 import { io } from 'socket.io-client';
-import type {
-  Conversation,
-  Emoji,
-  Member,
-  Message,
-  MessagePage,
-  ProfileUpdatedEvent,
-} from '../api/types';
+import type { Conversation, Emoji, Member, Message, ProfileUpdatedEvent } from '../api/types';
 import { api, useSession } from './SessionContext';
-import { mergeMessages } from '../lib/messages';
+import { MessageCache } from '../api/message-cache';
 import { useProfiles } from './ProfilesContext';
 
 interface ChatsState {
@@ -30,8 +23,9 @@ interface ChatsState {
   connection: string;
   error: string;
   setError: (error: string) => void;
-  refresh: () => Promise<void>;
-  loadMessages: (id: string, older?: boolean) => Promise<void>;
+  refresh: (queue?: boolean) => Promise<void>;
+  loadMessages: (id: string, older?: boolean, force?: boolean) => Promise<void>;
+  messageCache: MessageCache;
   hasOlder: (id: string) => boolean;
   acceptMessage: (message: Message) => void;
   activeId: string | null;
@@ -52,8 +46,22 @@ export function ChatsProvider({ children }: PropsWithChildren) {
   const [error, setError] = useState('');
   const activeRef = useRef<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const cursors = useRef<Record<string, string | null>>({});
+  const [messageCache] = useState(
+    () =>
+      new MessageCache(
+        (path) => api.get(path),
+        (id, history) => setMessages((current) => ({ ...current, [id]: history })),
+        (history) => {
+          void directory.getMany(
+            history.flatMap((message) => [message.senderId, message.forwardedFrom?.senderId ?? '']),
+          );
+        },
+      ),
+  );
+  const lastRefreshAt = useRef(0);
   const refreshSequence = useRef(0);
+  const refreshFlight = useRef<Promise<void> | null>(null);
+  const refreshQueued = useRef(false);
   const knownChats = useRef(new Set<string>());
   const activate = useCallback((id: string | null) => {
     activeRef.current = id;
@@ -61,101 +69,85 @@ export function ChatsProvider({ children }: PropsWithChildren) {
     if (id) setUnread((current) => ({ ...current, [id]: 0 }));
   }, []);
   const acceptMessage = useCallback(
-    (message: Message) => {
-      void directory.getMany([message.senderId, message.forwardedFrom?.senderId ?? '']);
-      setMessages((current) => ({
-        ...current,
-        [message.conversationId]: mergeMessages(current[message.conversationId] ?? [], [message]),
-      }));
-    },
-    [directory],
+    (message: Message) => messageCache.accept(message),
+    [messageCache],
   );
   const loadMessages = useCallback(
-    async (id: string, older = false) => {
-      const cursor = older ? cursors.current[id] : undefined;
-      if (older && !cursor) return;
-      const page = await api.get<MessagePage>(
-        `/api/conversations/${id}/messages?limit=50${cursor ? `&before=${cursor}` : ''}`,
-      );
-      void directory.getMany(
-        page.messages.flatMap((message) => [
-          message.senderId,
-          message.forwardedFrom?.senderId ?? '',
-        ]),
-      );
-      // Refreshing the newest page must not overwrite the older-history cursor.
-      if (older || !(id in cursors.current)) cursors.current[id] = page.nextCursor;
-      setMessages((current) => ({
-        ...current,
-        [id]: mergeMessages(current[id] ?? [], page.messages),
-      }));
-    },
-    [directory],
+    (id: string, older = false, force = false) => messageCache.page(id, older, force),
+    [messageCache],
   );
-  const refresh = useCallback(async () => {
-    const sequence = ++refreshSequence.current;
-    const { conversations: chats } = await api.get<{ conversations: Conversation[] }>(
-      '/api/conversations',
-    );
-    if (sequence !== refreshSequence.current) return;
-    setConversations(chats);
-    const allowed = new Set(chats.map((chat) => chat.id));
-    knownChats.current = allowed;
-    setMessages((current) =>
-      Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))),
-    );
-    if (activeRef.current && !allowed.has(activeRef.current)) activate(null);
-    const outcomes = await Promise.allSettled(
-      chats.map(async (chat) => {
-        const [page, people] = await Promise.all([
-          api.get<MessagePage>(`/api/conversations/${chat.id}/messages?limit=50`),
-          api.get<{ members: Member[] }>(`/api/conversations/${chat.id}/members`),
-        ]);
-        return { id: chat.id, page, people };
-      }),
-    );
-    if (sequence !== refreshSequence.current) return;
-    let failed = false;
-    for (const outcome of outcomes) {
-      if (outcome.status === 'fulfilled') {
-        const { id, page, people } = outcome.value;
-        void directory.getMany([
-          ...people.members.map((member) => member.userId),
-          ...page.messages.flatMap((message) => [
-            message.senderId,
-            message.forwardedFrom?.senderId ?? '',
-          ]),
-        ]);
-        // Reconnects can reveal an offline gap; pagination starts at the new page.
-        cursors.current[id] = page.nextCursor;
-        setMessages((current) => ({
-          ...current,
-          [id]: mergeMessages(current[id] ?? [], page.messages),
-        }));
-        setMembers((current) => ({ ...current, [id]: people.members }));
-      } else failed = true;
-    }
-    setError(failed ? 'Some conversations could not be synced. Refresh to try again.' : '');
-  }, [activate, directory]);
+  const refresh = useCallback(
+    (queue = false) => {
+      if (refreshFlight.current) {
+        if (queue) refreshQueued.current = true;
+        return refreshFlight.current;
+      }
+      const task = (async () => {
+        do {
+          refreshQueued.current = false;
+          const sequence = ++refreshSequence.current;
+          const { conversations: chats } = await api.get<{ conversations: Conversation[] }>(
+            '/api/conversations',
+          );
+          if (sequence !== refreshSequence.current) return;
+          setConversations(chats);
+          const allowed = new Set(chats.map((chat) => chat.id));
+          knownChats.current = allowed;
+          messageCache.prune(allowed);
+          setMessages((current) =>
+            Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))),
+          );
+          if (activeRef.current && !allowed.has(activeRef.current)) activate(null);
+          const outcomes = await Promise.allSettled(
+            chats.map(async (chat) => {
+              const [, people] = await Promise.all([
+                loadMessages(chat.id, false, true),
+                api.get<{ members: Member[] }>(`/api/conversations/${chat.id}/members`),
+              ]);
+              return { id: chat.id, people };
+            }),
+          );
+          if (sequence !== refreshSequence.current) return;
+          let failed = false;
+          for (const outcome of outcomes) {
+            if (outcome.status === 'fulfilled') {
+              const { id, people } = outcome.value;
+              void directory.getMany(people.members.map((member) => member.userId));
+              setMembers((current) => ({ ...current, [id]: people.members }));
+            } else failed = true;
+          }
+          lastRefreshAt.current = Date.now();
+          setError(failed ? 'Some conversations could not be synced. Refresh to try again.' : '');
+        } while (refreshQueued.current);
+      })().finally(() => {
+        refreshFlight.current = null;
+      });
+      refreshFlight.current = task;
+      return task;
+    },
+    [activate, directory, messageCache, loadMessages],
+  );
   useEffect(() => {
     if (!token || !userId) return;
     let alive = true;
+    let connectedOnce = false;
     const report = (err: Error) => {
       if (alive) setError(err.message);
     };
-    const sync = () => {
-      void refresh()
+    const sync = (queue = false) => {
+      void refresh(queue)
         .catch(report)
         .finally(() => {
           if (alive) setLoading(false);
         });
     };
-    // WebSocket transport avoids the reference server's missing polling CORS headers.
+    // Keep realtime delivery on the selected server alongside cached HTTP history.
     const socket = io(api.baseUrl, { auth: { token }, transports: ['websocket'] });
     socket.on('connect', () => {
       setConnection('Connected');
       void directory.refreshKnown(true);
-      sync();
+      if (connectedOnce || Date.now() - lastRefreshAt.current > 5000) sync(connectedOnce);
+      connectedOnce = true;
     });
     socket.on('user.profile_updated', (event: ProfileUpdatedEvent) => {
       void directory.refreshUser(event.userId).catch(report);
@@ -205,22 +197,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
         emoji: Emoji;
         removed: boolean;
       }) => {
-        setMessages((current) => ({
-          ...current,
-          [event.conversationId]: (current[event.conversationId] ?? []).map((message) => {
-            if (message.id !== event.messageId) return message;
-            const reactions = (message.reactions ?? []).filter(
-              (reaction) => !(reaction.userId === event.userId && reaction.emoji === event.emoji),
-            );
-            if (!event.removed)
-              reactions.push({
-                userId: event.userId,
-                emoji: event.emoji,
-                messageId: event.messageId,
-              });
-            return { ...message, reactions };
-          }),
-        }));
+        messageCache.reaction(event);
       },
     );
     for (const event of [
@@ -230,9 +207,9 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       'group.member_left',
       'group.role_changed',
     ])
-      socket.on(event, sync);
+      socket.on(event, () => sync(true));
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') sync();
+      if (state === 'active') sync(true);
     });
     sync();
     return () => {
@@ -240,7 +217,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       socket.disconnect();
       subscription.remove();
     };
-  }, [token, userId, acceptMessage, refresh, directory]);
+  }, [token, userId, acceptMessage, refresh, directory, messageCache]);
   return (
     <Context.Provider
       value={{
@@ -254,7 +231,8 @@ export function ChatsProvider({ children }: PropsWithChildren) {
         setError,
         refresh,
         loadMessages,
-        hasOlder: (id) => !!cursors.current[id],
+        hasOlder: (id) => messageCache.hasOlder(id),
+        messageCache,
         acceptMessage,
         activeId,
         activate,

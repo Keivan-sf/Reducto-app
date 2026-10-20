@@ -46,6 +46,7 @@ export interface Reaction {
   messageId: string;
 }
 export interface Message {
+  replyToMessageId?: string | null;
   id: string;
   conversationId: string;
   senderId: string;
@@ -58,6 +59,13 @@ export interface Message {
 export interface MessagePage {
   messages: Message[];
   nextCursor: string | null;
+}
+export interface AroundMessages {
+  message: Message;
+  before: Message[];
+  after: Message[];
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
 }
 export interface Gif {
   playbackUrl: string;

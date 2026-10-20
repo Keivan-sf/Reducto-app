@@ -105,9 +105,19 @@ test('sending a library GIF reuses its signed playback link without a details lo
   });
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Message actions', exact: true }).click();
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
   await page.getByRole('button', { name: 'Open GIF library' }).click();
   await expect(page.locator('video')).toBeVisible();
+  const sent = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/messages'),
+  );
   await page.getByRole('button', { name: 'Send GIF', exact: true }).click();
+  expect((await sent).postDataJSON()).toEqual({
+    attachment: { type: 'gif', gifId },
+    replyToMessageId: first.id,
+  });
   await expect(page.getByRole('button', { name: 'Open gif attachment' })).toBeVisible();
   const sentVideo = page.getByRole('button', { name: 'Open gif attachment' }).locator('video');
   await expect(sentVideo).toHaveAttribute('src', playbackUrl);
@@ -621,6 +631,247 @@ test('sign-up allows leaving the optional username blank', async ({ page }) => {
   await page.getByRole('button', { name: 'Create account', exact: true }).click();
   expect((await signup).postDataJSON()).not.toHaveProperty('username');
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+});
+
+test('reply composer sends reply IDs, renders a compact preview, and supports cancelling', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page);
+  await mockRealtime(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Message actions', exact: true }).click();
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(
+    page.getByTestId('reply-composer').getByText('Grace Hopper', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Here is my reply');
+  const sending = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/messages'),
+  );
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  expect((await sending).postDataJSON()).toEqual({
+    text: 'Here is my reply',
+    replyToMessageId: first.id,
+  });
+  await expect(page.getByTestId('reply-composer')).toHaveCount(0);
+  const reply = page.getByRole('button', {
+    name: `Jump to replied message ${first.id}`,
+    exact: true,
+  });
+  await expect(reply.getByText('Hello from the group…', { exact: true })).toBeVisible();
+  await expect(page.locator('button button')).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('replies.png'), fullPage: true });
+  await reply.click();
+  await expect(page.getByTestId(`message-${first.id}`)).toHaveCSS(
+    'background-color',
+    'rgb(255, 240, 179)',
+  );
+  await page.getByRole('button', { name: 'Message actions', exact: true }).last().click();
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel reply', exact: true }).click();
+  await expect(page.getByTestId('reply-composer')).toHaveCount(0);
+});
+
+test('failed replies preserve the draft and target until cancelled or sent', async ({ page }) => {
+  await mockApi(page);
+  await mockRealtime(page);
+  let attempts = 0;
+  await page.route('**/api/conversations/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    attempts++;
+    if (attempts === 1)
+      return route.fulfill({ status: 400, json: { error: 'Reply target is unavailable' } });
+    expect(route.request().postDataJSON()).toEqual({ text: 'Keep this draft' });
+    return route.fulfill({
+      json: { message: { ...first, id: 'retry', senderId: user.id, text: 'Keep this draft' } },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Message actions', exact: true }).click();
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Keep this draft');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByText('Reply target is unavailable', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('reply-composer')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue(
+    'Keep this draft',
+  );
+  await page.getByRole('button', { name: 'Cancel reply', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByTestId('message-retry')).toBeVisible();
+});
+
+test('reply previews load old targets once and jump through cached around windows', async ({
+  page,
+}) => {
+  const target = {
+    ...first,
+    id: 'old-target',
+    text: 'An earlier question about the weekend',
+    createdAt: '2026-10-17T10:00:00Z',
+  };
+  const before = Array.from({ length: 50 }, (_, index) => ({
+    ...first,
+    id: `older-${index}`,
+    text: `Older context ${index} ${'long line '.repeat(index % 5)}`,
+    createdAt: new Date(Date.parse(target.createdAt) - (50 - index) * 60000).toISOString(),
+  }));
+  const after = Array.from({ length: 50 }, (_, index) => ({
+    ...first,
+    id: `newer-${index}`,
+    text: `Newer context ${index}`,
+    createdAt: new Date(Date.parse(target.createdAt) + (index + 1) * 60000).toISOString(),
+  }));
+  await mockApi(page, [
+    { ...first, id: 'reply-1', text: 'First answer', replyToMessageId: target.id },
+    { ...first, id: 'reply-2', text: 'Second answer', replyToMessageId: target.id },
+  ]);
+  await mockRealtime(page);
+  let details = 0;
+  let around = 0;
+  await page.route(`**/messages/${target.id}`, (route) => {
+    details++;
+    return route.fulfill({ json: { message: target } });
+  });
+  await page.route('**/messages/*/around?*', (route) => {
+    around++;
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('before') === '0')
+      return route.fulfill({
+        json: {
+          message: after.at(-1),
+          before: [],
+          after: [
+            {
+              ...first,
+              id: 'new-edge',
+              text: 'More recent context',
+              createdAt: '2026-10-17T12:00:00Z',
+            },
+          ],
+          hasMoreBefore: true,
+          hasMoreAfter: false,
+        },
+      });
+    if (url.searchParams.get('after') === '0')
+      return route.fulfill({
+        json: {
+          message: before[0],
+          before: [
+            {
+              ...first,
+              id: 'old-edge',
+              text: 'Even older context',
+              createdAt: '2026-10-17T08:00:00Z',
+            },
+          ],
+          after: [],
+          hasMoreBefore: false,
+          hasMoreAfter: true,
+        },
+      });
+    expect(url.searchParams.get('before')).toBe('50');
+    expect(url.searchParams.get('after')).toBe('50');
+    return route.fulfill({
+      json: { message: target, before, after, hasMoreBefore: true, hasMoreAfter: true },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const previews = page.getByRole('button', {
+    name: `Jump to replied message ${target.id}`,
+    exact: true,
+  });
+  await expect(previews.first().getByText('An earlier question …', { exact: true })).toBeVisible();
+  expect(details).toBe(1);
+  await previews.first().click();
+  const original = page.getByTestId(`message-${target.id}`);
+  await expect(original).toBeInViewport({ ratio: 0.7 });
+  await expect(original).toHaveCSS('background-color', 'rgb(255, 240, 179)');
+  await expect(
+    page.getByRole('button', { name: 'Load newer messages', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Load newer messages', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Load newer messages', exact: true })).toHaveCount(
+    0,
+  );
+  await page
+    .getByRole('button', { name: 'Load earlier messages', exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.getByRole('button', { name: 'Load earlier messages', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Load earlier messages', exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back to latest messages', exact: true }).click();
+  await expect(previews.first()).toBeVisible();
+  await previews.first().click();
+  await expect(original).toBeInViewport({ ratio: 0.7 });
+  expect(around).toBe(3);
+  expect(details).toBe(1);
+});
+
+test('GIF reply previews show the attachment type and missing replies leave chat usable', async ({
+  page,
+}) => {
+  const gif = {
+    ...first,
+    id: 'gif-original',
+    text: null,
+    attachment: { type: 'gif', gifId: 'gif-id' },
+  };
+  await mockApi(page, [
+    gif,
+    { ...first, id: 'gif-answer', text: 'Nice animation', replyToMessageId: gif.id },
+    { ...first, id: 'missing-answer', text: 'What happened?', replyToMessageId: 'missing-target' },
+  ]);
+  await mockRealtime(page);
+  await page.route(/\/messages\/missing-target(?:\/around)?(?:\?|$)/, (route) =>
+    route.fulfill({ status: 404, json: { error: 'Message not found' } }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(
+    page
+      .getByRole('button', { name: `Jump to replied message ${gif.id}` })
+      .getByText('gif', { exact: true }),
+  ).toBeVisible();
+  const missing = page.getByRole('button', { name: 'Jump to replied message missing-target' });
+  await expect(missing.getByText('Message unavailable', { exact: true })).toBeVisible();
+  await missing.click();
+  await expect(page.getByText('Message not found', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEditable();
+});
+
+test('reopening a cached conversation does not request its history again', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page);
+  await mockRealtime(page);
+  let pages = 0;
+  await page.route(/\/api\/conversations\/[^/]+\/messages\?/, (route) => {
+    pages++;
+    return route.fulfill({ json: { messages: [first], nextCursor: null } });
+  });
+  await signIn(page);
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByTestId(`message-${first.id}`)).toBeVisible();
+  const initial = pages;
+  for (let index = 0; index < 3; index++) {
+    if (testInfo.project.name === 'mobile')
+      await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await expect(page.getByTestId(`message-${first.id}`)).toBeVisible();
+  }
+  expect(initial).toBe(1);
+  expect(pages).toBe(initial);
 });
 
 for (const gif of [false, true]) {

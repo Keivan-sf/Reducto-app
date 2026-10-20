@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mergeMessages } from '../src/lib/messages';
+import { mergeMessages, replySnippet } from '../src/lib/messages';
 import type { Message } from '../src/api/types';
 function message(id: string, createdAt: string): Message {
   return {
@@ -28,4 +28,14 @@ test('history, realtime delivery, and HTTP send responses merge without duplicat
   );
   assert.equal(result[1].reactions?.length, 1);
   assert.equal(mergeMessages(result, [{ ...newest }])[1].reactions?.length, 1);
+});
+
+test('reply snippets stay short, normalize whitespace, and label all attachment types', () => {
+  const original = message('a', '2026-10-20T00:00:00Z');
+  assert.equal(replySnippet({ ...original, text: 'Hello\n world' }), 'Hello world');
+  assert.equal(replySnippet({ ...original, text: '😀'.repeat(21) }), `${'😀'.repeat(20)}…`);
+  for (const type of ['image', 'video', 'gif', 'music', 'audio', 'document'] as const) {
+    const attachment = type === 'gif' ? { type, gifId: 'gif' } : { type, mediaId: 'media' };
+    assert.equal(replySnippet({ ...original, text: 'A caption', attachment }), type);
+  }
 });
