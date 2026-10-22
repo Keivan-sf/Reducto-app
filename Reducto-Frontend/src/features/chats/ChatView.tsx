@@ -12,6 +12,7 @@ import {
   View,
   type ViewToken,
   type GestureResponderEvent,
+  type ScrollViewProps,
 } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -59,6 +60,9 @@ import { useVideos, videoKey, gifFileKey, voiceFileKey } from '../../context/Vid
 import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
 import { MessageMenu, type MessageMenuAction } from './MessageMenu';
+import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+
+const renderChatHistoryScroll = (props: ScrollViewProps) => <ChatHistoryScrollView {...props} />;
 
 export default function ChatView({ id }: { id?: string }) {
   const { session } = useSession();
@@ -588,6 +592,7 @@ export default function ChatView({ id }: { id?: string }) {
       )}
       <FlatList
         ref={list}
+        renderScrollComponent={renderChatHistoryScroll}
         testID="chat-history"
         scrollEnabled={!seekingVoice}
         style={{ flex: 1 }}

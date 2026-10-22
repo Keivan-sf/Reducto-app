@@ -919,6 +919,91 @@ test('reopening a cached conversation does not request its history again', async
   expect(pages).toBe(initial);
 });
 
+test('chat scrollbar overlays history without a gutter and supports dragging', async ({ page }) => {
+  await mockApi(
+    page,
+    Array.from({ length: 60 }, (_, index) => ({
+      ...first,
+      id: `scroll-message-${index}`,
+      text: `Message ${index}`,
+      createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+    })),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const history = page.getByTestId('chat-history');
+  const thumb = page.getByRole('scrollbar', { name: 'Chat scrollbar' });
+  await expect(thumb).toBeVisible();
+  await expect
+    .poll(() =>
+      history.evaluate((element: HTMLElement) => element.offsetWidth - element.clientWidth),
+    )
+    .toBe(0);
+  const before = await history.evaluate((element) => element.scrollTop);
+  const bounds = (await thumb.boundingBox())!;
+  const historyBounds = (await history.boundingBox())!;
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(historyBounds.x + historyBounds.width);
+  expect(bounds.width).toBe(6);
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  for (const distance of [20, 40, 60, 80, 100]) {
+    await page.mouse.move(bounds.x - 40, bounds.y + bounds.height / 2 - distance);
+    await expect
+      .poll(async () => {
+        const current = (await thumb.boundingBox())!;
+        return Math.abs(current.y - (bounds.y - distance));
+      })
+      .toBeLessThan(1.5);
+    expect((await thumb.boundingBox())!.height).toBeCloseTo(bounds.height, 1);
+  }
+  await page.mouse.up();
+  await expect
+    .poll(() => history.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(before + 10);
+  await thumb.press('End');
+  await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
+test('chat scrollbar remains visible but disabled during voice seeking', async ({ page }) => {
+  const messages = Array.from({ length: 40 }, (_, index) => ({
+    ...first,
+    id: `older-scroll-${index}`,
+    text: `Older message ${index}`,
+    createdAt: new Date(Date.parse(first.createdAt) - (index + 1) * 1000).toISOString(),
+  }));
+  await mockApi(page, [
+    ...messages,
+    { ...first, text: null, attachment: { type: 'voice', mediaId: 'scroll-voice' } },
+  ]);
+  await page.route('**/api/conversations/*/attachments/scroll-voice', (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/voice.ogg'),
+      contentType: 'audio/ogg',
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const thumb = page.getByRole('scrollbar', { name: 'Chat scrollbar' });
+  const progress = page.getByRole('slider', { name: 'Voice message progress' });
+  await expect(thumb).toBeVisible();
+  await expect(progress).toBeVisible();
+  const bounds = (await progress.boundingBox())!;
+  const history = page.getByTestId('chat-history');
+  const before = await history.evaluate((element) => element.scrollTop);
+  await page.mouse.move(bounds.x + 20, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width * 0.8, bounds.y - 70);
+  await expect(thumb).toBeVisible();
+  await expect(thumb).toHaveAttribute('aria-disabled', 'true');
+  await expect(thumb).toHaveCSS('opacity', '0.5');
+  await thumb.dispatchEvent('keydown', { key: 'ArrowUp', bubbles: true });
+  expect(await history.evaluate((element) => element.scrollTop)).toBe(before);
+  await page.mouse.up();
+  await expect(thumb).toBeVisible();
+  await expect(thumb).toHaveAttribute('aria-disabled', 'false');
+  await expect(thumb).toHaveCSS('opacity', '1');
+});
+
 for (const kind of ['gif', 'voice', 'image', 'video'] as const) {
   test(`cached ${kind} media and metadata survive repeated chat remounts`, async ({
     page,
