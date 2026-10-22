@@ -1,2 +1,19 @@
+import { forwardRef } from 'react';
+import { ScrollView } from 'react-native';
+import type { ChatHistoryScrollProps } from './ChatHistoryScrollView.types';
+
 // Native scroll indicators already overlay their content without reserving width.
-export { ScrollView as ChatHistoryScrollView } from 'react-native';
+export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollProps>(
+  function ChatHistoryScrollView({ onUserScroll, ...props }, ref) {
+    return (
+      <ScrollView
+        {...props}
+        ref={ref}
+        onScrollBeginDrag={(event) => {
+          onUserScroll?.();
+          props.onScrollBeginDrag?.(event);
+        }}
+      />
+    );
+  },
+);

@@ -9,10 +9,18 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 import { io } from 'socket.io-client';
-import type { Conversation, Emoji, Member, Message, ProfileUpdatedEvent } from '../api/types';
+import type {
+  Conversation,
+  Emoji,
+  Member,
+  Message,
+  ProfileUpdatedEvent,
+  SeenState,
+} from '../api/types';
 import { api, useSession } from './SessionContext';
 import { MessageCache } from '../api/message-cache';
 import { useProfiles } from './ProfilesContext';
+import { ReadState } from '../api/read-state';
 
 interface ChatsState {
   conversations: Conversation[];
@@ -27,9 +35,18 @@ interface ChatsState {
   loadMessages: (id: string, older?: boolean, force?: boolean) => Promise<void>;
   messageCache: MessageCache;
   hasOlder: (id: string) => boolean;
+  hasNewer: (id: string) => boolean;
   acceptMessage: (message: Message) => void;
   activeId: string | null;
   activate: (id: string | null) => void;
+  readVisible: (
+    id: string,
+    visible: Message[],
+    window: Message[],
+    hasBefore: boolean,
+    hasAfter: boolean,
+  ) => void;
+  getReadState: (id: string) => SeenState | undefined;
 }
 const Context = createContext<ChatsState>(null!);
 export function ChatsProvider({ children }: PropsWithChildren) {
@@ -46,12 +63,27 @@ export function ChatsProvider({ children }: PropsWithChildren) {
   const [error, setError] = useState('');
   const activeRef = useRef<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [readState] = useState(() => {
+    const owner = api.getSession()!;
+    return new ReadState(async (id, messageId, signal) => {
+      const current = api.getSession();
+      if (!current || current.user.id !== owner.user.id || current.serverUrl !== owner.serverUrl)
+        throw new Error('Your session changed.');
+      return api.request<SeenState>(`/api/conversations/${encodeURIComponent(id)}/seen`, {
+        method: 'PUT',
+        body: JSON.stringify({ messageId }),
+        signal,
+      });
+    }, setUnread);
+  });
+  useEffect(() => () => readState.dispose(), [readState]);
   const [messageCache] = useState(
     () =>
       new MessageCache(
         (path) => api.get(path),
         (id, history) => setMessages((current) => ({ ...current, [id]: history })),
         (history) => {
+          for (const message of history) readState.remember(message.conversationId, [message]);
           void directory.getMany(
             history.flatMap((message) => [message.senderId, message.forwardedFrom?.senderId ?? '']),
           );
@@ -66,15 +98,47 @@ export function ChatsProvider({ children }: PropsWithChildren) {
   const activate = useCallback((id: string | null) => {
     activeRef.current = id;
     setActiveId(id);
-    if (id) setUnread((current) => ({ ...current, [id]: 0 }));
   }, []);
   const acceptMessage = useCallback(
-    (message: Message) => messageCache.accept(message),
-    [messageCache],
+    (message: Message) => {
+      readState.created(message);
+      messageCache.accept(message);
+    },
+    [messageCache, readState],
   );
+  const readVisible = useCallback(
+    (id: string, visible: Message[], window: Message[], hasBefore: boolean, hasAfter: boolean) => {
+      if (activeRef.current === id && AppState.currentState === 'active')
+        readState.view(id, visible, window, hasBefore, hasAfter);
+    },
+    [readState],
+  );
+  const getReadState = useCallback((id: string) => readState.peek(id), [readState]);
+  const conversationFlight = useRef<Promise<Conversation[]> | null>(null);
+  const fetchConversations = useCallback(() => {
+    if (conversationFlight.current) return conversationFlight.current;
+    const version = readState.version();
+    const task = api
+      .get<{ conversations: Conversation[] }>('/api/conversations')
+      .then(({ conversations: chats }) => {
+        readState.sync(chats, version);
+        setConversations(chats);
+        return chats;
+      })
+      .finally(() => {
+        conversationFlight.current = null;
+      });
+    conversationFlight.current = task;
+    return task;
+  }, [readState]);
   const loadMessages = useCallback(
-    (id: string, older = false, force = false) => messageCache.page(id, older, force),
-    [messageCache],
+    async (id: string, older = false, force = false) => {
+      if (!readState.peek(id)) await fetchConversations();
+      if (older) await messageCache.extend(id, true);
+      else if (force && messageCache.isOpen(id)) await messageCache.refresh(id);
+      else await messageCache.open(id, readState.peek(id)?.lastSeenMessageId ?? null);
+    },
+    [messageCache, readState, fetchConversations],
   );
   const refresh = useCallback(
     (queue = false) => {
@@ -86,11 +150,8 @@ export function ChatsProvider({ children }: PropsWithChildren) {
         do {
           refreshQueued.current = false;
           const sequence = ++refreshSequence.current;
-          const { conversations: chats } = await api.get<{ conversations: Conversation[] }>(
-            '/api/conversations',
-          );
+          const chats = await fetchConversations();
           if (sequence !== refreshSequence.current) return;
-          setConversations(chats);
           const allowed = new Set(chats.map((chat) => chat.id));
           knownChats.current = allowed;
           messageCache.prune(allowed);
@@ -100,10 +161,9 @@ export function ChatsProvider({ children }: PropsWithChildren) {
           if (activeRef.current && !allowed.has(activeRef.current)) activate(null);
           const outcomes = await Promise.allSettled(
             chats.map(async (chat) => {
-              const [, people] = await Promise.all([
-                loadMessages(chat.id, false, true),
-                api.get<{ members: Member[] }>(`/api/conversations/${chat.id}/members`),
-              ]);
+              const people = await api.get<{ members: Member[] }>(
+                `/api/conversations/${chat.id}/members`,
+              );
               return { id: chat.id, people };
             }),
           );
@@ -116,6 +176,9 @@ export function ChatsProvider({ children }: PropsWithChildren) {
               setMembers((current) => ({ ...current, [id]: people.members }));
             } else failed = true;
           }
+          const active = activeRef.current;
+          if (active && allowed.has(active) && messageCache.isOpen(active))
+            await messageCache.refresh(active);
           lastRefreshAt.current = Date.now();
           setError(failed ? 'Some conversations could not be synced. Refresh to try again.' : '');
         } while (refreshQueued.current);
@@ -125,12 +188,17 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       refreshFlight.current = task;
       return task;
     },
-    [activate, directory, messageCache, loadMessages],
+    [activate, directory, messageCache, fetchConversations],
   );
   useEffect(() => {
     if (!token || !userId) return;
     let alive = true;
     let connectedOnce = false;
+    let readRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const syncReads = () => {
+      if (alive && AppState.currentState === 'active') void fetchConversations().catch(() => {});
+    };
+    const readPoll = setInterval(syncReads, 10000);
     const report = (err: Error) => {
       if (alive) setError(err.message);
     };
@@ -180,12 +248,8 @@ export function ChatsProvider({ children }: PropsWithChildren) {
     });
     socket.on('message.created', ({ message }: { message: Message }) => {
       acceptMessage(message);
-      if (message.senderId !== userId && activeRef.current !== message.conversationId) {
-        setUnread((current) => ({
-          ...current,
-          [message.conversationId]: (current[message.conversationId] ?? 0) + 1,
-        }));
-      }
+      clearTimeout(readRefreshTimer);
+      readRefreshTimer = setTimeout(syncReads, 500);
       if (!knownChats.current.has(message.conversationId)) sync();
     });
     socket.on(
@@ -216,8 +280,10 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       alive = false;
       socket.disconnect();
       subscription.remove();
+      clearTimeout(readRefreshTimer);
+      clearInterval(readPoll);
     };
-  }, [token, userId, acceptMessage, refresh, directory, messageCache]);
+  }, [token, userId, acceptMessage, refresh, directory, messageCache, fetchConversations]);
   return (
     <Context.Provider
       value={{
@@ -232,10 +298,13 @@ export function ChatsProvider({ children }: PropsWithChildren) {
         refresh,
         loadMessages,
         hasOlder: (id) => messageCache.hasOlder(id),
+        hasNewer: (id) => messageCache.hasNewer(id),
         messageCache,
         acceptMessage,
         activeId,
         activate,
+        readVisible,
+        getReadState,
       }}
     >
       {children}

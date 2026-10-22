@@ -366,6 +366,8 @@ async function mockApi(
           { userId: 'friend', conversationId: chat.id, role: 'member' },
         ],
       };
+    else if (path.endsWith('/seen') && request.method() === 'PUT')
+      body = { lastSeenMessageId: request.postDataJSON().messageId, unreadCount: 0 };
     else if (path.endsWith('/messages') && request.method() === 'POST') {
       const message = {
         ...first,
@@ -376,6 +378,29 @@ async function mockApi(
       };
       messages.unshift(message);
       body = { message };
+    } else if (path.endsWith('/messages/first')) {
+      const ordered = [...messages].sort((a, b) => {
+        const left = a as typeof first;
+        const right = b as typeof first;
+        return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+      });
+      body = { message: ordered[0] ?? null };
+    } else if (/\/messages\/[^/]+\/around$/.test(path)) {
+      const id = decodeURIComponent(path.split('/').at(-2)!);
+      const ordered = [...messages].sort((a, b) =>
+        (a as typeof first).createdAt.localeCompare((b as typeof first).createdAt),
+      );
+      const index = ordered.findIndex((message) => (message as typeof first).id === id);
+      const params = new URL(request.url()).searchParams;
+      const before = Number(params.get('before') ?? 50);
+      const after = Number(params.get('after') ?? 50);
+      body = {
+        message: ordered[index],
+        before: ordered.slice(Math.max(0, index - before), index),
+        after: ordered.slice(index + 1, index + 1 + after),
+        hasMoreBefore: index > before,
+        hasMoreAfter: ordered.length - index - 1 > after,
+      };
     } else if (path.endsWith('/messages')) body = { messages, nextCursor: null };
     else if (path.endsWith('/profile')) body = { user: { ...user, ...request.postDataJSON() } };
     else if (path.endsWith('/sign-out')) return route.fulfill({ status: 204 });
@@ -784,8 +809,10 @@ test('reply previews load old targets once and jump through cached around window
     return route.fulfill({ json: { message: target } });
   });
   await page.route('**/messages/*/around?*', (route) => {
-    around++;
     const url = new URL(route.request().url());
+    if (![target.id, before[0].id, after.at(-1)!.id].includes(url.pathname.split('/').at(-2)!))
+      return route.fallback();
+    around++;
     if (url.searchParams.get('before') === '0')
       return route.fulfill({
         json: {
@@ -838,20 +865,19 @@ test('reply previews load old targets once and jump through cached around window
   const original = page.getByTestId(`message-${target.id}`);
   await expect(original).toBeInViewport({ ratio: 0.7 });
   await expect(original).toHaveCSS('background-color', 'rgb(255, 240, 179)');
-  await expect(
-    page.getByRole('button', { name: 'Load newer messages', exact: true }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Load newer messages', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Load newer messages', exact: true })).toHaveCount(
-    0,
-  );
-  await page
-    .getByRole('button', { name: 'Load earlier messages', exact: true })
-    .scrollIntoViewIfNeeded();
-  await page.getByRole('button', { name: 'Load earlier messages', exact: true }).click();
-  await expect(
-    page.getByRole('button', { name: 'Load earlier messages', exact: true }),
-  ).toHaveCount(0);
+  await page.waitForTimeout(450);
+  const list = page.getByTestId('chat-history');
+  await list.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect.poll(() => around).toBe(2);
+  await page.waitForTimeout(200);
+  await list.dispatchEvent('wheel', { deltaY: 500, bubbles: true });
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(() => around).toBe(3);
+  await expect(page.getByRole('button', { name: /Load (earlier|newer) messages/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to latest messages', exact: true }).click();
   await expect(previews.first()).toBeVisible();
   await previews.first().click();
@@ -898,10 +924,13 @@ test('reopening a cached conversation does not request its history again', async
   await mockApi(page);
   await mockRealtime(page);
   let pages = 0;
-  await page.route(/\/api\/conversations\/[^/]+\/messages\?/, (route) => {
-    pages++;
-    return route.fulfill({ json: { messages: [first], nextCursor: null } });
-  });
+  await page.route(
+    /\/api\/conversations\/[^/]+\/messages(?:\/first|\/[^/]+\/around)?(?:\?|$)/,
+    (route) => {
+      pages++;
+      return route.fallback();
+    },
+  );
   await signIn(page);
   await expect(page.getByText('Connected', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
@@ -915,9 +944,345 @@ test('reopening a cached conversation does not request its history again', async
     await page.getByRole('button', { name: 'Open Weekend plans' }).click();
     await expect(page.getByTestId(`message-${first.id}`)).toBeVisible();
   }
-  expect(initial).toBe(1);
+  expect(initial).toBe(2);
   expect(pages).toBe(initial);
 });
+
+test('API unread counts decrease as visible messages are read, persist seen positions, and sync another client without notifications', async ({
+  page,
+}, testInfo) => {
+  await page.clock.install();
+  const history = Array.from({ length: 11 }, (_, index) => ({
+    ...first,
+    id: `unread-${index}`,
+    text: `Unread message ${index}\n${'Long message line\n'.repeat(12)}`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history);
+  let serverState = { lastSeenMessageId: history[0].id, unreadCount: 10 };
+  let listCalls = 0;
+  const seen: string[] = [];
+  let releaseSeen!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseSeen = resolve;
+  });
+  await page.route('**:3001/api/conversations', (route) => {
+    listCalls++;
+    return route.fulfill({ json: { conversations: [{ ...chat, ...serverState }] } });
+  });
+  await page.route('**/api/conversations/*/seen', async (route) => {
+    expect(route.request().method()).toBe('PUT');
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    const id = route.request().postDataJSON().messageId;
+    seen.push(id);
+    const index = history.findIndex((message) => message.id === id);
+    await gate;
+    if (index > history.findIndex((message) => message.id === serverState.lastSeenMessageId))
+      serverState = { lastSeenMessageId: id, unreadCount: 10 - index };
+    return route.fulfill({ json: serverState });
+  });
+  try {
+    await signIn(page);
+    const badge = page.getByTestId(`unread-${chat.id}`);
+    await expect(badge).toHaveText('10');
+    expect(seen).toEqual([]); // Fetching list/history is not seeing messages.
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await expect(page.getByTestId(`message-${history[0].id}`)).toBeInViewport();
+    await page.waitForTimeout(450);
+    await page.getByTestId('chat-history').evaluate((element) => {
+      element.scrollTop = Math.max(0, element.scrollTop - 300);
+    });
+    await expect.poll(() => seen.length).toBeGreaterThan(0);
+    const index = history.findIndex((message) => message.id === seen.at(-1));
+    expect(index).toBeGreaterThan(0);
+    expect(index).toBeLessThan(10); // Opening starts by the saved watermark.
+    if (testInfo.project.name === 'mobile')
+      await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+    await expect(badge).toHaveText(String(10 - index)); // Before PUT completes.
+    releaseSeen();
+    await expect.poll(() => serverState.unreadCount).toBe(10 - index);
+    const before = listCalls;
+    serverState = { lastSeenMessageId: history[9].id, unreadCount: 1 };
+    await page.clock.fastForward(10000);
+    await expect.poll(() => listCalls).toBeGreaterThan(before);
+    await expect(badge).toHaveText('1');
+  } finally {
+    releaseSeen();
+  }
+});
+
+test('unread opening resolves an older seen position through the around API without clearing the whole badge', async ({
+  page,
+}, testInfo) => {
+  const history = Array.from({ length: 31 }, (_, index) => ({
+    ...first,
+    id: `old-seen-${index}`,
+    text: `Message ${index}\n${'Text line\n'.repeat(12)}`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history.slice(26));
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: { conversations: [{ ...chat, lastSeenMessageId: history[0].id, unreadCount: 30 }] },
+    }),
+  );
+  let aroundCalls = 0;
+  let seenIndex = 0;
+  await page.route(`**/api/conversations/*/messages/${history[0].id}/around*`, (route) => {
+    aroundCalls++;
+    return route.fulfill({
+      json: {
+        message: history[0],
+        before: [],
+        after: history.slice(1, 9),
+        hasMoreBefore: false,
+        hasMoreAfter: true,
+      },
+    });
+  });
+  await page.route('**/api/conversations/*/seen', (route) => {
+    seenIndex = history.findIndex(
+      (message) => message.id === route.request().postDataJSON().messageId,
+    );
+    return route.fulfill({
+      json: { lastSeenMessageId: history[seenIndex].id, unreadCount: 30 - seenIndex },
+    });
+  });
+  await signIn(page);
+  await expect(page.getByTestId(`unread-${chat.id}`)).toHaveText('30');
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByTestId(`message-${history[0].id}`)).toBeInViewport();
+  await page.waitForTimeout(450);
+  await page.getByTestId('chat-history').evaluate((element) => {
+    element.scrollTop = Math.max(0, element.scrollTop - 300);
+  });
+  await expect.poll(() => seenIndex).toBeGreaterThan(0);
+  expect(seenIndex).toBeLessThan(9);
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await expect(page.getByTestId(`unread-${chat.id}`)).toHaveText(String(30 - seenIndex));
+  expect(aroundCalls).toBe(1);
+});
+
+test('history opens around last seen without startup tail requests and scrolling loads both edges automatically', async ({
+  page,
+}) => {
+  const history = Array.from({ length: 401 }, (_, index) => ({
+    ...first,
+    id: `batch-${index}`,
+    text: `History message ${index}\nSecond line`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, []);
+  let latestRequests = 0;
+  const batches: { id: string; before: number; after: number }[] = [];
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [
+          { ...chat, lastSeenMessageId: 'batch-100', unreadCount: 300 },
+          {
+            ...chat,
+            id: 'unopened-chat',
+            name: 'Unopened chat',
+            lastSeenMessageId: 'other-seen',
+            unreadCount: 50,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(/\/api\/conversations\/[^/]+\/messages\?/, (route) => {
+    latestRequests++;
+    return route.fulfill({
+      status: 500,
+      json: { error: 'No latest-page startup requests expected' },
+    });
+  });
+  await page.route('**/api/conversations/*/messages/*/around?*', (route) => {
+    const url = new URL(route.request().url());
+    const id = url.pathname.split('/').at(-2)!;
+    const index = history.findIndex((message) => message.id === id);
+    const before = Number(url.searchParams.get('before'));
+    const after = Number(url.searchParams.get('after'));
+    batches.push({ id, before, after });
+    return route.fulfill({
+      json: {
+        message: history[index],
+        before: history.slice(Math.max(0, index - before), index),
+        after: history.slice(index + 1, index + after + 1),
+        hasMoreBefore: index > before,
+        hasMoreAfter: history.length - index - 1 > after,
+      },
+    });
+  });
+  await signIn(page);
+  expect(batches).toEqual([]);
+  expect(latestRequests).toBe(0);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByTestId('message-batch-100')).toBeInViewport();
+  expect(batches[0]).toEqual({ id: 'batch-100', before: 50, after: 50 });
+  const list = page.getByTestId('chat-history');
+  await page.waitForTimeout(500);
+  for (const edge of [150, 200, 250, 300, 350]) {
+    await list.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await expect
+      .poll(() =>
+        batches.some(
+          (batch) => batch.id === `batch-${edge}` && batch.before === 0 && batch.after === 50,
+        ),
+      )
+      .toBe(true);
+    await page.waitForTimeout(200);
+  }
+  // Returning to the older edge loads another batch without a button.
+  await list.dispatchEvent('wheel', { deltaY: 500, bubbles: true });
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect
+    .poll(() =>
+      batches.some((batch) => batch.id === 'batch-50' && batch.before === 50 && batch.after === 0),
+    )
+    .toBe(true);
+  expect(latestRequests).toBe(0);
+  await expect(page.getByRole('button', { name: /Load (earlier|newer) messages/ })).toHaveCount(0);
+});
+
+test('a chat without a last-seen message opens at its first message and pages forward', async ({
+  page,
+}) => {
+  const history = Array.from({ length: 201 }, (_, index) => ({
+    ...first,
+    id: `unseen-${index}`,
+    text: `Unread from the beginning ${index}\nSecond line`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [{ ...chat, lastSeenMessageId: null, unreadCount: history.length }],
+      },
+    }),
+  );
+  let firstCalls = 0;
+  let latestCalls = 0;
+  const batches: { id: string; before: number; after: number }[] = [];
+  await page.route('**/api/conversations/*/messages/first', (route) => {
+    firstCalls++;
+    return route.fulfill({ json: { message: history[0] } });
+  });
+  await page.route(/\/api\/conversations\/[^/]+\/messages\?/, (route) => {
+    latestCalls++;
+    return route.fulfill({
+      status: 500,
+      json: { error: 'Unseen history must start at the beginning' },
+    });
+  });
+  await page.route('**/api/conversations/*/messages/*/around?*', (route) => {
+    const url = new URL(route.request().url());
+    const id = url.pathname.split('/').at(-2)!;
+    batches.push({
+      id,
+      before: Number(url.searchParams.get('before')),
+      after: Number(url.searchParams.get('after')),
+    });
+    return route.fallback();
+  });
+  await signIn(page);
+  expect(firstCalls).toBe(0);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByTestId('message-unseen-0')).toBeInViewport();
+  expect(batches[0]).toEqual({ id: 'unseen-0', before: 50, after: 50 });
+  const list = page.getByTestId('chat-history');
+  for (const edge of [50, 100, 150]) {
+    await list.dispatchEvent('wheel', { deltaY: 500, bubbles: true });
+    await list.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await expect
+      .poll(() =>
+        batches.some(
+          (batch) => batch.id === `unseen-${edge}` && batch.before === 0 && batch.after === 50,
+        ),
+      )
+      .toBe(true);
+    await page.waitForTimeout(200);
+  }
+  if (await page.getByRole('button', { name: 'Back to chats', exact: true }).isVisible())
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  expect(firstCalls).toBe(1);
+  expect(latestCalls).toBe(0);
+});
+
+for (const anchored of [true, false]) {
+  test(`scrolling immediately to older history loads consecutive batches (${anchored ? 'last seen' : 'last seen at tail'})`, async ({
+    page,
+  }) => {
+    const history = Array.from({ length: 301 }, (_, index) => ({
+      ...first,
+      id: `older-${index}`,
+      text: `Older message ${index}\nSecond line`,
+      createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+    }));
+    await mockApi(page, history);
+    await page.route('**:3001/api/conversations', (route) =>
+      route.fulfill({
+        json: {
+          conversations: [
+            {
+              ...chat,
+              lastSeenMessageId: anchored ? 'older-250' : 'older-300',
+              unreadCount: anchored ? 50 : 0,
+            },
+          ],
+        },
+      }),
+    );
+    await page.route(/\/api\/conversations\/[^/]+\/messages\?/, (route) =>
+      route.fulfill({
+        json: {
+          messages: history.slice(-50).reverse(),
+          nextCursor: 'older-251',
+        },
+      }),
+    );
+    const batches: string[] = [];
+    await page.route('**/api/conversations/*/messages/*/around?*', (route) => {
+      const url = new URL(route.request().url());
+      const id = url.pathname.split('/').at(-2)!;
+      const index = history.findIndex((message) => message.id === id);
+      const before = Number(url.searchParams.get('before'));
+      const after = Number(url.searchParams.get('after'));
+      if (!after) batches.push(id);
+      return route.fulfill({
+        json: {
+          message: history[index],
+          before: history.slice(Math.max(0, index - before), index),
+          after: history.slice(index + 1, index + after + 1),
+          hasMoreBefore: index > before,
+          hasMoreAfter: history.length - index - 1 > after,
+        },
+      });
+    });
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await expect(page.getByTestId(`message-older-${anchored ? 250 : 300}`)).toBeInViewport();
+    const list = page.getByTestId('chat-history');
+    for (const edge of anchored ? [200, 150, 100, 50] : [250, 200, 150, 100, 50]) {
+      await list.dispatchEvent('wheel', { deltaY: -500, bubbles: true });
+      await list.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect.poll(() => batches).toContain(`older-${edge}`);
+      await page.waitForTimeout(200);
+    }
+  });
+}
 
 test('chat scrollbar overlays history without a gutter and supports dragging', async ({ page }) => {
   await mockApi(

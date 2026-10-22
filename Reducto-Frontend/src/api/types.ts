@@ -29,11 +29,18 @@ export interface Conversation {
   name: string | null;
   createdAt: string;
   inviteLink?: string;
+  lastSeenMessageId?: string | null;
+  unreadCount?: number;
+}
+export interface SeenState {
+  lastSeenMessageId: string | null;
+  unreadCount: number;
 }
 export interface Member {
   userId: string;
   conversationId: string;
   role: 'owner' | 'admin' | 'member';
+  lastSeenMessageId?: string | null;
 }
 export const EMOJIS = ['👍', '👎', '❤️', '😂', '😮', '😢', '🔥', '🎉'] as const;
 export type Emoji = (typeof EMOJIS)[number];

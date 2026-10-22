@@ -180,10 +180,20 @@ export default function ChatList() {
                 <View style={s.rowLine}>
                   <Text numberOfLines={1} style={[s.preview, selected && { color: '#E6F1FE' }]}>
                     {last?.senderId === session!.user.id ? 'You: ' : ''}
-                    {preview(last)}
+                    {last
+                      ? preview(last)
+                      : unread[chat.id] > 0
+                        ? `${unread[chat.id]} unread messages`
+                        : chat.lastSeenMessageId
+                          ? 'Open conversation'
+                          : preview(last)}
                   </Text>
                   {!!unread[chat.id] && (
-                    <View style={[s.badge, selected && { backgroundColor: 'white' }]}>
+                    <View
+                      testID={`unread-${chat.id}`}
+                      accessibilityLabel={`${unread[chat.id]} unread messages`}
+                      style={[s.badge, selected && { backgroundColor: 'white' }]}
+                    >
                       <Text
                         style={{
                           color: selected ? colors.blue : 'white',

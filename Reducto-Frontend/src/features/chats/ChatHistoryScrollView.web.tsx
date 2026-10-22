@@ -1,5 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
-import { ScrollView, View, type ScrollViewProps } from 'react-native';
+import { ScrollView, View } from 'react-native';
+
+import type { ChatHistoryScrollProps } from './ChatHistoryScrollView.types';
 
 interface ThumbDrag {
   pointerId: number;
@@ -10,8 +12,8 @@ interface ThumbDrag {
 
 /** A transparent overlay for inverted chat history. Paint directly once per
  * animation frame so scrolling never waits for a React render. */
-export const ChatHistoryScrollView = forwardRef<ScrollView, ScrollViewProps>(
-  function ChatHistoryScrollView(props, ref) {
+export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollProps>(
+  function ChatHistoryScrollView({ onUserScroll, ...props }, ref) {
     const scroll = useRef<ScrollView>(null);
     const thumb = useRef<HTMLDivElement>(null);
     const drag = useRef<ThumbDrag | undefined>(undefined);
@@ -56,6 +58,19 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ScrollViewProps>(
         paint();
       });
     }, [paint]);
+    useEffect(() => {
+      const content = node();
+      if (!content || !onUserScroll) return;
+      // Web ScrollView does not emit onScrollBeginDrag for wheel/keyboard
+      // scrolling. User input must cancel pending automatic positioning too.
+      const interact = () => onUserScroll();
+      for (const event of ['wheel', 'pointerdown', 'keydown'])
+        content.addEventListener(event, interact, { passive: true });
+      return () => {
+        for (const event of ['wheel', 'pointerdown', 'keydown'])
+          content.removeEventListener(event, interact);
+      };
+    }, [onUserScroll]);
     useEffect(() => {
       const content = node();
       content?.addEventListener('scroll', schedulePaint, { passive: true });
@@ -121,6 +136,7 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ScrollViewProps>(
           onPointerDown={(event) => {
             if (!enabled || event.button !== 0 || drag.current) return;
             event.preventDefault();
+            onUserScroll?.();
             event.currentTarget.setPointerCapture(event.pointerId);
             const bounds = event.currentTarget.getBoundingClientRect();
             drag.current = {
@@ -164,6 +180,7 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ScrollViewProps>(
                           ? 0
                           : undefined;
             if (offset === undefined) return;
+            onUserScroll?.();
             event.preventDefault();
             content.scrollTop = Math.min(maximum, Math.max(0, offset));
           }}

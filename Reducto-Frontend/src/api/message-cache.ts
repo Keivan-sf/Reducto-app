@@ -3,6 +3,7 @@ import { mergeMessages } from '../lib/messages';
 
 /** One account/server session's history, reply targets, and jump windows. */
 export class MessageCache {
+  private bounds = new Map<string, { hasMoreBefore: boolean; hasMoreAfter: boolean }>();
   private histories = new Map<string, Message[]>();
   private entities = new Map<string, Map<string, Message>>();
   private cursors = new Map<string, string | null>();
@@ -41,13 +42,90 @@ export class MessageCache {
     return this.entities.get(id)?.get(messageId);
   }
   hasOlder(id: string) {
-    return !!this.cursors.get(id);
+    return this.bounds.get(id)?.hasMoreBefore ?? !!this.cursors.get(id);
+  }
+  hasNewer(id: string) {
+    return this.bounds.get(id)?.hasMoreAfter ?? false;
+  }
+  isOpen(id: string) {
+    return this.bounds.has(id);
+  }
+  history(id: string) {
+    return this.histories.get(id) ?? [];
   }
   accept(message: Message) {
     this.remember([message]);
+    // A live message must not create a hole after an older, contiguous window.
+    if (this.hasNewer(message.conversationId)) return;
     const history = mergeMessages(this.histories.get(message.conversationId) ?? [], [message]);
     this.histories.set(message.conversationId, history);
     this.publish(message.conversationId, history);
+  }
+  async open(id: string, lastSeenMessageId: string | null, force = false) {
+    if (
+      !force &&
+      this.isOpen(id) &&
+      (lastSeenMessageId
+        ? this.history(id).some((message) => message.id === lastSeenMessageId)
+        : !this.hasOlder(id))
+    )
+      return;
+    await this.request(id, JSON.stringify(['open', id, lastSeenMessageId]), async () => {
+      const generation = this.generations.get(id);
+      let anchor = lastSeenMessageId;
+      if (!anchor) {
+        const { message } = await this.get<{ message: Message | null }>(
+          `/api/conversations/${id}/messages/first`,
+        );
+        if (this.generations.get(id) !== generation) return;
+        if (!message) {
+          this.histories.set(id, []);
+          this.bounds.set(id, { hasMoreBefore: false, hasMoreAfter: false });
+          this.publish(id, []);
+          return;
+        }
+        this.remember([message]);
+        anchor = message.id;
+      }
+      const page = await this.around(id, anchor, 50, 50, force);
+      if (this.generations.get(id) !== generation) return;
+      const history = mergeMessages([], [...page.before, page.message, ...page.after]);
+      this.histories.set(id, history);
+      this.bounds.set(id, { hasMoreBefore: page.hasMoreBefore, hasMoreAfter: page.hasMoreAfter });
+      this.publish(id, history);
+    });
+  }
+  async extend(id: string, older: boolean, force = false) {
+    if (!this.isOpen(id) || (!force && !(older ? this.hasOlder(id) : this.hasNewer(id)))) return;
+    const edge = older ? this.history(id)[0] : this.history(id).at(-1);
+    if (!edge) return;
+    await this.request(id, JSON.stringify(['extend', id, edge.id, older]), async () => {
+      const generation = this.generations.get(id);
+      const page = await this.around(id, edge.id, older ? 50 : 0, older ? 0 : 50, force);
+      if (this.generations.get(id) !== generation) return;
+      // A reply jump or explicit latest jump may have replaced this window.
+      if (!this.history(id).some((message) => message.id === edge.id)) return;
+      const history = mergeMessages(this.history(id), [
+        ...page.before,
+        page.message,
+        ...page.after,
+      ]);
+      const previous = this.bounds.get(id)!;
+      this.bounds.set(id, {
+        hasMoreBefore: older
+          ? page.hasMoreBefore && page.before.length > 0
+          : previous.hasMoreBefore,
+        hasMoreAfter: older ? previous.hasMoreAfter : page.hasMoreAfter && page.after.length > 0,
+      });
+      this.histories.set(id, history);
+      this.publish(id, history);
+    });
+  }
+  async refresh(id: string) {
+    if (this.isOpen(id) && !this.hasNewer(id)) {
+      if (!this.history(id).length) await this.open(id, null, true);
+      else await this.extend(id, false, true);
+    }
   }
   async page(id: string, older = false, force = false): Promise<void> {
     if (!older && !force && this.cursors.has(id)) return;
@@ -61,7 +139,7 @@ export class MessageCache {
         `/api/conversations/${id}/messages?limit=50${cursor ? `&before=${encodeURIComponent(cursor)}` : ''}`,
       );
       if (this.generations.get(id) !== generation) return;
-      const history = this.histories.get(id) ?? [];
+      const history = !older && this.hasNewer(id) ? [] : (this.histories.get(id) ?? []);
       const overlap = page.messages.some((message) =>
         history.some((entry) => entry.id === message.id),
       );
@@ -69,6 +147,7 @@ export class MessageCache {
         this.cursors.set(id, page.nextCursor);
       this.remember(page.messages);
       const merged = mergeMessages(history, page.messages);
+      this.bounds.set(id, { hasMoreBefore: !!this.cursors.get(id), hasMoreAfter: false });
       this.histories.set(id, merged);
       this.publish(id, merged);
     });
@@ -84,10 +163,16 @@ export class MessageCache {
     this.remember([result.message]);
     return result.message;
   }
-  async around(id: string, messageId: string, before = 50, after = 50): Promise<AroundMessages> {
+  async around(
+    id: string,
+    messageId: string,
+    before = 50,
+    after = 50,
+    force = false,
+  ): Promise<AroundMessages> {
     const key = JSON.stringify(['around', id, messageId, before, after]);
     const cached = this.windows.get(key);
-    if (cached) return cached.page;
+    if (cached && !force) return cached.page;
     const page = await this.request(id, key, () =>
       this.get<AroundMessages>(
         `/api/conversations/${id}/messages/${encodeURIComponent(messageId)}/around?before=${before}&after=${after}`,
@@ -125,6 +210,7 @@ export class MessageCache {
       this.histories.delete(id);
       this.entities.delete(id);
       this.cursors.delete(id);
+      this.bounds.delete(id);
     }
     for (const [key, window] of this.windows)
       if (!allowed.has(window.chatId)) this.windows.delete(key);

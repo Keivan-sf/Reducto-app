@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -14,7 +15,7 @@ import {
   type GestureResponderEvent,
   type ScrollViewProps,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
 import { api, useSession } from '../../context/SessionContext';
@@ -61,8 +62,10 @@ import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
 import { MessageMenu, type MessageMenuAction } from './MessageMenu';
 import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+import { comparePosition } from '../../api/read-state';
+import { captureHistoryAnchor } from '../../lib/history-anchor';
 
-const renderChatHistoryScroll = (props: ScrollViewProps) => <ChatHistoryScrollView {...props} />;
+const readViewabilityConfig = { minimumViewTime: 350, viewAreaCoveragePercentThreshold: 60 };
 
 export default function ChatView({ id }: { id?: string }) {
   const { session } = useSession();
@@ -76,8 +79,12 @@ export default function ChatView({ id }: { id?: string }) {
     acceptMessage,
     loadMessages,
     hasOlder,
+    hasNewer,
     messageCache,
+    readVisible,
+    getReadState,
   } = useChats();
+  const focused = useIsFocused();
   const chat = conversations.find((entry) => entry.id === id);
   const [jumpWindow, setJumpWindow] = useState<{
     messages: Message[];
@@ -85,13 +92,21 @@ export default function ChatView({ id }: { id?: string }) {
     hasMoreAfter: boolean;
   } | null>(null);
   const latest = messages[id ?? ''];
-  const history = useMemo(
-    () =>
-      jumpWindow
-        ? jumpWindow.messages.map((message) => messageCache.peek(id ?? '', message.id) ?? message)
-        : (latest ?? []),
-    [jumpWindow, latest, messageCache, id],
-  );
+  const history = useMemo(() => {
+    if (!jumpWindow) return latest ?? [];
+    const context = jumpWindow.messages.map(
+      (message) => messageCache.peek(id ?? '', message.id) ?? message,
+    );
+    const edge = context.at(-1);
+    // An initial unread window that reaches the live tail stays live as new
+    // messages arrive. Do not merge across a gap in an older context window.
+    if (!jumpWindow.hasMoreAfter && edge && latest?.some((message) => message.id === edge.id))
+      return mergeMessages(
+        context,
+        latest.filter((message) => comparePosition(message, edge) > 0),
+      );
+    return context;
+  }, [jumpWindow, latest, messageCache, id]);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
@@ -120,9 +135,50 @@ export default function ChatView({ id }: { id?: string }) {
   const mediaMetadata = useMediaMetadata();
   const [playingVideo, setPlayingVideo] = useState<string | null>(null);
   const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
+  const [openingHistory, setOpeningHistory] = useState(true);
+  const initialReadTarget = useRef<string | null>(null);
+  useEffect(() => {
+    const report = () => {
+      if (!id || openingHistory || !focused || details || gifs || playingVideo || actionsVisible)
+        return;
+      readVisible(
+        id,
+        history.filter((message) => visibleMessages.has(message.id)),
+        history,
+        jumpWindow?.hasMoreBefore ?? hasOlder(id),
+        jumpWindow?.hasMoreAfter ?? hasNewer(id),
+      );
+    };
+    report();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') report();
+    });
+    return () => subscription.remove();
+  }, [
+    id,
+    openingHistory,
+    focused,
+    details,
+    gifs,
+    playingVideo,
+    actionsVisible,
+    readVisible,
+    history,
+    visibleMessages,
+    jumpWindow,
+    hasOlder,
+    hasNewer,
+  ]);
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<Message>[] }) => {
       setVisibleMessages(new Set(viewableItems.map(({ item }) => item.id)));
+      if (
+        initialReadTarget.current &&
+        viewableItems.some(({ item }) => item.id === initialReadTarget.current)
+      ) {
+        initialReadTarget.current = null;
+        setOpeningHistory(false);
+      }
       const target = scrollTarget.current;
       if (target && viewableItems.some(({ item }) => item.id === target.id)) {
         scrollTarget.current = null;
@@ -133,7 +189,7 @@ export default function ChatView({ id }: { id?: string }) {
         highlightTimer.current = setTimeout(() => setHighlighted(null), 2500);
       }
     },
-    [setJumpTarget, setHighlighted],
+    [setJumpTarget, setHighlighted, setOpeningHistory],
   );
   const list = useRef<FlatList<Message>>(null);
   const onVoiceSeekingChange = useCallback((seeking: boolean) => {
@@ -142,6 +198,20 @@ export default function ChatView({ id }: { id?: string }) {
     if (Platform.OS !== 'web') list.current?.setNativeProps({ scrollEnabled: !seeking });
     setSeekingVoice(seeking);
   }, []);
+  const cancelPositioning = useCallback(() => {
+    if (!initialReadTarget.current && !scrollTarget.current) return;
+    initialReadTarget.current = null;
+    scrollTarget.current = null;
+    clearTimeout(scrollTimer.current);
+    setJumpTarget(null);
+    setOpeningHistory(false);
+  }, [setJumpTarget, setOpeningHistory]);
+  const renderChatHistoryScroll = useCallback(
+    (props: ScrollViewProps) => (
+      <ChatHistoryScrollView {...props} onUserScroll={cancelPositioning} />
+    ),
+    [cancelPositioning],
+  );
   const wide = useWindowDimensions().width >= 850;
   const peerId = id
     ? members[id]?.find((member) => member.userId !== session!.user.id)?.userId
@@ -149,10 +219,34 @@ export default function ChatView({ id }: { id?: string }) {
   const peer = chat?.type === 'private' && peerId ? profiles[peerId] : undefined;
   const title = chat ? conversationName(chat, peer) : '';
   useEffect(() => {
+    let alive = true;
     activate(id ?? null);
-    if (id) void loadMessages(id).catch((err) => setError(err.message));
-    return () => activate(null);
-  }, [id, activate, loadMessages]);
+    if (id)
+      void (async () => {
+        await loadMessages(id);
+        if (!alive) return;
+        const read = getReadState(id);
+        const window = messageCache.history(id);
+        const target =
+          window.find((message) => message.id === read?.lastSeenMessageId) ??
+          (read?.lastSeenMessageId ? window.at(-1) : window[0]);
+        if (!target) {
+          setOpeningHistory(false);
+          return;
+        }
+        initialReadTarget.current = target.id;
+        setJumpTarget(target.id);
+      })().catch((err) => {
+        if (alive) {
+          setOpeningHistory(false);
+          setError(err.message);
+        }
+      });
+    return () => {
+      alive = false;
+      activate(null);
+    };
+  }, [id, activate, loadMessages, getReadState, messageCache]);
   const shown = useMemo(
     () =>
       [...history]
@@ -183,6 +277,8 @@ export default function ChatView({ id }: { id?: string }) {
   );
   async function jumpToMessage(messageId: string) {
     if (!id) return;
+    initialReadTarget.current = null;
+    setOpeningHistory(false);
     const sequence = ++jumpSequence.current;
     setLoadingHistory(false);
     setJumping(true);
@@ -213,9 +309,11 @@ export default function ChatView({ id }: { id?: string }) {
       if (sequence === jumpSequence.current) setJumping(false);
     }
   }
-  function showLatest() {
-    jumpSequence.current++;
-    setJumping(false);
+  async function showLatest() {
+    initialReadTarget.current = null;
+    setOpeningHistory(false);
+    const sequence = ++jumpSequence.current;
+    setJumping(true);
     setLoadingHistory(false);
     setJumpWindow(null);
     setJumpTarget(null);
@@ -224,36 +322,99 @@ export default function ChatView({ id }: { id?: string }) {
     clearTimeout(highlightTimer.current);
     setHighlighted(null);
     setSearch(null);
-    requestAnimationFrame(() => list.current?.scrollToOffset({ offset: 0, animated: false }));
-  }
-  async function expandWindow(older: boolean) {
-    if (!id || !jumpWindow || loadingHistory) return;
-    const sequence = jumpSequence.current;
-    const edge = older ? jumpWindow.messages[0] : jumpWindow.messages.at(-1);
-    if (!edge) return;
-    setLoadingHistory(true);
     try {
-      const page = await messageCache.around(id, edge.id, older ? 50 : 0, older ? 0 : 50);
-      if (sequence !== jumpSequence.current) return;
-      setJumpWindow((current) =>
-        current
-          ? {
-              messages: mergeMessages(current.messages, [
-                ...page.before,
-                page.message,
-                ...page.after,
-              ]),
-              hasMoreBefore: older ? page.hasMoreBefore : current.hasMoreBefore,
-              hasMoreAfter: older ? current.hasMoreAfter : page.hasMoreAfter,
-            }
-          : null,
-      );
+      if (id && messageCache.hasNewer(id)) await messageCache.page(id, false, true);
+      if (sequence === jumpSequence.current)
+        requestAnimationFrame(() => list.current?.scrollToOffset({ offset: 0, animated: false }));
     } catch (err) {
       if (sequence === jumpSequence.current) setError((err as Error).message);
     } finally {
-      if (sequence === jumpSequence.current) setLoadingHistory(false);
+      if (sequence === jumpSequence.current) setJumping(false);
     }
   }
+  const edgeRequests = useRef(new Set<string>());
+  const edgeFailures = useRef(new Map<string, number>());
+  const expandWindow = useCallback(
+    async (older: boolean) => {
+      if (!id || openingHistory || jumping || jumpTarget || !focused || search !== null) return;
+      const more = jumpWindow
+        ? older
+          ? jumpWindow.hasMoreBefore
+          : jumpWindow.hasMoreAfter
+        : older
+          ? messageCache.hasOlder(id)
+          : messageCache.hasNewer(id);
+      const edge = older ? history[0] : history.at(-1);
+      if (!more || !edge) return;
+      const key = `${id}:${jumpWindow ? 'jump' : 'history'}:${edge.id}:${older}`;
+      if (edgeRequests.current.has(key) || Date.now() - (edgeFailures.current.get(key) ?? 0) < 3000)
+        return;
+      edgeRequests.current.add(key);
+      const restoreAnchor = captureHistoryAnchor(list.current, older);
+      const sequence = jumpSequence.current;
+      setLoadingHistory(true);
+      try {
+        if (jumpWindow) {
+          const page = await messageCache.around(id, edge.id, older ? 50 : 0, older ? 0 : 50);
+          if (sequence !== jumpSequence.current) return;
+          setJumpWindow((current) =>
+            current
+              ? {
+                  messages: mergeMessages(current.messages, [
+                    ...page.before,
+                    page.message,
+                    ...page.after,
+                  ]),
+                  hasMoreBefore: older
+                    ? page.hasMoreBefore && page.before.length > 0
+                    : current.hasMoreBefore,
+                  hasMoreAfter: older
+                    ? current.hasMoreAfter
+                    : page.hasMoreAfter && page.after.length > 0,
+                }
+              : null,
+          );
+        } else await messageCache.extend(id, older);
+        if (sequence === jumpSequence.current)
+          requestAnimationFrame(() => {
+            if (sequence === jumpSequence.current) restoreAnchor();
+          });
+      } catch (err) {
+        edgeFailures.current.set(key, Date.now());
+        if (sequence === jumpSequence.current) setError((err as Error).message);
+      } finally {
+        edgeRequests.current.delete(key);
+        if (sequence === jumpSequence.current) setLoadingHistory(edgeRequests.current.size > 0);
+      }
+    },
+    [
+      id,
+      openingHistory,
+      jumping,
+      jumpTarget,
+      focused,
+      search,
+      jumpWindow,
+      history,
+      messageCache,
+      setLoadingHistory,
+      setJumpWindow,
+      setError,
+    ],
+  );
+  const historyMetrics = useRef({ offset: 0, height: 0, viewport: 0 });
+  const loadVisibleEdges = useCallback(() => {
+    const { offset, height, viewport } = historyMetrics.current;
+    if (!height || !viewport) return;
+    const threshold = viewport * 0.5;
+    if (offset <= threshold) void expandWindow(false);
+    if (height - viewport - offset <= threshold) void expandWindow(true);
+  }, [expandWindow]);
+  // Edge callbacks can fire while initial positioning is locked and will not
+  // fire again at the same offset. Recheck after positioning or data changes.
+  useEffect(() => {
+    loadVisibleEdges();
+  }, [loadVisibleEdges]);
   async function send(gifId?: string) {
     if (!id || busy || (!draft.trim() && !attachment && !gifId)) return;
     setBusy(true);
@@ -580,14 +741,6 @@ export default function ChatView({ id }: { id?: string }) {
           }}
         >
           <Button title="Back to latest messages" secondary onPress={showLatest} />
-          {jumpWindow.hasMoreAfter && (
-            <Button
-              title="Load newer messages"
-              secondary
-              busy={loadingHistory}
-              onPress={() => void expandWindow(false)}
-            />
-          )}
         </View>
       )}
       <FlatList
@@ -601,7 +754,28 @@ export default function ChatView({ id }: { id?: string }) {
         data={shown}
         keyExtractor={(message) => message.id}
         keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={cancelPositioning}
+        scrollEventThrottle={16}
         onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={readViewabilityConfig}
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        onEndReached={() => void expandWindow(true)}
+        onEndReachedThreshold={0.5}
+        onStartReached={() => void expandWindow(false)}
+        onStartReachedThreshold={0.5}
+        onScroll={({ nativeEvent }) => {
+          const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+          historyMetrics.current = {
+            offset: contentOffset.y,
+            height: contentSize.height,
+            viewport: layoutMeasurement.height,
+          };
+          loadVisibleEdges();
+        }}
+        onContentSizeChange={(_width, height) => {
+          historyMetrics.current.height = height;
+          loadVisibleEdges();
+        }}
         onScrollToIndexFailed={({ index, averageItemLength }) => {
           const target = scrollTarget.current;
           if (!target || target.index !== index) return;
@@ -615,27 +789,15 @@ export default function ChatView({ id }: { id?: string }) {
           else {
             scrollTarget.current = null;
             setJumpTarget(null);
+            initialReadTarget.current = null;
+            setOpeningHistory(false);
             setError('Could not scroll to the message. Tap the reply to try again.');
           }
         }}
         ListFooterComponent={
           <View style={{ alignItems: 'center', padding: 14, gap: 10 }}>
-            {(jumpWindow ? jumpWindow.hasMoreBefore : hasOlder(id)) && (
-              <Button
-                title="Load earlier messages"
-                secondary
-                busy={loadingHistory}
-                onPress={() => {
-                  if (jumpWindow) {
-                    void expandWindow(true);
-                    return;
-                  }
-                  setLoadingHistory(true);
-                  void loadMessages(id, true)
-                    .catch((err) => setError(err.message))
-                    .finally(() => setLoadingHistory(false));
-                }}
-              />
+            {loadingHistory && (
+              <ActivityIndicator accessibilityLabel="Loading more messages" color={colors.blue} />
             )}
             {!history.length && (
               <Text style={s.emptyText}>Say hello. This is the start of your conversation.</Text>
