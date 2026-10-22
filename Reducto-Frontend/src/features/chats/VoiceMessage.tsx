@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import { Icon, colors } from '../../components/ui';
 import { useCachedFile, voiceFileKey } from '../../context/VideosContext';
 import { videoTime } from '../../lib/video-download.types';
 import { voicePlayback } from '../../lib/voice-playback';
+import { VoiceSeekBar } from './VoiceSeekBar';
 
 export function VoiceMessage({
   conversationId,
@@ -22,12 +22,14 @@ export function VoiceMessage({
   active,
   onOptions,
   onError,
+  onSeekingChange,
 }: {
   conversationId: string;
   mediaId: string;
   active: boolean;
   onOptions: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
+  onSeekingChange?: (seeking: boolean) => void;
 }) {
   const { state, download } = useCachedFile(voiceFileKey(conversationId, mediaId), active);
   const [autoplay, setAutoplay] = useState(false);
@@ -42,6 +44,7 @@ export function VoiceMessage({
       active={active}
       onOptions={onOptions}
       onError={onError}
+      onSeekingChange={onSeekingChange}
     />
   ) : (
     <View style={s.row}>
@@ -76,6 +79,7 @@ function VoicePlayer({
   active,
   onOptions,
   onError,
+  onSeekingChange,
 }: {
   uri: string;
   durationHint?: number;
@@ -83,16 +87,15 @@ function VoicePlayer({
   active: boolean;
   onOptions: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
+  onSeekingChange?: (seeking: boolean) => void;
 }) {
   const player = useAudioPlayer(uri, { updateInterval: 150 });
   const status = useAudioPlayerStatus(player);
   const focused = useIsFocused();
   const mounted = useRef(true);
   const autoplayed = useRef(false);
-  const [trackWidth, setTrackWidth] = useState(1);
   const duration =
     Number.isFinite(status.duration) && status.duration > 0 ? status.duration : (durationHint ?? 0);
-  const fraction = duration > 0 ? Math.min(1, Math.max(0, status.currentTime / duration)) : 0;
   useEffect(() => {
     // useAudioPlayer releases its native object before this effect cleans up.
     // Even reading player.id after that release calls into the native bridge.
@@ -121,10 +124,13 @@ function VoicePlayer({
   useEffect(() => {
     if (status.error) onError('This voice message could not be played.');
   }, [status.error, onError]);
-  const seek = (seconds: number) => {
-    void player
-      .seekTo(Math.min(duration, Math.max(0, seconds)))
-      .catch(() => onError('Could not seek this voice message.'));
+  const seek = async (seconds: number) => {
+    try {
+      await player.seekTo(Math.min(duration, Math.max(0, seconds)));
+    } catch (error) {
+      if (mounted.current) onError('Could not seek this voice message.');
+      throw error;
+    }
   };
   return (
     <View testID="voice-player" style={s.row}>
@@ -151,52 +157,13 @@ function VoicePlayer({
         <Icon name={status.playing ? 'pause' : 'play'} color="white" size={24} />
       </Pressable>
       <View style={{ flex: 1, gap: 5 }}>
-        <Pressable
-          accessibilityRole="adjustable"
-          accessibilityLabel="Voice message progress"
-          aria-valuemin={0}
-          aria-valuemax={Math.ceil(duration)}
-          aria-valuenow={Math.floor(status.currentTime)}
-          aria-valuetext={`${videoTime(status.currentTime)} of ${videoTime(duration)}`}
-          accessibilityValue={{
-            min: 0,
-            max: Math.ceil(duration),
-            now: Math.floor(status.currentTime),
-            text: `${videoTime(status.currentTime)} of ${videoTime(duration)}`,
-          }}
-          onLayout={({ nativeEvent }) => setTrackWidth(nativeEvent.layout.width)}
-          onPress={(event) => {
-            event.stopPropagation();
-            if (!duration) return;
-            if (Platform.OS === 'web') {
-              const pointer = event as unknown as {
-                nativeEvent: { clientX: number };
-                currentTarget: HTMLElement;
-              };
-              const bounds = pointer.currentTarget.getBoundingClientRect();
-              if (Number.isFinite(pointer.nativeEvent.clientX) && bounds.width)
-                seek(((pointer.nativeEvent.clientX - bounds.left) / bounds.width) * duration);
-            } else if (Number.isFinite(event.nativeEvent.locationX))
-              seek((event.nativeEvent.locationX / trackWidth) * duration);
-          }}
-          onLongPress={onOptions}
-          {...(Platform.OS === 'web'
-            ? {
-                onKeyDown: (event: { key: string; preventDefault: () => void }) => {
-                  if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
-                    event.preventDefault();
-                    seek(status.currentTime + (event.key === 'ArrowRight' ? 5 : -5));
-                  }
-                },
-              }
-            : {})}
-          style={s.seek}
-        >
-          <View style={s.track}>
-            <View style={[s.fill, { width: `${fraction * 100}%` }]} />
-            <View style={[s.dot, { left: `${fraction * 100}%` }]} />
-          </View>
-        </Pressable>
+        <VoiceSeekBar
+          value={status.currentTime}
+          duration={duration}
+          enabled={active && focused}
+          onDraggingChange={onSeekingChange}
+          onSeek={seek}
+        />
         <Text style={s.time}>
           {videoTime(status.playing || status.currentTime > 0 ? status.currentTime : duration)}
           {status.playing ? ` / ${videoTime(duration)}` : ''}
@@ -222,17 +189,6 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  seek: { height: 28, justifyContent: 'center' },
   track: { height: 3, borderRadius: 2, backgroundColor: '#3390EC38' },
-  fill: { height: 3, backgroundColor: colors.blue, borderRadius: 2 },
-  dot: {
-    position: 'absolute',
-    top: -2,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.blue,
-    marginLeft: -3,
-  },
   time: { fontSize: 12, color: '#6C93AF' },
 });
