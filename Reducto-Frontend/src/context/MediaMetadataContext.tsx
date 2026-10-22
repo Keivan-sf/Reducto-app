@@ -23,7 +23,8 @@ export function useAttachmentMetadata(conversationId: string, mediaId: string, a
         const result = await cache.get(conversationId, mediaId);
         if (disposed) return;
         setEntry(result);
-        timer = setTimeout(() => void load(), Math.max(30000, result.renewAt - Date.now()));
+        if (Number.isFinite(result.renewAt))
+          timer = setTimeout(() => void load(), Math.max(30000, result.renewAt - Date.now()));
       } catch {
         if (!disposed) timer = setTimeout(() => void load(), 30000);
       }

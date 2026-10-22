@@ -25,17 +25,23 @@ export class AttachmentCache {
     const entry = {
       conversationId,
       attachment,
-      renewAt: signedMediaRenewAt([attachment.thumbnailUrl], this.now()),
+      renewAt: attachment.thumbnailUrl
+        ? signedMediaRenewAt([attachment.thumbnailUrl], this.now())
+        : Infinity,
     };
     this.entries.delete(key);
     this.entries.set(key, entry);
-    if (this.entries.size > 256) this.entries.delete(this.entries.keys().next().value!);
+    if (this.entries.size > 2048) this.entries.delete(this.entries.keys().next().value!);
     return entry;
   }
   async get(conversationId: string, mediaId: string) {
     const key = this.key(conversationId, mediaId);
     const cached = this.entries.get(key);
-    if (cached && cached.renewAt > this.now()) return cached;
+    if (cached && cached.renewAt > this.now()) {
+      this.entries.delete(key);
+      this.entries.set(key, cached);
+      return cached;
+    }
     const pending = this.pending.get(key);
     if (pending) return pending;
     const request = this.fetchMetadata(key)

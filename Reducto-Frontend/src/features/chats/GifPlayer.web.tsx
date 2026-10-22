@@ -8,7 +8,14 @@ import type { GifPlayerProps } from './GifPlayer';
 import { ServerThumbnail } from './ServerThumbnail';
 
 /** Size the browser's replaced video element explicitly; intrinsic sizing can overflow. */
-export function GifPlayer({ uri, active = true, size, thumbnailUrl, onError }: GifPlayerProps) {
+export function GifPlayer({
+  uri,
+  active = true,
+  size,
+  thumbnailUrl,
+  onError,
+  cached = false,
+}: GifPlayerProps) {
   const [readyUri, setReadyUri] = useState<string>();
   const video = useRef<HTMLVideoElement>(null);
   const [metadata, setMetadata] = useState<{ uri: string; size: MediaSize }>();
@@ -76,7 +83,7 @@ export function GifPlayer({ uri, active = true, size, thumbnailUrl, onError }: G
       {(!active || readyUri !== uri) && (
         <ServerThumbnail uri={thumbnailUrl} label="GIF thumbnail" />
       )}
-      {status === 'loading' && <ActivityIndicator color={colors.blue} />}
+      {!cached && status === 'loading' && <ActivityIndicator color={colors.blue} />}
       {status === 'error' && <Text style={{ color: colors.muted }}>GIF unavailable</Text>}
     </MediaPreview>
   );

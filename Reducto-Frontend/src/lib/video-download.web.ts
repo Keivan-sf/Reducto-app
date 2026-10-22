@@ -27,7 +27,8 @@ export async function loadVideoFile(request: VideoDownloadRequest): Promise<Vide
     });
   let response = await get(request.headers);
   if (response.status === 401) response = await get(await request.refresh());
-  if (response.status !== 200) throw new Error('Could not download this video.');
+  if (response.status !== 200)
+    throw new Error(`Could not download media (HTTP ${response.status}).`);
   if (request.signal.aborted) throw new Error('Download cancelled');
   // The attachment endpoint deliberately returns application/octet-stream.
   const uri = URL.createObjectURL(

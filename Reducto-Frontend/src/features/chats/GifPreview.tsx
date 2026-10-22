@@ -11,13 +11,16 @@ import { mediaDimensions } from '../../lib/media-preview';
 export function GifPreview({ gifId, active = true }: { gifId: string; active?: boolean }) {
   const cache = useGifs();
   const files = useVideos();
-  const { state: localState } = useCachedFile(gifFileKey(gifId), active);
+  const { state: localState, download } = useCachedFile(gifFileKey(gifId), active);
   const local = localState.status === 'ready' ? localState.file : undefined;
   useEffect(() => {
     if (local?.exists && !local.exists()) files.forget(gifFileKey(gifId));
   }, [local, files, gifId]);
   const [source, setSource] = useState(() => cache.peek(gifId)?.gif);
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (active) void download().catch(() => {});
+  }, [active, download]);
   useEffect(() => {
     if (!active) return;
     let disposed = false;
@@ -26,12 +29,12 @@ export function GifPreview({ gifId, active = true }: { gifId: string; active?: b
       clearTimeout(timer);
       if (AppState.currentState !== 'active') return;
       try {
-        const { gif, renewAt } = await cache.get(gifId);
+        const { gif, renewAt } = (local && cache.peek(gifId)) || (await cache.get(gifId));
         if (disposed) return;
         setSource(gif);
         setFailed(false);
         clearTimeout(timer);
-        timer = setTimeout(() => void load(), Math.max(30000, renewAt - Date.now()));
+        if (!local) timer = setTimeout(() => void load(), Math.max(30000, renewAt - Date.now()));
       } catch {
         if (disposed) return;
         setFailed(true);
@@ -48,7 +51,7 @@ export function GifPreview({ gifId, active = true }: { gifId: string; active?: b
       clearTimeout(timer);
       subscription.remove();
     };
-  }, [cache, gifId, active]);
+  }, [cache, gifId, active, local]);
 
   const metadata = source?.id === gifId ? source : undefined;
   if (local?.mimeType === 'image/gif')
@@ -60,24 +63,26 @@ export function GifPreview({ gifId, active = true }: { gifId: string; active?: b
             source={{ uri: local.uri }}
             resizeMode="contain"
             style={{ width: '100%', height: '100%' }}
-            onError={() => files.forget(gifFileKey(gifId))}
+            onError={() => files.forget(gifFileKey(gifId), 'GIF unavailable')}
           />
         ) : (
           <ServerThumbnail uri={metadata?.thumbnailUrl} label="GIF thumbnail" />
         )}
       </MediaPreview>
     );
-  return source?.id === gifId ? (
+  return local ? (
     <GifPlayer
-      uri={local?.uri ?? source.playbackUrl}
+      uri={local.uri}
       active={active}
-      size={mediaDimensions(source)}
-      thumbnailUrl={source.thumbnailUrl}
-      onError={local ? () => files.forget(gifFileKey(gifId)) : undefined}
+      size={mediaDimensions(metadata)}
+      thumbnailUrl={metadata?.thumbnailUrl}
+      cached
+      onError={() => files.forget(gifFileKey(gifId), 'GIF unavailable')}
     />
   ) : (
-    <MediaPreview label="GIF preview">
-      {failed ? (
+    <MediaPreview size={mediaDimensions(metadata)} label="GIF preview">
+      <ServerThumbnail uri={metadata?.thumbnailUrl} label="GIF thumbnail" />
+      {failed || localState.status === 'error' ? (
         <Text style={{ color: colors.muted }}>GIF unavailable</Text>
       ) : (
         <ActivityIndicator color={colors.blue} />

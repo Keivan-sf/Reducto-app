@@ -20,7 +20,7 @@ export class GifCache {
     const entry = { gif, renewAt };
     this.entries.delete(gif.id);
     this.entries.set(gif.id, entry);
-    if (this.entries.size > 128) this.entries.delete(this.entries.keys().next().value!);
+    if (this.entries.size > 2048) this.entries.delete(this.entries.keys().next().value!);
     return entry;
   }
 
@@ -28,9 +28,13 @@ export class GifCache {
     return this.entries.get(id);
   }
 
-  async get(id: string): Promise<CachedGif> {
+  async get(id: string, force = false): Promise<CachedGif> {
     const cached = this.entries.get(id);
-    if (cached && cached.renewAt > this.now()) return cached;
+    if (!force && cached && cached.renewAt > this.now()) {
+      this.entries.delete(id);
+      this.entries.set(id, cached);
+      return cached;
+    }
     const pending = this.pending.get(id);
     if (pending) return pending;
     const request = this.fetchGif(`/api/gifs/${encodeURIComponent(id)}`)

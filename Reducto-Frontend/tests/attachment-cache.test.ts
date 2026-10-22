@@ -63,3 +63,20 @@ test('failed metadata requests retry and historical records keep nullable metada
   assert.equal(entry.attachment.thumbnailUrl, null);
   assert.equal(calls, 2);
 });
+
+test('immutable attachment details without signed thumbnails do not expire on chat reentry', async () => {
+  let now = 0;
+  let calls = 0;
+  const cache = new AttachmentCache(
+    async () => {
+      calls++;
+      return { attachment: { ...attachment, type: 'image', thumbnailUrl: null } };
+    },
+    () => now,
+  );
+  const first = await cache.get('chat', 'media');
+  now = 24 * 60 * 60 * 1000;
+  assert.equal(await cache.get('chat', 'media'), first);
+  assert.equal(calls, 1);
+  assert.equal(first.renewAt, Infinity);
+});

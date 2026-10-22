@@ -15,6 +15,7 @@ export interface GifPlayerProps {
   size?: MediaSize;
   thumbnailUrl?: string | null;
   onError?: () => void;
+  cached?: boolean;
 }
 
 /** The backend converts GIFs to silent MP4s. Keep their playback inline and automatic. */
@@ -24,6 +25,7 @@ export function GifPlayer({
   size: metadataSize,
   thumbnailUrl,
   onError,
+  cached = false,
 }: GifPlayerProps) {
   const [frameUri, setFrameUri] = useState<string>();
   const focused = useIsFocused();
@@ -71,7 +73,9 @@ export function GifPlayer({
       {(!active || frameUri !== uri) && (
         <ServerThumbnail uri={thumbnailUrl} label="GIF thumbnail" />
       )}
-      {(status === 'loading' || status === 'idle') && <ActivityIndicator color={colors.blue} />}
+      {!cached && (status === 'loading' || status === 'idle') && (
+        <ActivityIndicator color={colors.blue} />
+      )}
       {status === 'error' && <Text style={s.error}>GIF unavailable</Text>}
     </MediaPreview>
   );

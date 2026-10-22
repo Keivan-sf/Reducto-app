@@ -21,6 +21,7 @@ export type VideoLoader = (
   key: string,
   signal: AbortSignal,
   progress: (value: VideoProgress) => void,
+  mimeType?: string,
 ) => Promise<VideoFile>;
 
 /** Session-scoped files shared by playback and locally uploaded attachments. */
@@ -28,14 +29,25 @@ export class VideoCache {
   private states = new Map<string, VideoState>();
   private listeners = new Map<string, Set<() => void>>();
   private pending = new Map<string, { controller: AbortController; promise: Promise<VideoFile> }>();
-  constructor(private readonly load: VideoLoader) {}
+  constructor(
+    private readonly load: VideoLoader,
+    private readonly limits = { files: 512, bytes: 256 * 1024 * 1024 },
+  ) {}
   read = (key: string): VideoState => this.states.get(key) ?? IDLE;
+  private touch(key: string) {
+    const state = this.states.get(key);
+    if (!state) return;
+    this.states.delete(key);
+    this.states.set(key, state);
+  }
   subscribe = (key: string, listener: () => void) => {
+    this.touch(key);
     const listeners = this.listeners.get(key) ?? new Set();
     listeners.add(listener);
     this.listeners.set(key, listeners);
     return () => {
       listeners.delete(listener);
+      if (!listeners.size) this.listeners.delete(key);
       this.prune();
     };
   };
@@ -51,17 +63,20 @@ export class VideoCache {
     this.publish(key, { status: 'ready', file });
     this.prune(key);
   }
-  forget(key: string) {
+  forget(key: string, error?: string) {
     this.pending.get(key)?.controller.abort();
     this.pending.delete(key);
     const state = this.read(key);
     if (state.status === 'ready') state.file.dispose();
-    this.publish(key, IDLE);
+    this.publish(key, error ? { status: 'error', error } : IDLE);
   }
-  get(key: string): Promise<VideoFile> {
+  get(key: string, mimeType?: string): Promise<VideoFile> {
     const state = this.read(key);
     if (state.status === 'ready') {
-      if (!state.file.exists || state.file.exists()) return Promise.resolve(state.file);
+      if (!state.file.exists || state.file.exists()) {
+        this.touch(key);
+        return Promise.resolve(state.file);
+      }
       state.file.dispose();
       this.states.delete(key);
       this.pending.delete(key);
@@ -72,9 +87,14 @@ export class VideoCache {
     this.publish(key, { status: 'loading', progress: { received: 0, total: 0 } });
     const promise = Promise.resolve()
       .then(() =>
-        this.load(key, controller.signal, (progress) => {
-          if (!controller.signal.aborted) this.publish(key, { status: 'loading', progress });
-        }),
+        this.load(
+          key,
+          controller.signal,
+          (progress) => {
+            if (!controller.signal.aborted) this.publish(key, { status: 'loading', progress });
+          },
+          mimeType,
+        ),
       )
       .then((file) => {
         if (controller.signal.aborted) {
@@ -100,6 +120,7 @@ export class VideoCache {
     return promise;
   }
   cancel(key: string) {
+    if (!this.pending.has(key)) return;
     this.pending.get(key)?.controller.abort();
     this.pending.delete(key);
     this.publish(key, IDLE);
@@ -111,7 +132,7 @@ export class VideoCache {
       0,
     );
     for (const [key, state] of ready) {
-      if (ready.length <= 12 && bytes <= 128 * 1024 * 1024) break;
+      if (ready.length <= this.limits.files && bytes <= this.limits.bytes) break;
       if (key === keep || this.listeners.get(key)?.size || state.status !== 'ready') continue;
       bytes -= state.file.bytes;
       state.file.dispose();

@@ -91,7 +91,10 @@ test('failed downloads can retry and disposing a session frees files and cancels
 
 test('unused cached videos are evicted while subscribed videos stay available', async () => {
   let disposed = 0;
-  const cache = new VideoCache(async () => file(() => disposed++));
+  const cache = new VideoCache(async () => file(() => disposed++), {
+    files: 12,
+    bytes: 128 * 1024 * 1024,
+  });
   const unsubscribe = cache.subscribe('first', () => {});
   await cache.get('first');
   for (let index = 0; index < 15; index++) await cache.get(String(index));
@@ -110,13 +113,54 @@ test('video durations and byte progress labels handle unknown lengths', () => {
   assert.equal(videoBytes(3.1 * 1024 * 1024), '3.1 MB');
 });
 
+test('scrolling through many voice messages preserves downloaded files for reopening', async () => {
+  let calls = 0;
+  const cache = new VideoCache(async () => {
+    calls++;
+    return file();
+  });
+  for (let index = 0; index < 80; index++) {
+    const key = `voice:${index}`;
+    const unsubscribe = cache.subscribe(key, () => {});
+    await cache.get(key);
+    unsubscribe();
+  }
+  for (let index = 0; index < 80; index++) {
+    assert.equal(cache.read(`voice:${index}`).status, 'ready');
+    await cache.get(`voice:${index}`);
+  }
+  assert.equal(calls, 80);
+  cache.dispose();
+});
+
+test('eviction uses recent reads and subscriptions; cancellation preserves completed files', async () => {
+  const cache = new VideoCache(async () => file(), { files: 3, bytes: 100000 });
+  await cache.get('first');
+  await cache.get('second');
+  await cache.get('third');
+  await cache.get('first');
+  await cache.get('fourth');
+  assert.equal(cache.read('second').status, 'idle');
+  const unsubscribe = cache.subscribe('third', () => {});
+  unsubscribe();
+  await cache.get('fifth');
+  assert.equal(cache.read('first').status, 'idle');
+  assert.equal(cache.read('third').status, 'ready');
+  cache.cancel('third');
+  assert.equal(cache.read('third').status, 'ready');
+  cache.dispose();
+});
+
 test('the cache also bounds unused video bytes and keeps the file just returned', async () => {
   const disposed: string[] = [];
-  const cache = new VideoCache(async (key) => ({
-    uri: key,
-    bytes: 80 * 1024 * 1024,
-    dispose: () => disposed.push(key),
-  }));
+  const cache = new VideoCache(
+    async (key) => ({
+      uri: key,
+      bytes: 80 * 1024 * 1024,
+      dispose: () => disposed.push(key),
+    }),
+    { files: 12, bytes: 128 * 1024 * 1024 },
+  );
   await cache.get('first');
   await cache.get('second');
   assert.deepEqual(disposed, ['first']);

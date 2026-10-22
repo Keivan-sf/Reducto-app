@@ -122,7 +122,7 @@ test('sending a library GIF reuses its signed playback link without a details lo
   });
   await expect(page.getByRole('button', { name: 'Open gif attachment' })).toBeVisible();
   const sentVideo = page.getByRole('button', { name: 'Open gif attachment' }).locator('video');
-  await expect(sentVideo).toHaveAttribute('src', playbackUrl);
+  await expect(sentVideo).toHaveAttribute('src', /^blob:/);
   await expect
     .poll(() =>
       sentVideo.evaluate((video: HTMLVideoElement) => !video.paused && video.videoWidth > 0),
@@ -131,7 +131,9 @@ test('sending a library GIF reuses its signed playback link without a details lo
   expect(lookups).toBe(0);
 });
 
-test('visible GIF previews renew cached signed links before expiry', async ({ page }) => {
+test('downloaded GIF previews keep local bytes after their signed links expire', async ({
+  page,
+}) => {
   await page.clock.install();
   const gifId = '55555555-5555-4555-8555-555555555555';
   let lookups = 0;
@@ -157,10 +159,51 @@ test('visible GIF previews renew cached signed links before expiry', async ({ pa
   );
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
-  await expect(page.locator('video')).toHaveAttribute('src', 'https://media.example/test.mp4?v=1');
+  await expect(page.locator('video')).toHaveAttribute('src', /^blob:/);
+  const local = await page.locator('video').getAttribute('src');
   await page.clock.fastForward(10 * 60 * 1000 + 1000);
-  await expect(page.locator('video')).toHaveAttribute('src', 'https://media.example/test.mp4?v=2');
-  expect(lookups).toBe(2);
+  await expect(page.locator('video')).toHaveAttribute('src', local!);
+  expect(lookups).toBe(1);
+});
+
+test('an expired GIF download renews its signed URL once without sending the bearer token to storage', async ({
+  page,
+}) => {
+  let details = 0;
+  let downloads = 0;
+  await mockApi(page, [{ ...first, attachment: { type: 'gif', gifId: 'expired-gif' } }]);
+  await page.route('**/api/gifs/expired-gif', (route) =>
+    route.fulfill({
+      json: {
+        gif: {
+          id: 'expired-gif',
+          playbackUrl: `https://media.example/expired.mp4?v=${++details}`,
+        },
+      },
+    }),
+  );
+  await page.route('https://media.example/expired.mp4*', (route) => {
+    expect(route.request().headers().authorization).toBeUndefined();
+    downloads++;
+    return downloads === 1
+      ? route.fulfill({ status: 403 })
+      : route.fulfill({
+          path: path.join(__dirname, '../fixtures/loop.mp4'),
+          contentType: 'video/mp4',
+        });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.locator('video')).toHaveAttribute('src', /^blob:/);
+  await expect
+    .poll(() =>
+      page
+        .locator('video')
+        .evaluate((video: HTMLVideoElement) => !video.paused && video.videoWidth > 0),
+    )
+    .toBe(true);
+  expect(details).toBe(2);
+  expect(downloads).toBe(2);
 });
 
 for (const portrait of [false, true]) {
@@ -875,6 +918,86 @@ test('reopening a cached conversation does not request its history again', async
   expect(initial).toBe(1);
   expect(pages).toBe(initial);
 });
+
+for (const kind of ['gif', 'voice', 'image', 'video'] as const) {
+  test(`cached ${kind} media and metadata survive repeated chat remounts`, async ({
+    page,
+  }, testInfo) => {
+    const mediaId = 'remount-media';
+    let details = 0;
+    let downloads = 0;
+    await mockApi(page, [
+      {
+        ...first,
+        text: null,
+        attachment: kind === 'gif' ? { type: 'gif', gifId: mediaId } : { type: kind, mediaId },
+      },
+    ]);
+    const mediaUrl =
+      kind === 'gif'
+        ? 'https://media.example/remount.mp4'
+        : `**/api/conversations/*/attachments/${mediaId}`;
+    await page.route(mediaUrl, (route) => {
+      downloads++;
+      return route.fulfill({
+        path: path.join(
+          __dirname,
+          `../fixtures/${
+            kind === 'image' ? 'portrait.png' : kind === 'voice' ? 'voice.ogg' : 'loop.mp4'
+          }`,
+        ),
+        contentType: kind === 'image' ? 'image/png' : kind === 'voice' ? 'audio/ogg' : 'video/mp4',
+      });
+    });
+    await page.route(
+      kind === 'gif'
+        ? `**/api/gifs/${mediaId}`
+        : `**/api/conversations/*/attachments/${mediaId}/metadata`,
+      (route) => {
+        details++;
+        const metadata = {
+          id: mediaId,
+          type: kind,
+          width: 120,
+          height: 200,
+          contentType: kind === 'image' ? 'image/png' : 'video/mp4',
+          fileSize: 9000,
+          thumbnailUrl: null,
+          playbackUrl: mediaUrl,
+        };
+        return route.fulfill({
+          json: kind === 'gif' ? { gif: metadata } : { attachment: metadata },
+        });
+      },
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    if (kind === 'video')
+      await page.getByRole('button', { name: 'Download video', exact: true }).click();
+    const ready = async () => {
+      if (kind === 'gif') await expect(page.locator('video')).toHaveAttribute('src', /^blob:/);
+      else if (kind === 'voice') await expect(page.getByTestId('voice-player')).toBeVisible();
+      else if (kind === 'video')
+        await expect(page.getByRole('button', { name: 'Save video', exact: true })).toBeVisible();
+      else
+        await expect(
+          page.getByLabel('Image preview', { exact: true }).locator('img'),
+        ).toHaveAttribute('src', /^blob:/);
+    };
+    await ready();
+    for (let index = 0; index < 3; index++) {
+      if (testInfo.project.name === 'mobile')
+        await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+      await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+      await ready();
+      await expect(page.getByRole('progressbar')).toHaveCount(0);
+    }
+    expect(downloads).toBe(1);
+    expect(details).toBe(kind === 'voice' ? 0 : 1);
+  });
+}
 
 for (const gif of [false, true]) {
   test(`${gif ? 'GIF' : 'text'} message options dismiss as one complete menu`, async ({ page }) => {
