@@ -262,7 +262,11 @@ export default function ChatView({ id }: { id?: string }) {
     if (index < 0) return;
     scrollTarget.current = { id: jumpTarget, index, attempts: 0 };
     const frame = requestAnimationFrame(() =>
-      list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }),
+      list.current?.scrollToIndex({
+        index,
+        viewPosition: 0.5,
+        animated: initialReadTarget.current !== jumpTarget,
+      }),
     );
     return () => cancelAnimationFrame(frame);
   }, [jumpTarget, shown]);
@@ -743,235 +747,271 @@ export default function ChatView({ id }: { id?: string }) {
           <Button title="Back to latest messages" secondary onPress={showLatest} />
         </View>
       )}
-      <FlatList
-        ref={list}
-        renderScrollComponent={renderChatHistoryScroll}
-        testID="chat-history"
-        scrollEnabled={!seekingVoice}
-        style={{ flex: 1 }}
-        contentContainerStyle={s.history}
-        inverted
-        data={shown}
-        keyExtractor={(message) => message.id}
-        keyboardShouldPersistTaps="handled"
-        onScrollBeginDrag={cancelPositioning}
-        scrollEventThrottle={16}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={readViewabilityConfig}
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-        onEndReached={() => void expandWindow(true)}
-        onEndReachedThreshold={0.5}
-        onStartReached={() => void expandWindow(false)}
-        onStartReachedThreshold={0.5}
-        onScroll={({ nativeEvent }) => {
-          const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-          historyMetrics.current = {
-            offset: contentOffset.y,
-            height: contentSize.height,
-            viewport: layoutMeasurement.height,
-          };
-          loadVisibleEdges();
-        }}
-        onContentSizeChange={(_width, height) => {
-          historyMetrics.current.height = height;
-          loadVisibleEdges();
-        }}
-        onScrollToIndexFailed={({ index, averageItemLength }) => {
-          const target = scrollTarget.current;
-          if (!target || target.index !== index) return;
-          list.current?.scrollToOffset({ offset: averageItemLength * index, animated: false });
-          clearTimeout(scrollTimer.current);
-          if (++target.attempts <= 12)
-            scrollTimer.current = setTimeout(() => {
-              if (scrollTarget.current === target)
-                list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
-            }, 150);
-          else {
-            scrollTarget.current = null;
-            setJumpTarget(null);
-            initialReadTarget.current = null;
-            setOpeningHistory(false);
-            setError('Could not scroll to the message. Tap the reply to try again.');
-          }
-        }}
-        ListFooterComponent={
-          <View style={{ alignItems: 'center', padding: 14, gap: 10 }}>
-            {loadingHistory && (
-              <ActivityIndicator accessibilityLabel="Loading more messages" color={colors.blue} />
-            )}
-            {!history.length && (
-              <Text style={s.emptyText}>Say hello. This is the start of your conversation.</Text>
-            )}
-            {search !== null && !shown.length && (
-              <Text style={s.emptyText}>No matching messages.</Text>
-            )}
-          </View>
-        }
-        renderItem={({ item: message, index }) => {
-          const mine = message.senderId === session!.user.id;
-          const older = shown[index + 1];
-          const dateStart =
-            !older ||
-            new Date(older.createdAt).toDateString() !== new Date(message.createdAt).toDateString();
-          const reactions = EMOJIS.map((emoji) => ({
-            emoji,
-            count: message.reactions?.filter((reaction) => reaction.emoji === emoji).length ?? 0,
-          })).filter((entry) => entry.count);
-          return (
-            <View>
-              {dateStart && (
-                <View style={s.date}>
-                  <Text style={s.dateText}>
-                    {new Date(message.createdAt).toLocaleDateString([], {
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </Text>
-                </View>
-              )}
-              <Pressable
-                accessible={false}
-                testID={`message-row-${message.id}`}
-                onPress={(event) => openMessageMenu(message, event)}
-                onLongPress={(event) => openMessageMenu(message, event)}
-                {...(Platform.OS === 'web'
-                  ? {
-                      onContextMenu: (event: GestureResponderEvent) => {
-                        event.preventDefault();
-                        openMessageMenu(message, event);
-                      },
-                    }
-                  : {})}
-                style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}
-              >
-                {!mine && chat.type === 'group' && (
-                  <View style={{ marginRight: 8, alignSelf: 'flex-end' }}>
-                    <Avatar
-                      name={profileName(profiles[message.senderId])}
-                      uri={profiles[message.senderId]?.avatarUrl ?? undefined}
-                      size={32}
-                    />
-                  </View>
+      <View style={{ flex: 1 }}>
+        <View
+          testID="positioned-chat-history"
+          style={{ flex: 1, opacity: openingHistory ? 0 : 1 }}
+          pointerEvents={openingHistory ? 'none' : 'auto'}
+          accessibilityElementsHidden={openingHistory}
+          importantForAccessibility={openingHistory ? 'no-hide-descendants' : 'auto'}
+        >
+          <FlatList
+            ref={list}
+            renderScrollComponent={renderChatHistoryScroll}
+            testID="chat-history"
+            scrollEnabled={!seekingVoice}
+            style={{ flex: 1 }}
+            contentContainerStyle={s.history}
+            inverted
+            data={shown}
+            keyExtractor={(message) => message.id}
+            keyboardShouldPersistTaps="handled"
+            onScrollBeginDrag={cancelPositioning}
+            scrollEventThrottle={16}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={readViewabilityConfig}
+            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            onEndReached={() => void expandWindow(true)}
+            onEndReachedThreshold={0.5}
+            onStartReached={() => void expandWindow(false)}
+            onStartReachedThreshold={0.5}
+            onScroll={({ nativeEvent }) => {
+              const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+              historyMetrics.current = {
+                offset: contentOffset.y,
+                height: contentSize.height,
+                viewport: layoutMeasurement.height,
+              };
+              loadVisibleEdges();
+            }}
+            onContentSizeChange={(_width, height) => {
+              historyMetrics.current.height = height;
+              loadVisibleEdges();
+            }}
+            onScrollToIndexFailed={({ index, averageItemLength }) => {
+              const target = scrollTarget.current;
+              if (!target || target.index !== index) return;
+              list.current?.scrollToOffset({ offset: averageItemLength * index, animated: false });
+              clearTimeout(scrollTimer.current);
+              if (++target.attempts <= 12)
+                scrollTimer.current = setTimeout(() => {
+                  if (scrollTarget.current === target)
+                    list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
+                }, 150);
+              else {
+                scrollTarget.current = null;
+                setJumpTarget(null);
+                initialReadTarget.current = null;
+                setOpeningHistory(false);
+                setError('Could not scroll to the message. Tap the reply to try again.');
+              }
+            }}
+            ListFooterComponent={
+              <View style={{ alignItems: 'center', padding: 14, gap: 10 }}>
+                {loadingHistory && (
+                  <ActivityIndicator
+                    accessibilityLabel="Loading more messages"
+                    color={colors.blue}
+                  />
                 )}
-                <View
-                  testID={`message-${message.id}`}
-                  style={[
-                    s.bubble,
-                    mine ? s.outgoing : s.incoming,
-                    highlighted === message.id && { backgroundColor: '#FFF0B3' },
-                  ]}
-                >
-                  {!mine && chat.type === 'group' && (
-                    <Text style={s.sender}>{profileName(profiles[message.senderId])}</Text>
-                  )}
-                  {!!message.forwardedFrom && (
-                    <Text style={s.forwarded}>
-                      Forwarded from {profileName(profiles[message.forwardedFrom.senderId])}
-                    </Text>
-                  )}
-                  {!!message.replyToMessageId && (
-                    <ReplyPreview
-                      conversationId={id}
-                      messageId={message.replyToMessageId}
-                      onJump={(target) => void jumpToMessage(target)}
-                    />
-                  )}
-                  {message.attachment?.type === 'voice' ? (
-                    <VoiceMessage
-                      onSeekingChange={onVoiceSeekingChange}
-                      conversationId={id}
-                      mediaId={message.attachment.mediaId}
-                      active={
-                        !voiceActive && !playingVideo && !gifs && visibleMessages.has(message.id)
-                      }
-                      onOptions={(event) => openMessageMenu(message, event)}
-                      onError={setError}
-                    />
-                  ) : message.attachment?.type === 'video' ? (
-                    <VideoCard
-                      conversationId={id}
-                      mediaId={message.attachment.mediaId}
-                      active={!playingVideo && visibleMessages.has(message.id)}
-                      onPlay={() =>
-                        setPlayingVideo(
-                          message.attachment!.type === 'video' ? message.attachment!.mediaId : null,
-                        )
-                      }
-                      onOptions={(event) => openMessageMenu(message, event)}
-                      onError={setError}
-                    />
-                  ) : message.attachment ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Open ${message.attachment.type} attachment`}
-                      onPress={(event) => openMessageMenu(message, event)}
-                      onLongPress={(event) => openMessageMenu(message, event)}
-                      style={s.attachment}
-                    >
-                      {message.attachment.type === 'image' && (
-                        <AttachmentImage conversationId={id} mediaId={message.attachment.mediaId} />
-                      )}
-                      {message.attachment.type === 'gif' && (
-                        <GifPreview
-                          gifId={message.attachment.gifId}
-                          active={!gifs && !playingVideo && visibleMessages.has(message.id)}
-                        />
-                      )}
-                      {!['image', 'gif'].includes(message.attachment.type) && (
-                        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-                          <Icon
-                            name={
-                              ['audio', 'music'].includes(message.attachment.type)
-                                ? 'musical-notes-outline'
-                                : 'document-outline'
-                            }
-                            color={colors.blue}
-                          />
-                          <Text style={{ color: '#3974A8', fontSize: 13 }}>
-                            {message.attachment.type}
-                          </Text>
-                        </View>
-                      )}
-                    </Pressable>
-                  ) : null}
-                  {!!message.text && (
-                    <MessageText
-                      text={message.text}
-                      style={s.messageText}
-                      onError={setError}
-                      onMessagePress={(event) => openMessageMenu(message, event)}
-                    />
+                {!history.length && (
+                  <Text style={s.emptyText}>
+                    Say hello. This is the start of your conversation.
+                  </Text>
+                )}
+                {search !== null && !shown.length && (
+                  <Text style={s.emptyText}>No matching messages.</Text>
+                )}
+              </View>
+            }
+            renderItem={({ item: message, index }) => {
+              const mine = message.senderId === session!.user.id;
+              const older = shown[index + 1];
+              const dateStart =
+                !older ||
+                new Date(older.createdAt).toDateString() !==
+                  new Date(message.createdAt).toDateString();
+              const reactions = EMOJIS.map((emoji) => ({
+                emoji,
+                count:
+                  message.reactions?.filter((reaction) => reaction.emoji === emoji).length ?? 0,
+              })).filter((entry) => entry.count);
+              return (
+                <View>
+                  {dateStart && (
+                    <View style={s.date}>
+                      <Text style={s.dateText}>
+                        {new Date(message.createdAt).toLocaleDateString([], {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </Text>
+                    </View>
                   )}
                   <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Message actions"
+                    accessible={false}
+                    testID={`message-row-${message.id}`}
                     onPress={(event) => openMessageMenu(message, event)}
                     onLongPress={(event) => openMessageMenu(message, event)}
+                    {...(Platform.OS === 'web'
+                      ? {
+                          onContextMenu: (event: GestureResponderEvent) => {
+                            event.preventDefault();
+                            openMessageMenu(message, event);
+                          },
+                        }
+                      : {})}
+                    style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}
                   >
-                    <View style={s.meta}>
-                      <Text style={s.time}>{timeLabel(message.createdAt)}</Text>
-                      {mine && <Icon name="checkmark" size={15} color="#6D9D62" />}
-                      {message.attachment && (
-                        <Icon name="ellipsis-horizontal" size={18} color={colors.muted} />
-                      )}
-                    </View>
-                    {!!reactions.length && (
-                      <View style={s.reactions}>
-                        {reactions.map((reaction) => (
-                          <Text key={reaction.emoji} style={s.reaction}>
-                            {reaction.emoji} {reaction.count}
-                          </Text>
-                        ))}
+                    {!mine && chat.type === 'group' && (
+                      <View style={{ marginRight: 8, alignSelf: 'flex-end' }}>
+                        <Avatar
+                          name={profileName(profiles[message.senderId])}
+                          uri={profiles[message.senderId]?.avatarUrl ?? undefined}
+                          size={32}
+                        />
                       </View>
                     )}
+                    <View
+                      testID={`message-${message.id}`}
+                      style={[
+                        s.bubble,
+                        mine ? s.outgoing : s.incoming,
+                        highlighted === message.id && { backgroundColor: '#FFF0B3' },
+                      ]}
+                    >
+                      {!mine && chat.type === 'group' && (
+                        <Text style={s.sender}>{profileName(profiles[message.senderId])}</Text>
+                      )}
+                      {!!message.forwardedFrom && (
+                        <Text style={s.forwarded}>
+                          Forwarded from {profileName(profiles[message.forwardedFrom.senderId])}
+                        </Text>
+                      )}
+                      {!!message.replyToMessageId && (
+                        <ReplyPreview
+                          conversationId={id}
+                          messageId={message.replyToMessageId}
+                          onJump={(target) => void jumpToMessage(target)}
+                        />
+                      )}
+                      {message.attachment?.type === 'voice' ? (
+                        <VoiceMessage
+                          onSeekingChange={onVoiceSeekingChange}
+                          conversationId={id}
+                          mediaId={message.attachment.mediaId}
+                          active={
+                            !voiceActive &&
+                            !playingVideo &&
+                            !gifs &&
+                            visibleMessages.has(message.id)
+                          }
+                          onOptions={(event) => openMessageMenu(message, event)}
+                          onError={setError}
+                        />
+                      ) : message.attachment?.type === 'video' ? (
+                        <VideoCard
+                          conversationId={id}
+                          mediaId={message.attachment.mediaId}
+                          active={!playingVideo && visibleMessages.has(message.id)}
+                          onPlay={() =>
+                            setPlayingVideo(
+                              message.attachment!.type === 'video'
+                                ? message.attachment!.mediaId
+                                : null,
+                            )
+                          }
+                          onOptions={(event) => openMessageMenu(message, event)}
+                          onError={setError}
+                        />
+                      ) : message.attachment ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Open ${message.attachment.type} attachment`}
+                          onPress={(event) => openMessageMenu(message, event)}
+                          onLongPress={(event) => openMessageMenu(message, event)}
+                          style={s.attachment}
+                        >
+                          {message.attachment.type === 'image' && (
+                            <AttachmentImage
+                              conversationId={id}
+                              mediaId={message.attachment.mediaId}
+                            />
+                          )}
+                          {message.attachment.type === 'gif' && (
+                            <GifPreview
+                              gifId={message.attachment.gifId}
+                              active={!gifs && !playingVideo && visibleMessages.has(message.id)}
+                            />
+                          )}
+                          {!['image', 'gif'].includes(message.attachment.type) && (
+                            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                              <Icon
+                                name={
+                                  ['audio', 'music'].includes(message.attachment.type)
+                                    ? 'musical-notes-outline'
+                                    : 'document-outline'
+                                }
+                                color={colors.blue}
+                              />
+                              <Text style={{ color: '#3974A8', fontSize: 13 }}>
+                                {message.attachment.type}
+                              </Text>
+                            </View>
+                          )}
+                        </Pressable>
+                      ) : null}
+                      {!!message.text && (
+                        <MessageText
+                          text={message.text}
+                          style={s.messageText}
+                          onError={setError}
+                          onMessagePress={(event) => openMessageMenu(message, event)}
+                        />
+                      )}
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Message actions"
+                        onPress={(event) => openMessageMenu(message, event)}
+                        onLongPress={(event) => openMessageMenu(message, event)}
+                      >
+                        <View style={s.meta}>
+                          <Text style={s.time}>{timeLabel(message.createdAt)}</Text>
+                          {mine && <Icon name="checkmark" size={15} color="#6D9D62" />}
+                          {message.attachment && (
+                            <Icon name="ellipsis-horizontal" size={18} color={colors.muted} />
+                          )}
+                        </View>
+                        {!!reactions.length && (
+                          <View style={s.reactions}>
+                            {reactions.map((reaction) => (
+                              <Text key={reaction.emoji} style={s.reaction}>
+                                {reaction.emoji} {reaction.count}
+                              </Text>
+                            ))}
+                          </View>
+                        )}
+                      </Pressable>
+                    </View>
                   </Pressable>
                 </View>
-              </Pressable>
-            </View>
-          );
-        }}
-      />
+              );
+            }}
+          />
+        </View>
+        {openingHistory && (
+          <View
+            style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}
+          >
+            <ActivityIndicator
+              testID="chat-history-loading"
+              accessibilityLabel="Loading conversation"
+              color={colors.blue}
+            />
+          </View>
+        )}
+      </View>
       <View style={s.composerWrap}>
         {!!error && (
           <View style={{ paddingHorizontal: 10, paddingBottom: 8 }}>

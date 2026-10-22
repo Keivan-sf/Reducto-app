@@ -1234,6 +1234,93 @@ test('unread opening resolves an older seen position through the around API with
   expect(aroundCalls).toBe(1);
 });
 
+test('opening reveals history already at last seen without an animated scroll', async ({
+  page,
+}) => {
+  const history = Array.from({ length: 201 }, (_, index) => ({
+    ...first,
+    id: `position-${index}`,
+    text: `Position message ${index}\n${'More text\n'.repeat(index % 4)}`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [{ ...chat, lastSeenMessageId: 'position-100', unreadCount: 100 }],
+      },
+    }),
+  );
+  let releaseHistory!: () => Promise<void>;
+  await page.route('**/messages/position-100/around?*', (route) => {
+    releaseHistory = () =>
+      route.fulfill({
+        json: {
+          message: history[100],
+          before: history.slice(50, 100),
+          after: history.slice(101, 151),
+          hasMoreBefore: true,
+          hasMoreAfter: true,
+        },
+      });
+  });
+  await signIn(page);
+  await page.evaluate(() => {
+    const state = { scrolls: [] as string[], revealed: false, targetVisibleOnReveal: false };
+    (window as unknown as { __historyOpening: typeof state }).__historyOpening = state;
+    const scroll = Element.prototype.scroll;
+    Element.prototype.scroll = function (this: Element, ...args: unknown[]) {
+      if (this.getAttribute('data-testid') === 'chat-history') {
+        state.scrolls.push((args[0] as ScrollToOptions)?.behavior ?? 'auto');
+      }
+      Reflect.apply(scroll, this, args);
+    } as Element['scroll'];
+    const check = () => {
+      const container = document.querySelector('[data-testid="positioned-chat-history"]');
+      if (container && getComputedStyle(container).opacity === '1') {
+        state.revealed = true;
+        const viewport = document
+          .querySelector('[data-testid="chat-history"]')
+          ?.getBoundingClientRect();
+        const target = document
+          .querySelector('[data-testid="message-position-100"]')
+          ?.getBoundingClientRect();
+        state.targetVisibleOnReveal =
+          !!viewport && !!target && target.bottom > viewport.top && target.top < viewport.bottom;
+      } else requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByTestId('chat-history-loading')).toBeVisible();
+  await expect(page.getByTestId('positioned-chat-history')).toHaveCSS('opacity', '0');
+  await expect.poll(() => !!releaseHistory).toBe(true);
+  await releaseHistory();
+  await expect(page.getByTestId('chat-history-loading')).toHaveCount(0);
+  await expect(page.getByTestId('positioned-chat-history')).toHaveCSS('opacity', '1');
+  await expect(page.getByTestId('message-position-100')).toBeInViewport();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __historyOpening: { revealed: boolean } }).__historyOpening
+            .revealed,
+      ),
+    )
+    .toBe(true);
+  const result = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __historyOpening: { scrolls: string[]; targetVisibleOnReveal: boolean };
+        }
+      ).__historyOpening,
+  );
+  expect(result.targetVisibleOnReveal).toBe(true);
+  expect(result.scrolls.length).toBeGreaterThan(0);
+  expect(result.scrolls).not.toContain('smooth');
+});
+
 test('history opens around last seen without startup tail requests and scrolling loads both edges automatically', async ({
   page,
 }) => {
