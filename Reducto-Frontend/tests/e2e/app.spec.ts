@@ -666,6 +666,142 @@ test('sending keeps the composer focused and preserves edits made during the req
   await expect(composer).toBeFocused();
 });
 
+test('optimistic sends clear immediately, allow concurrent messages, and show failure/retry status per bubble', async ({
+  page,
+}) => {
+  await mockApi(page);
+  const bodies: { text: string }[] = [];
+  const finish: ((failed?: boolean) => Promise<void>)[] = [];
+  await page.route('**/api/conversations/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    const index = bodies.length;
+    bodies.push(body);
+    finish.push((failed = false) =>
+      route.fulfill(
+        failed
+          ? { status: 500, json: { error: 'Could not send now' } }
+          : {
+              json: {
+                message: {
+                  ...first,
+                  ...body,
+                  id: `burst-${index}`,
+                  senderId: user.id,
+                  createdAt: new Date(Date.now() + index).toISOString(),
+                },
+              },
+            },
+      ),
+    );
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  for (const text of ['First queued message', 'Second queued message']) {
+    await composer.fill(text);
+    const send = page.getByRole('button', { name: 'Send message', exact: true });
+    await expect(send.getByRole('progressbar')).toHaveCount(0);
+    await send.click();
+    await expect(composer).toHaveValue('');
+    await expect(composer).toBeFocused();
+    await expect(page.getByTestId('chat-history').getByText(text, { exact: true })).toBeVisible();
+  }
+  await expect.poll(() => bodies.length).toBe(2);
+  await expect(page.getByLabel('Sending message', { exact: true })).toHaveCount(2);
+  await finish[1]();
+  await expect(page.getByTestId('message-status-burst-1')).toHaveAttribute(
+    'aria-label',
+    'Message sent',
+  );
+  await expect(page.getByLabel('Sending message', { exact: true })).toHaveCount(1);
+  await finish[0](true);
+  await expect(page.getByLabel('Message failed to send', { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId('chat-history').getByText('First queued message', { exact: true }),
+  ).toBeVisible();
+  await composer.fill('Draft while retrying');
+  await page.getByTestId('chat-history').getByText('First queued message', { exact: true }).click();
+  await page.getByRole('button', { name: 'Retry sending', exact: true }).click();
+  await expect.poll(() => bodies.length).toBe(3);
+  expect(bodies[2]).toEqual(bodies[0]);
+  await expect(page.getByLabel('Sending message', { exact: true })).toHaveCount(1);
+  await finish[2]();
+  await expect(page.getByTestId('message-status-burst-2')).toHaveAttribute(
+    'aria-label',
+    'Message sent',
+  );
+  await expect(composer).toHaveValue('Draft while retrying');
+  await expect(page.getByLabel('Message failed to send', { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByTestId('chat-history').getByText('First queued message', { exact: true }),
+  ).toHaveCount(1);
+});
+
+test('sent bubbles stay above the composer through keyboard-sized viewport changes and confirmation', async ({
+  page,
+}) => {
+  const history = Array.from({ length: 80 }, (_, index) => ({
+    ...first,
+    id: `keyboard-history-${index}`,
+    text: `History ${index}\nA second line`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [{ ...chat, lastSeenMessageId: history[79].id, unreadCount: 0 }],
+      },
+    }),
+  );
+  let confirm!: () => Promise<void>;
+  await page.route('**/api/conversations/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    confirm = () =>
+      route.fulfill({
+        json: {
+          message: {
+            ...first,
+            ...body,
+            id: 'keyboard-confirmed',
+            senderId: user.id,
+            createdAt: new Date().toISOString(),
+          },
+        },
+      });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByTestId('chat-history-loading')).toHaveCount(0);
+  const viewport = page.viewportSize()!;
+  await page.setViewportSize({ width: viewport.width, height: 450 });
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Visible with the keyboard open');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  const bubble = page
+    .getByTestId('chat-history')
+    .getByText('Visible with the keyboard open', { exact: true });
+  const aboveComposer = async () => {
+    const message = await bubble.boundingBox();
+    const input = await composer.boundingBox();
+    const list = await page.getByTestId('chat-history').boundingBox();
+    return (
+      !!message && !!input && !!list && message.y >= list.y && message.y + message.height <= input.y
+    );
+  };
+  await expect.poll(aboveComposer).toBe(true);
+  // Further keyboard/composer reflow can occur after the first send frame.
+  await page.setViewportSize({ width: viewport.width, height: 390 });
+  await expect.poll(aboveComposer).toBe(true);
+  await confirm();
+  await expect(page.getByTestId('message-keyboard-confirmed')).toBeVisible();
+  await expect.poll(aboveComposer).toBe(true);
+  await page.setViewportSize(viewport);
+  await expect.poll(aboveComposer).toBe(true);
+});
+
 test('authentication failures and sign-up fields are usable', async ({ page }, testInfo) => {
   await mockApi(page);
   await page.goto('/login');
@@ -796,7 +932,9 @@ test('reply composer sends reply IDs, renders a compact preview, and supports ca
   await expect(page.getByTestId('reply-composer')).toHaveCount(0);
 });
 
-test('failed replies preserve the draft and target until cancelled or sent', async ({ page }) => {
+test('failed replies remain in failed bubbles and retry with their original target', async ({
+  page,
+}) => {
   await mockApi(page);
   await mockRealtime(page);
   let attempts = 0;
@@ -805,7 +943,10 @@ test('failed replies preserve the draft and target until cancelled or sent', asy
     attempts++;
     if (attempts === 1)
       return route.fulfill({ status: 400, json: { error: 'Reply target is unavailable' } });
-    expect(route.request().postDataJSON()).toEqual({ text: 'Keep this draft' });
+    expect(route.request().postDataJSON()).toEqual({
+      text: 'Keep this draft',
+      replyToMessageId: first.id,
+    });
     return route.fulfill({
       json: { message: { ...first, id: 'retry', senderId: user.id, text: 'Keep this draft' } },
     });
@@ -817,13 +958,11 @@ test('failed replies preserve the draft and target until cancelled or sent', asy
   await expect(page.getByTestId('message-options')).toHaveCount(0);
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Keep this draft');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await expect(page.getByText('Reply target is unavailable', { exact: true })).toBeVisible();
-  await expect(page.getByTestId('reply-composer')).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue(
-    'Keep this draft',
-  );
-  await page.getByRole('button', { name: 'Cancel reply', exact: true }).click();
-  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByLabel('Message failed to send', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('reply-composer')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue('');
+  await page.getByTestId('chat-history').getByText('Keep this draft', { exact: true }).click();
+  await page.getByRole('button', { name: 'Retry sending', exact: true }).click();
   await expect(page.getByTestId('message-retry')).toBeVisible();
 });
 
@@ -1169,8 +1308,8 @@ test('sending marks the returned message seen before latest history loads', asyn
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect.poll(() => !!releaseTail).toBe(true);
     await expect.poll(() => seen).toContain(sent.id);
-    // The sent message cannot be visible yet: the latest history is still pending.
-    await expect(page.getByTestId(`message-${sent.id}`)).toHaveCount(0);
+    // The outbox retains the confirmed message even while latest history is pending.
+    await expect(page.getByTestId(`message-${sent.id}`)).toBeVisible();
     if (testInfo.project.name === 'mobile')
       await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
     await expect(page.getByTestId(`unread-${chat.id}`)).toHaveCount(0);
@@ -1533,12 +1672,17 @@ for (const anchored of [true, false]) {
     await expect(page.getByTestId(`message-older-${anchored ? 250 : 300}`)).toBeInViewport();
     const list = page.getByTestId('chat-history');
     for (const edge of anchored ? [200, 150, 100, 50] : [250, 200, 150, 100, 50]) {
+      const previousHeight = await list.evaluate((element) => element.scrollHeight);
       await list.dispatchEvent('wheel', { deltaY: -500, bubbles: true });
       await list.evaluate((element) => {
         element.scrollTop = element.scrollHeight;
       });
       await expect.poll(() => batches).toContain(`older-${edge}`);
-      await page.waitForTimeout(200);
+      // Wait for the returned batch to affect layout before the next gesture.
+      await expect(page.getByLabel('Loading more messages', { exact: true })).toHaveCount(0);
+      await expect
+        .poll(() => list.evaluate((element) => element.scrollHeight))
+        .toBeGreaterThan(previousHeight + 500);
     }
   });
 }
@@ -1599,6 +1743,13 @@ test('chat scrollbar remains visible but disabled during voice seeking', async (
     ...messages,
     { ...first, text: null, attachment: { type: 'voice', mediaId: 'scroll-voice' } },
   ]);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [{ ...chat, lastSeenMessageId: first.id, unreadCount: 0 }],
+      },
+    }),
+  );
   await page.route('**/api/conversations/*/attachments/scroll-voice', (route) =>
     route.fulfill({
       path: path.join(__dirname, '../fixtures/voice.ogg'),

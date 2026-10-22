@@ -21,10 +21,13 @@ import { api, useSession } from './SessionContext';
 import { MessageCache } from '../api/message-cache';
 import { useProfiles } from './ProfilesContext';
 import { ReadState } from '../api/read-state';
+import { MessageOutbox } from '../api/message-outbox';
 
 interface ChatsState {
   conversations: Conversation[];
   messages: Record<string, Message[]>;
+  outgoing: Record<string, Message[]>;
+  outbox: MessageOutbox;
   latestMessages: Record<string, Message | null>;
   members: Record<string, Member[]>;
   unread: Record<string, number>;
@@ -57,6 +60,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
   const userId = session?.user.id;
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
+  const [outgoing, setOutgoing] = useState<Record<string, Message[]>>({});
   const [latestMessages, setLatestMessages] = useState<Record<string, Message | null>>({});
   const [members, setMembers] = useState<Record<string, Member[]>>({});
   const [unread, setUnread] = useState<Record<string, number>>({});
@@ -110,6 +114,30 @@ export function ChatsProvider({ children }: PropsWithChildren) {
     },
     [messageCache, readState, userId],
   );
+  const [outbox] = useState(() => {
+    const owner = api.getSession()!;
+    return new MessageOutbox(
+      owner.user.id,
+      async (id, payload, signal) => {
+        const current = api.getSession();
+        if (!current || current.user.id !== owner.user.id || current.serverUrl !== owner.serverUrl)
+          throw new Error('Your session changed.');
+        const { message } = await api.request<{ message: Message }>(
+          `/api/conversations/${id}/messages`,
+          {
+            method: 'POST',
+            body: JSON.stringify(payload),
+            signal,
+          },
+        );
+        return message;
+      },
+      acceptMessage,
+      setOutgoing,
+    );
+  });
+  useEffect(() => () => outbox.dispose(), [outbox]);
+  useEffect(() => outbox.reconcile(messages), [outbox, messages]);
   const readVisible = useCallback(
     (id: string, visible: Message[], window: Message[], hasBefore: boolean, hasAfter: boolean) => {
       if (activeRef.current === id && AppState.currentState === 'active')
@@ -159,6 +187,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
           const allowed = new Set(chats.map((chat) => chat.id));
           knownChats.current = allowed;
           messageCache.prune(allowed);
+          outbox.prune(allowed);
           setMessages((current) =>
             Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))),
           );
@@ -198,7 +227,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       refreshFlight.current = task;
       return task;
     },
-    [activate, directory, messageCache, fetchConversations],
+    [activate, directory, messageCache, fetchConversations, outbox],
   );
   useEffect(() => {
     if (!token || !userId) return;
@@ -257,6 +286,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
           .catch(report);
     });
     socket.on('message.created', ({ message }: { message: Message }) => {
+      outbox.observe(message);
       acceptMessage(message);
       clearTimeout(readRefreshTimer);
       readRefreshTimer = setTimeout(syncReads, 500);
@@ -293,12 +323,14 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       clearTimeout(readRefreshTimer);
       clearInterval(readPoll);
     };
-  }, [token, userId, acceptMessage, refresh, directory, messageCache, fetchConversations]);
+  }, [token, userId, acceptMessage, refresh, directory, messageCache, fetchConversations, outbox]);
   return (
     <Context.Provider
       value={{
         conversations,
         messages,
+        outgoing,
+        outbox,
         latestMessages,
         members,
         unread,

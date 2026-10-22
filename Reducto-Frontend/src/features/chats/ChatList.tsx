@@ -22,6 +22,7 @@ export default function ChatList() {
   const {
     conversations,
     latestMessages,
+    outgoing,
     members,
     unread,
     activeId,
@@ -42,6 +43,13 @@ export default function ChatList() {
   function title(chat: (typeof conversations)[number]) {
     return conversationName(chat, peer(chat));
   }
+  function lastMessage(id: string) {
+    const local = outgoing[id]?.at(-1);
+    const server = latestMessages[id];
+    if (!local) return server;
+    if (!server) return local;
+    return local.createdAt > server.createdAt ? local : server;
+  }
   const chats = conversations
     .filter(
       (chat) =>
@@ -52,8 +60,8 @@ export default function ChatList() {
         (filter !== 'Unread' || unread[chat.id] > 0),
     )
     .sort((a, b) =>
-      (latestMessages[b.id]?.createdAt ?? b.createdAt).localeCompare(
-        latestMessages[a.id]?.createdAt ?? a.createdAt,
+      (lastMessage(b.id)?.createdAt ?? b.createdAt).localeCompare(
+        lastMessage(a.id)?.createdAt ?? a.createdAt,
       ),
     );
   async function reload() {
@@ -153,7 +161,7 @@ export default function ChatList() {
           )
         }
         renderItem={({ item: chat }) => {
-          const last = latestMessages[chat.id];
+          const last = lastMessage(chat.id);
           const selected = activeId === chat.id;
           return (
             <Pressable

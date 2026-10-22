@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
   FlatList,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
@@ -64,6 +65,7 @@ import { MessageMenu, type MessageMenuAction } from './MessageMenu';
 import { ChatHistoryScrollView } from './ChatHistoryScrollView';
 import { comparePosition } from '../../api/read-state';
 import { captureHistoryAnchor } from '../../lib/history-anchor';
+import { ChatTailFollow } from '../../lib/chat-tail-follow';
 
 const readViewabilityConfig = { minimumViewTime: 350, viewAreaCoveragePercentThreshold: 60 };
 
@@ -73,6 +75,8 @@ export default function ChatView({ id }: { id?: string }) {
   const {
     conversations,
     messages,
+    outgoing,
+    outbox,
     members,
     loading,
     activate,
@@ -191,20 +195,38 @@ export default function ChatView({ id }: { id?: string }) {
     [setJumpTarget, setHighlighted, setOpeningHistory],
   );
   const list = useRef<FlatList<Message>>(null);
-  const onVoiceSeekingChange = useCallback((seeking: boolean) => {
-    // Apply immediately to Android's native ScrollView, then keep the rendered
-    // prop in sync so any intervening render preserves the lock.
-    if (Platform.OS !== 'web') list.current?.setNativeProps({ scrollEnabled: !seeking });
-    setSeekingVoice(seeking);
-  }, []);
+  const [tailFollow] = useState(() => new ChatTailFollow());
+  useLayoutEffect(() => {
+    tailFollow.setScroll(() => list.current?.scrollToOffset({ offset: 0, animated: false }));
+  }, [tailFollow]);
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => tailFollow.layout());
+    const hidden = Keyboard.addListener('keyboardDidHide', () => tailFollow.layout());
+    return () => {
+      shown.remove();
+      hidden.remove();
+      tailFollow.stop();
+    };
+  }, [tailFollow]);
+  const onVoiceSeekingChange = useCallback(
+    (seeking: boolean) => {
+      // Apply immediately to Android's native ScrollView, then keep the rendered
+      // prop in sync so any intervening render preserves the lock.
+      if (Platform.OS !== 'web') list.current?.setNativeProps({ scrollEnabled: !seeking });
+      tailFollow.setEnabled(!seeking);
+      setSeekingVoice(seeking);
+    },
+    [tailFollow],
+  );
   const cancelPositioning = useCallback(() => {
+    tailFollow.stop();
     if (!initialReadTarget.current && !scrollTarget.current) return;
     initialReadTarget.current = null;
     scrollTarget.current = null;
     clearTimeout(scrollTimer.current);
     setJumpTarget(null);
     setOpeningHistory(false);
-  }, [setJumpTarget, setOpeningHistory]);
+  }, [setJumpTarget, setOpeningHistory, tailFollow]);
   const renderChatHistoryScroll = useCallback(
     (props: ScrollViewProps) => (
       <ChatHistoryScrollView {...props} onUserScroll={cancelPositioning} />
@@ -248,14 +270,17 @@ export default function ChatView({ id }: { id?: string }) {
   }, [id, activate, loadMessages, getReadState, messageCache]);
   const shown = useMemo(
     () =>
-      [...history]
+      mergeMessages(history, outgoing[id ?? ''] ?? [])
         .filter(
           (message) =>
             search === null || (message.text ?? '').toLowerCase().includes(search.toLowerCase()),
         )
         .reverse(),
-    [history, search],
+    [history, search, outgoing, id],
   );
+  useLayoutEffect(() => {
+    tailFollow.layout();
+  }, [shown, tailFollow]);
   useEffect(() => {
     if (!jumpTarget) return;
     const index = shown.findIndex((message) => message.id === jumpTarget);
@@ -280,6 +305,7 @@ export default function ChatView({ id }: { id?: string }) {
   );
   async function jumpToMessage(messageId: string) {
     if (!id) return;
+    tailFollow.stop();
     initialReadTarget.current = null;
     setOpeningHistory(false);
     const sequence = ++jumpSequence.current;
@@ -313,6 +339,7 @@ export default function ChatView({ id }: { id?: string }) {
     }
   }
   async function showLatest() {
+    tailFollow.start();
     initialReadTarget.current = null;
     setOpeningHistory(false);
     const sequence = ++jumpSequence.current;
@@ -327,8 +354,7 @@ export default function ChatView({ id }: { id?: string }) {
     setSearch(null);
     try {
       if (id && messageCache.hasNewer(id)) await messageCache.page(id, false, true);
-      if (sequence === jumpSequence.current)
-        requestAnimationFrame(() => list.current?.scrollToOffset({ offset: 0, animated: false }));
+      if (sequence === jumpSequence.current) tailFollow.layout();
     } catch (err) {
       if (sequence === jumpSequence.current) setError((err as Error).message);
     } finally {
@@ -418,37 +444,21 @@ export default function ChatView({ id }: { id?: string }) {
   useEffect(() => {
     loadVisibleEdges();
   }, [loadVisibleEdges]);
-  async function send(gifId?: string, text = ''): Promise<boolean> {
+  function send(gifId?: string, text = ''): boolean {
     if (!id || busy || (!text.trim() && !attachment && !gifId)) return false;
-    setBusy(true);
     setError('');
-    try {
-      const { message } = await api.post<{ message: Message }>(
-        `/api/conversations/${id}/messages`,
-        {
-          ...(text.trim() && !gifId ? { text: text.trim() } : {}),
-          ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
-          ...(gifId || attachment
-            ? { attachment: gifId ? { type: 'gif', gifId } : attachment }
-            : {}),
-        },
-      );
-      acceptMessage(message);
-      setReplyTo(null);
-      showLatest();
-      if (!gifId) {
-        setAttachment(undefined);
-        setAttachmentName('');
-      }
-      list.current?.scrollToOffset({ offset: 0, animated: true });
-      return true;
-    } catch (err) {
-      setError((err as Error).message);
-      if (gifId) throw err;
-      return false;
-    } finally {
-      setBusy(false);
+    outbox.enqueue(id, {
+      ...(text.trim() && !gifId ? { text: text.trim() } : {}),
+      ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
+      ...(gifId || attachment ? { attachment: gifId ? { type: 'gif', gifId } : attachment } : {}),
+    });
+    setReplyTo(null);
+    if (!gifId) {
+      setAttachment(undefined);
+      setAttachmentName('');
     }
+    void showLatest();
+    return true;
   }
   async function upload() {
     if (!id || busy) return;
@@ -512,20 +522,12 @@ export default function ChatView({ id }: { id?: string }) {
       mediaMetadata.remember(id, media);
       videoCache.remember(voiceFileKey(id, media.id), { ...local, duration: voice.duration });
       local = undefined;
-      const { message } = await api.request<{ message: Message }>(
-        `/api/conversations/${id}/messages`,
-        {
-          method: 'POST',
-          signal,
-          body: JSON.stringify({
-            attachment: { type: 'voice', mediaId: media.id },
-            ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
-          }),
-        },
-      );
-      acceptMessage(message);
+      outbox.enqueue(id, {
+        attachment: { type: 'voice', mediaId: media.id },
+        ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
+      });
       setReplyTo(null);
-      showLatest();
+      void showLatest();
     } finally {
       local?.dispose();
       setBusy(false);
@@ -533,6 +535,7 @@ export default function ChatView({ id }: { id?: string }) {
   }
   function openMessageMenu(message: Message, event: GestureResponderEvent) {
     event.stopPropagation();
+    if (message.delivery === 'sending') return;
     setError('');
     setActionMessage(message);
     setActionAnchor({ x: event.nativeEvent.pageX, y: event.nativeEvent.pageY });
@@ -566,85 +569,105 @@ export default function ChatView({ id }: { id?: string }) {
       setBusy(false);
     }
   }
-  const messageActions: MessageMenuAction[] = [
-    {
-      label: 'Reply',
-      icon: 'arrow-undo-outline',
-      onPress: () => {
-        setReplyTo(actionMessage);
-        setActionsVisible(false);
-      },
-    },
-    ...(actionMessage?.text
+  const messageActions: MessageMenuAction[] =
+    actionMessage?.delivery === 'failed'
       ? [
           {
-            label: 'Copy',
-            icon: 'copy-outline' as const,
+            label: 'Retry sending',
+            icon: 'refresh-outline',
             onPress: () => {
-              const text = actionMessage.text!;
+              if (actionMessage.localId) outbox.retry(actionMessage.localId);
               setActionsVisible(false);
-              void Clipboard.setStringAsync(text).catch((err) => setError(err.message));
+            },
+          },
+          {
+            label: 'Discard message',
+            icon: 'trash-outline',
+            onPress: () => {
+              if (actionMessage.localId) outbox.discard(actionMessage.localId);
+              setActionsVisible(false);
             },
           },
         ]
-      : []),
-    ...(actionMessage?.attachment && actionMessage.attachment.type !== 'gif'
-      ? [
+      : [
           {
-            label: 'Save attachment',
-            icon: 'download-outline' as const,
+            label: 'Reply',
+            icon: 'arrow-undo-outline',
             onPress: () => {
-              const attachment = actionMessage.attachment!;
+              setReplyTo(actionMessage);
               setActionsVisible(false);
-              if (id && attachment.type === 'voice')
-                void videoCache
-                  .get(voiceFileKey(id, attachment.mediaId))
-                  .then(saveLocalFile)
-                  .catch((err) => setError(err.message));
-              else if (id && attachment.type === 'video')
-                void videoCache
-                  .get(videoKey(id, attachment.mediaId))
-                  .then(saveVideoFile)
-                  .catch((err) => setError(err.message));
-              else if (id && attachment.type !== 'gif') {
-                const cached = videoCache.read(videoKey(id, attachment.mediaId));
-                const save =
-                  cached.status === 'ready' && (!cached.file.exists || cached.file.exists())
-                    ? saveLocalFile(cached.file)
-                    : downloadAttachment(id, attachment.mediaId);
-                void save.catch((err) => setError(err.message));
-              }
             },
           },
-        ]
-      : []),
-    ...(actionMessage?.attachment?.type === 'gif'
-      ? [
+          ...(actionMessage?.text
+            ? [
+                {
+                  label: 'Copy',
+                  icon: 'copy-outline' as const,
+                  onPress: () => {
+                    const text = actionMessage.text!;
+                    setActionsVisible(false);
+                    void Clipboard.setStringAsync(text).catch((err) => setError(err.message));
+                  },
+                },
+              ]
+            : []),
+          ...(actionMessage?.attachment && actionMessage.attachment.type !== 'gif'
+            ? [
+                {
+                  label: 'Save attachment',
+                  icon: 'download-outline' as const,
+                  onPress: () => {
+                    const attachment = actionMessage.attachment!;
+                    setActionsVisible(false);
+                    if (id && attachment.type === 'voice')
+                      void videoCache
+                        .get(voiceFileKey(id, attachment.mediaId))
+                        .then(saveLocalFile)
+                        .catch((err) => setError(err.message));
+                    else if (id && attachment.type === 'video')
+                      void videoCache
+                        .get(videoKey(id, attachment.mediaId))
+                        .then(saveVideoFile)
+                        .catch((err) => setError(err.message));
+                    else if (id && attachment.type !== 'gif') {
+                      const cached = videoCache.read(videoKey(id, attachment.mediaId));
+                      const save =
+                        cached.status === 'ready' && (!cached.file.exists || cached.file.exists())
+                          ? saveLocalFile(cached.file)
+                          : downloadAttachment(id, attachment.mediaId);
+                      void save.catch((err) => setError(err.message));
+                    }
+                  },
+                },
+              ]
+            : []),
+          ...(actionMessage?.attachment?.type === 'gif'
+            ? [
+                {
+                  label: 'Save GIF',
+                  icon: 'bookmark-outline' as const,
+                  onPress: () => {
+                    const attachment = actionMessage.attachment!;
+                    if (attachment.type !== 'gif') return;
+                    setActionsVisible(false);
+                    setBusy(true);
+                    void api
+                      .request(`/api/gifs/${attachment.gifId}`, { method: 'PUT' })
+                      .catch((err) => setError(err.message))
+                      .finally(() => setBusy(false));
+                  },
+                },
+              ]
+            : []),
           {
-            label: 'Save GIF',
-            icon: 'bookmark-outline' as const,
+            label: 'Forward',
+            icon: 'arrow-redo-outline',
             onPress: () => {
-              const attachment = actionMessage.attachment!;
-              if (attachment.type !== 'gif') return;
               setActionsVisible(false);
-              setBusy(true);
-              void api
-                .request(`/api/gifs/${attachment.gifId}`, { method: 'PUT' })
-                .catch((err) => setError(err.message))
-                .finally(() => setBusy(false));
+              setForward(true);
             },
           },
-        ]
-      : []),
-    {
-      label: 'Forward',
-      icon: 'arrow-redo-outline',
-      onPress: () => {
-        setActionsVisible(false);
-        setForward(true);
-      },
-    },
-  ];
+        ];
   if (!id)
     return (
       <View style={s.welcome}>
@@ -767,6 +790,7 @@ export default function ChatView({ id }: { id?: string }) {
             keyExtractor={(message) => message.id}
             keyboardShouldPersistTaps="handled"
             onScrollBeginDrag={cancelPositioning}
+            onLayout={() => tailFollow.layout()}
             scrollEventThrottle={16}
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={readViewabilityConfig}
@@ -786,6 +810,7 @@ export default function ChatView({ id }: { id?: string }) {
             }}
             onContentSizeChange={(_width, height) => {
               historyMetrics.current.height = height;
+              tailFollow.layout();
               loadVisibleEdges();
             }}
             onScrollToIndexFailed={({ index, averageItemLength }) => {
@@ -978,7 +1003,33 @@ export default function ChatView({ id }: { id?: string }) {
                       >
                         <View style={s.meta}>
                           <Text style={s.time}>{timeLabel(message.createdAt)}</Text>
-                          {mine && <Icon name="checkmark" size={15} color="#6D9D62" />}
+                          {mine && (
+                            <View
+                              testID={`message-status-${message.id}`}
+                              accessible
+                              accessibilityLabel={
+                                message.delivery === 'sending'
+                                  ? 'Sending message'
+                                  : message.delivery === 'failed'
+                                    ? 'Message failed to send'
+                                    : 'Message sent'
+                              }
+                            >
+                              {message.delivery === 'failed' ? (
+                                <Text style={{ color: '#E53935', fontWeight: '800', fontSize: 15 }}>
+                                  !
+                                </Text>
+                              ) : (
+                                <Icon
+                                  name={
+                                    message.delivery === 'sending' ? 'time-outline' : 'checkmark'
+                                  }
+                                  size={15}
+                                  color={message.delivery === 'sending' ? colors.muted : '#6D9D62'}
+                                />
+                              )}
+                            </View>
+                          )}
                           {message.attachment && (
                             <Icon name="ellipsis-horizontal" size={18} color={colors.muted} />
                           )}
@@ -1114,7 +1165,9 @@ export default function ChatView({ id }: { id?: string }) {
           ),
         )}
         busy={busy}
-        onReact={(emoji) => void react(emoji)}
+        onReact={(emoji) => {
+          if (!actionMessage?.delivery) void react(emoji);
+        }}
         onClose={() => setActionsVisible(false)}
       />
     </KeyboardAvoidingView>

@@ -53,6 +53,10 @@ export interface Reaction {
   messageId: string;
 }
 export interface Message {
+  /** Local outbox state; never sent to the backend or used as a read watermark. */
+  delivery?: 'sending' | 'failed';
+  localId?: string;
+  sendError?: string;
   replyToMessageId?: string | null;
   id: string;
   conversationId: string;

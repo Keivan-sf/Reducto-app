@@ -1,13 +1,5 @@
 import { useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors, Icon, IconButton } from '../../components/ui';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { VoiceRecordButton } from './VoiceRecordButton';
@@ -15,7 +7,7 @@ import { VoiceRecordButton } from './VoiceRecordButton';
 interface Props {
   busy: boolean;
   hasAttachment: boolean;
-  onSend: (text: string) => Promise<boolean>;
+  onSend: (text: string) => boolean;
   onSendVoice: (voice: RecordedVoice, signal: AbortSignal) => Promise<void>;
   onAttach: () => void;
   onOpenGifs: () => void;
@@ -37,24 +29,27 @@ export function MessageComposer({
   const [draft, setDraft] = useState('');
   const text = useRef('');
   const input = useRef<TextInput>(null);
-  const sending = useRef(false);
   const [recording, setRecording] = useState(false);
   const canSend = !!draft.trim() || hasAttachment;
-  async function submit() {
+  function submit() {
     const submitted = text.current;
-    if (busy || sending.current || (!submitted.trim() && !hasAttachment)) return;
-    sending.current = true;
+    if (busy || (!submitted.trim() && !hasAttachment)) return;
     input.current?.focus();
+    // Consume the draft synchronously so another tap cannot send it twice.
+    text.current = '';
     try {
-      if (await onSend(submitted)) {
-        // Keep edits made while the request was pending.
-        if (text.current === submitted) {
-          text.current = '';
-          setDraft('');
-        }
+      if (!onSend(submitted)) {
+        text.current = submitted;
+        return;
       }
-    } finally {
-      sending.current = false;
+      // Android can keep displaying the controlled value until React commits.
+      // Clear the native text/selection now, in the same press handler, without
+      // blurring the input or waiting for a render/network response.
+      input.current?.clear();
+      setDraft('');
+    } catch (error) {
+      text.current = submitted;
+      onError(error instanceof Error ? error.message : 'Could not send message.');
     }
   }
   function beforeRecord() {
@@ -114,11 +109,7 @@ export function MessageComposer({
             onPress={() => void submit()}
             style={[s.send, busy && { opacity: 0.45 }]}
           >
-            {busy ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Icon name="send" color="white" size={20} />
-            )}
+            <Icon name="send" color="white" size={20} />
           </Pressable>
         ) : (
           <VoiceRecordButton
