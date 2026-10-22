@@ -266,3 +266,58 @@ test('a failed first lookup retries and removed conversations cannot restore the
   assert.equal(published.chat, undefined);
   assert.equal(cache.isOpen('chat'), false);
 });
+
+test('latest previews load one message independently of the anchored history and reuse the cache', async () => {
+  const paths: string[] = [];
+  const latest = { ...message('latest'), createdAt: '2026-10-22T12:00:00Z' };
+  const { cache, published } = create(async (path) => {
+    paths.push(path);
+    if (path.endsWith('?limit=1')) return { messages: [latest], nextCursor: 'older' };
+    return {
+      message: message('seen'),
+      before: [],
+      after: [],
+      hasMoreBefore: true,
+      hasMoreAfter: true,
+    };
+  });
+  await Promise.all([cache.loadLatest('chat'), cache.loadLatest('chat')]);
+  assert.equal(paths.length, 1);
+  assert.equal(cache.latest('chat')?.id, 'latest');
+  assert.equal(cache.isOpen('chat'), false);
+  assert.equal(Object.hasOwn(published, 'chat'), false);
+  await cache.open('chat', 'seen');
+  assert.equal(published.chat.at(-1)?.id, 'seen');
+  assert.equal(cache.latest('chat')?.id, 'latest');
+  await cache.loadLatest('chat');
+  assert.equal(paths.length, 2);
+  const live = { ...latest, id: 'live', createdAt: '2026-10-22T13:00:00Z' };
+  cache.accept(live);
+  assert.equal(cache.latest('chat')?.id, 'live');
+  assert.equal(published.chat.at(-1)?.id, 'seen', 'a live preview cannot create a history gap');
+  await cache.loadLatest('chat', true);
+  assert.equal(cache.latest('chat')?.id, 'live', 'older refreshes cannot roll back live previews');
+  cache.prune(new Set());
+  assert.equal(cache.latest('chat'), undefined);
+});
+
+test('empty previews are cached, and pending preview snapshots cannot erase live messages', async () => {
+  let calls = 0;
+  let resolve!: (page: MessagePage) => void;
+  const { cache, published } = create(async () => {
+    if (++calls === 1) return { messages: [], nextCursor: null };
+    return new Promise<MessagePage>((done) => {
+      resolve = done;
+    });
+  });
+  await cache.loadLatest('chat');
+  await cache.loadLatest('chat');
+  assert.equal(calls, 1);
+  assert.equal(cache.latest('chat'), null);
+  assert.equal(Object.hasOwn(published, 'chat'), false);
+  const pending = cache.loadLatest('chat', true);
+  cache.accept(message('live'));
+  resolve({ messages: [], nextCursor: null });
+  await pending;
+  assert.equal(cache.latest('chat')?.id, 'live');
+});

@@ -401,8 +401,15 @@ async function mockApi(
         hasMoreBefore: index > before,
         hasMoreAfter: ordered.length - index - 1 > after,
       };
-    } else if (path.endsWith('/messages')) body = { messages, nextCursor: null };
-    else if (path.endsWith('/profile')) body = { user: { ...user, ...request.postDataJSON() } };
+    } else if (path.endsWith('/messages')) {
+      const limit = Number(new URL(request.url()).searchParams.get('limit') ?? 50);
+      const ordered = [...messages].sort((a, b) => {
+        const left = a as typeof first;
+        const right = b as typeof first;
+        return right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id);
+      });
+      body = { messages: ordered.slice(0, limit), nextCursor: null };
+    } else if (path.endsWith('/profile')) body = { user: { ...user, ...request.postDataJSON() } };
     else if (path.endsWith('/sign-out')) return route.fulfill({ status: 204 });
     else if (path.endsWith('/invite')) body = { inviteLink: `/api/groups/join/${inviteToken}` };
     else if (path.startsWith('/api/groups/join/')) body = { conversation: chat };
@@ -971,6 +978,7 @@ test('reopening a cached conversation does not request its history again', async
   await page.route(
     /\/api\/conversations\/[^/]+\/messages(?:\/first|\/[^/]+\/around)?(?:\?|$)/,
     (route) => {
+      if (new URL(route.request().url()).searchParams.get('limit') === '1') return route.fallback();
       pages++;
       return route.fallback();
     },
@@ -990,6 +998,55 @@ test('reopening a cached conversation does not request its history again', async
   }
   expect(initial).toBe(2);
   expect(pages).toBe(initial);
+});
+
+test('conversation previews show the actual latest message independently of unread history windows', async ({
+  page,
+}, testInfo) => {
+  const history = Array.from({ length: 201 }, (_, index) => ({
+    ...first,
+    id: `preview-history-${index}`,
+    text: `Conversation message ${index}`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history);
+  const realtime = await mockRealtime(page);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [{ ...chat, lastSeenMessageId: history[20].id, unreadCount: 180 }],
+      },
+    }),
+  );
+  const limits: number[] = [];
+  await page.route(/\/api\/conversations\/[^/]+\/messages\?/, (route) => {
+    const limit = Number(new URL(route.request().url()).searchParams.get('limit'));
+    limits.push(limit);
+    return route.fallback();
+  });
+  await signIn(page);
+  const preview = page.getByTestId(`preview-${chat.id}`);
+  await expect(preview).toHaveText('Conversation message 200');
+  expect(limits).toEqual([1]);
+  await expect(page.getByTestId(`unread-${chat.id}`)).toHaveText('180');
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByTestId(`message-${history[20].id}`)).toBeInViewport();
+  const live = {
+    ...history[200],
+    id: 'latest-voice',
+    text: null,
+    attachment: { type: 'voice', mediaId: 'latest-voice' },
+    createdAt: '2026-10-18T13:00:00Z',
+  };
+  await realtime.emit('message.created', { message: live });
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await expect(preview).toHaveText('Voice message');
+  await expect(page.getByText('Open conversation', { exact: true })).toHaveCount(0);
+  // Refresh may return an older snapshot; it must not roll back the live preview.
+  await page.getByRole('button', { name: 'Refresh conversations', exact: true }).click();
+  await expect(preview).toHaveText('Voice message');
+  expect(limits.every((limit) => limit === 1)).toBe(true);
 });
 
 test('API unread counts decrease as visible messages are read, persist seen positions, and sync another client without notifications', async ({
@@ -1137,6 +1194,7 @@ test('history opens around last seen without startup tail requests and scrolling
     }),
   );
   await page.route(/\/api\/conversations\/[^/]+\/messages\?/, (route) => {
+    if (new URL(route.request().url()).searchParams.get('limit') === '1') return route.fallback();
     latestRequests++;
     return route.fulfill({
       status: 500,
@@ -1220,6 +1278,7 @@ test('a chat without a last-seen message opens at its first message and pages fo
     return route.fulfill({ json: { message: history[0] } });
   });
   await page.route(/\/api\/conversations\/[^/]+\/messages\?/, (route) => {
+    if (new URL(route.request().url()).searchParams.get('limit') === '1') return route.fallback();
     latestCalls++;
     return route.fulfill({
       status: 500,

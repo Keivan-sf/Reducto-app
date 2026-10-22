@@ -5,6 +5,7 @@ import { mergeMessages } from '../lib/messages';
 export class MessageCache {
   private bounds = new Map<string, { hasMoreBefore: boolean; hasMoreAfter: boolean }>();
   private histories = new Map<string, Message[]>();
+  private latestMessages = new Map<string, Message | null>();
   private entities = new Map<string, Map<string, Message>>();
   private cursors = new Map<string, string | null>();
   private pending = new Map<string, Promise<unknown>>();
@@ -14,6 +15,7 @@ export class MessageCache {
     private readonly get: <T>(path: string) => Promise<T>,
     private readonly publish: (id: string, messages: Message[]) => void,
     private readonly rememberPeople: (messages: Message[]) => void = () => {},
+    private readonly publishLatest: (id: string, message: Message | null) => void = () => {},
   ) {}
   private async request<T>(id: string, key: string, action: () => Promise<T>): Promise<T> {
     if (!this.generations.has(id)) this.generations.set(id, 0);
@@ -53,8 +55,36 @@ export class MessageCache {
   history(id: string) {
     return this.histories.get(id) ?? [];
   }
+  latest(id: string) {
+    return this.latestMessages.get(id);
+  }
+  private updateLatest(id: string, message: Message | null) {
+    const previous = this.latestMessages.get(id);
+    // Delayed snapshots/history windows must not replace a newer live preview.
+    if (
+      previous &&
+      (!message ||
+        previous.createdAt > message.createdAt ||
+        (previous.createdAt === message.createdAt && previous.id > message.id))
+    )
+      return;
+    this.latestMessages.set(id, message);
+    this.publishLatest(id, message);
+  }
+  async loadLatest(id: string, force = false) {
+    if (!force && this.latestMessages.has(id)) return;
+    await this.request(id, JSON.stringify(['latest', id]), async () => {
+      const generation = this.generations.get(id);
+      const page = await this.get<MessagePage>(`/api/conversations/${id}/messages?limit=1`);
+      if (this.generations.get(id) !== generation) return;
+      const message = page.messages[0] ?? null;
+      if (message) this.remember([message]);
+      this.updateLatest(id, message);
+    });
+  }
   accept(message: Message) {
     this.remember([message]);
+    this.updateLatest(message.conversationId, message);
     // A live message must not create a hole after an older, contiguous window.
     if (this.hasNewer(message.conversationId)) return;
     const history = mergeMessages(this.histories.get(message.conversationId) ?? [], [message]);
@@ -91,6 +121,7 @@ export class MessageCache {
       if (this.generations.get(id) !== generation) return;
       const history = mergeMessages([], [...page.before, page.message, ...page.after]);
       this.histories.set(id, history);
+      if (!page.hasMoreAfter) this.updateLatest(id, history.at(-1) ?? null);
       this.bounds.set(id, { hasMoreBefore: page.hasMoreBefore, hasMoreAfter: page.hasMoreAfter });
       this.publish(id, history);
     });
@@ -118,6 +149,7 @@ export class MessageCache {
         hasMoreAfter: older ? previous.hasMoreAfter : page.hasMoreAfter && page.after.length > 0,
       });
       this.histories.set(id, history);
+      if (!this.hasNewer(id)) this.updateLatest(id, history.at(-1) ?? null);
       this.publish(id, history);
     });
   }
@@ -146,6 +178,7 @@ export class MessageCache {
       if (older || !this.cursors.has(id) || (force && !overlap && page.messages.length))
         this.cursors.set(id, page.nextCursor);
       this.remember(page.messages);
+      if (!older) this.updateLatest(id, page.messages[0] ?? null);
       const merged = mergeMessages(history, page.messages);
       this.bounds.set(id, { hasMoreBefore: !!this.cursors.get(id), hasMoreAfter: false });
       this.histories.set(id, merged);
@@ -208,6 +241,7 @@ export class MessageCache {
       if (allowed.has(id)) continue;
       this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
       this.histories.delete(id);
+      this.latestMessages.delete(id);
       this.entities.delete(id);
       this.cursors.delete(id);
       this.bounds.delete(id);

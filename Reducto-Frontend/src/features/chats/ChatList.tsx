@@ -21,7 +21,7 @@ export default function ChatList() {
   const { profiles, directory } = useProfiles();
   const {
     conversations,
-    messages,
+    latestMessages,
     members,
     unread,
     activeId,
@@ -52,8 +52,8 @@ export default function ChatList() {
         (filter !== 'Unread' || unread[chat.id] > 0),
     )
     .sort((a, b) =>
-      (messages[b.id]?.at(-1)?.createdAt ?? b.createdAt).localeCompare(
-        messages[a.id]?.at(-1)?.createdAt ?? a.createdAt,
+      (latestMessages[b.id]?.createdAt ?? b.createdAt).localeCompare(
+        latestMessages[a.id]?.createdAt ?? a.createdAt,
       ),
     );
   async function reload() {
@@ -153,7 +153,7 @@ export default function ChatList() {
           )
         }
         renderItem={({ item: chat }) => {
-          const last = messages[chat.id]?.at(-1);
+          const last = latestMessages[chat.id];
           const selected = activeId === chat.id;
           return (
             <Pressable
@@ -178,15 +178,13 @@ export default function ChatList() {
                   </Text>
                 )}
                 <View style={s.rowLine}>
-                  <Text numberOfLines={1} style={[s.preview, selected && { color: '#E6F1FE' }]}>
+                  <Text
+                    testID={`preview-${chat.id}`}
+                    numberOfLines={1}
+                    style={[s.preview, selected && { color: '#E6F1FE' }]}
+                  >
                     {last?.senderId === session!.user.id ? 'You: ' : ''}
-                    {last
-                      ? preview(last)
-                      : unread[chat.id] > 0
-                        ? `${unread[chat.id]} unread messages`
-                        : chat.lastSeenMessageId
-                          ? 'Open conversation'
-                          : preview(last)}
+                    {last ? preview(last) : last === null ? preview() : ''}
                   </Text>
                   {!!unread[chat.id] && (
                     <View

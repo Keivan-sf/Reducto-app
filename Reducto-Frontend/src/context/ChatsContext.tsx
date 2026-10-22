@@ -25,6 +25,7 @@ import { ReadState } from '../api/read-state';
 interface ChatsState {
   conversations: Conversation[];
   messages: Record<string, Message[]>;
+  latestMessages: Record<string, Message | null>;
   members: Record<string, Member[]>;
   unread: Record<string, number>;
   loading: boolean;
@@ -56,6 +57,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
   const userId = session?.user.id;
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
+  const [latestMessages, setLatestMessages] = useState<Record<string, Message | null>>({});
   const [members, setMembers] = useState<Record<string, Member[]>>({});
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -88,6 +90,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
             history.flatMap((message) => [message.senderId, message.forwardedFrom?.senderId ?? '']),
           );
         },
+        (id, message) => setLatestMessages((current) => ({ ...current, [id]: message })),
       ),
   );
   const lastRefreshAt = useRef(0);
@@ -158,17 +161,23 @@ export function ChatsProvider({ children }: PropsWithChildren) {
           setMessages((current) =>
             Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))),
           );
-          if (activeRef.current && !allowed.has(activeRef.current)) activate(null);
-          const outcomes = await Promise.allSettled(
-            chats.map(async (chat) => {
-              const people = await api.get<{ members: Member[] }>(
-                `/api/conversations/${chat.id}/members`,
-              );
-              return { id: chat.id, people };
-            }),
+          setLatestMessages((current) =>
+            Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))),
           );
+          if (activeRef.current && !allowed.has(activeRef.current)) activate(null);
+          const [outcomes, previews] = await Promise.all([
+            Promise.allSettled(
+              chats.map(async (chat) => {
+                const people = await api.get<{ members: Member[] }>(
+                  `/api/conversations/${chat.id}/members`,
+                );
+                return { id: chat.id, people };
+              }),
+            ),
+            Promise.allSettled(chats.map((chat) => messageCache.loadLatest(chat.id, true))),
+          ]);
           if (sequence !== refreshSequence.current) return;
-          let failed = false;
+          let failed = previews.some((outcome) => outcome.status === 'rejected');
           for (const outcome of outcomes) {
             if (outcome.status === 'fulfilled') {
               const { id, people } = outcome.value;
@@ -289,6 +298,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       value={{
         conversations,
         messages,
+        latestMessages,
         members,
         unread,
         loading,
