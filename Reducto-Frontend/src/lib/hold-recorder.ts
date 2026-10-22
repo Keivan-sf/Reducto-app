@@ -80,17 +80,25 @@ export class HoldRecorder {
   cancel() {
     const current = this.current;
     if (!current) return;
+    // Release the UI immediately, even if permission/preparation or stop is
+    // still pending. Late results belong to this aborted hold and are discarded.
+    this.current = undefined;
     current.controller.abort();
-    current.session?.cancel();
-    if (this.phase === 'preparing' || this.phase === 'stopping' || this.phase === 'sending')
-      this.change('stopping');
-    else {
-      this.current = undefined;
+    try {
+      current.session?.cancel();
+    } catch (error) {
+      if (this.mounted)
+        this.callbacks.error(
+          error instanceof Error ? error.message : 'Could not cancel recording.',
+        );
+    } finally {
       this.change('idle');
     }
   }
   dispose() {
-    this.mounted = false;
+    // Notify the parent before suppressing callbacks so a disappearing mic
+    // button can never leave its composer locked in recording mode.
     this.cancel();
+    this.mounted = false;
   }
 }

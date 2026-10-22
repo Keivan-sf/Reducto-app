@@ -73,6 +73,7 @@ test('release during permission/preparation cancels a late recorder without uplo
   const preparing = test.controller.press();
   test.controller.release();
   assert.equal(signal.aborted, true);
+  assert.equal(test.states.at(-1), 'idle', 'permission cleanup must not lock the composer');
   started.resolve(test.session);
   await preparing;
   assert.equal(test.counts().sends, 0);
@@ -123,4 +124,43 @@ test('short taps discard silently while permission failures still show an error'
   await denied.controller.press();
   assert.deepEqual(denied.errors, ['Microphone denied']);
   assert.equal(denied.states.at(-1), 'idle');
+});
+
+test('a cancelled preparation restores the UI immediately and cannot change a newer hold', async () => {
+  const pending = deferred<RecordingSession>();
+  let starts = 0;
+  const test = setup(() => (++starts === 1 ? pending.promise : Promise.resolve(test.session)));
+  const first = test.controller.press();
+  test.controller.cancel();
+  assert.equal(test.states.at(-1), 'idle');
+  await test.controller.press();
+  assert.equal(test.states.at(-1), 'recording');
+  pending.resolve(test.session);
+  await first;
+  assert.equal(test.states.at(-1), 'recording', 'old cleanup cannot unlock a newer recording');
+  test.controller.release();
+  await tick();
+  assert.equal(test.counts().sends, 1);
+});
+
+test('disposing an active recorder clears the parent activity state', async () => {
+  const test = setup();
+  await test.controller.press();
+  test.controller.dispose();
+  assert.equal(test.states.at(-1), 'idle');
+  assert.equal(test.counts().sends, 0);
+});
+
+test('cancellation restores idle even when native recorder cleanup throws', async () => {
+  const test = setup(async () => ({
+    stop: async () => {
+      throw new Error('Not recording');
+    },
+    cancel: () => {
+      throw new Error('Already released');
+    },
+  }));
+  await test.controller.press();
+  assert.doesNotThrow(() => test.controller.cancel());
+  assert.equal(test.states.at(-1), 'idle');
 });

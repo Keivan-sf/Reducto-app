@@ -615,6 +615,50 @@ test('sign in, send a message, edit profile, and sign out', async ({ page }, tes
   expect(errors).toEqual([]);
 });
 
+test('sending keeps the composer focused and preserves edits made during the request', async ({
+  page,
+}) => {
+  await mockApi(page);
+  let finishSend!: () => Promise<void>;
+  const sent: string[] = [];
+  await page.route('**/api/conversations/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    sent.push(body.text);
+    if (sent.length > 1) return route.fallback();
+    finishSend = () =>
+      route.fulfill({
+        json: {
+          message: {
+            ...first,
+            id: 'keyboard-message',
+            senderId: user.id,
+            text: body.text,
+            createdAt: '2026-10-18T12:02:00Z',
+          },
+        },
+      });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('First message');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect.poll(() => sent).toEqual(['First message']);
+  await expect(composer).toBeFocused();
+  await expect(composer).toBeEditable();
+  await composer.fill('Next message');
+  await finishSend();
+  await expect(page.getByTestId('message-keyboard-message')).toBeVisible();
+  await expect(composer).toBeFocused();
+  await expect(composer).toHaveValue('Next message');
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect.poll(() => sent).toEqual(['First message', 'Next message']);
+  await expect(composer).toHaveValue('');
+  await expect(composer).toBeFocused();
+});
+
 test('authentication failures and sign-up fields are usable', async ({ page }, testInfo) => {
   await mockApi(page);
   await page.goto('/login');
@@ -2679,6 +2723,9 @@ for (const mode of ['denied', 'delayed'] as const) {
       ).toBeVisible();
     else await expect(page.getByText('Preparing microphone…')).toBeVisible();
     await page.mouse.up();
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEditable();
+    await expect(mic).toBeEnabled();
+
     if (mode === 'delayed') {
       await page.evaluate(() =>
         (
@@ -2700,6 +2747,46 @@ for (const mode of ['denied', 'delayed'] as const) {
     expect(uploads).toBe(0);
   });
 }
+
+test('accidental mic taps leave typing usable and fast typing switches immediately to send', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await mockMicrophone(page, 'delayed');
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  const mic = page.getByRole('button', { name: 'Hold to record voice message', exact: true });
+  await mic.click();
+  await expect(composer).toBeEditable();
+  await expect(page.getByText('Preparing microphone…')).toHaveCount(0);
+  await composer.focus();
+  await page.keyboard.type('A quick message', { delay: 0 });
+  const send = page.getByRole('button', { name: 'Send message', exact: true });
+  await send.click();
+  await expect(page.getByText('A quick message', { exact: true })).toBeVisible();
+  await expect(composer).toHaveValue('');
+  await expect(composer).toBeFocused();
+  // Cancel a real preparation before its permission promise resolves. Typing
+  // must work immediately, and late permission must not lock the new draft.
+  const box = (await mic.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.getByText('Preparing microphone…')).toBeVisible();
+  await page.mouse.up();
+  await expect(composer).toBeEditable();
+  await composer.fill('Typing after cancellation');
+  await expect(send).toBeVisible();
+  await page.evaluate(() =>
+    (
+      window as unknown as { __voiceMicrophone: { resolve?: () => void } }
+    ).__voiceMicrophone.resolve?.(),
+  );
+  await expect(composer).toBeEditable();
+  await expect(composer).toHaveValue('Typing after cancellation');
+  await send.click();
+  await expect(page.getByText('Typing after cancellation', { exact: true })).toBeVisible();
+});
 
 test('moving away while holding keeps recording until release; leaving the chat cancels without sending', async ({
   page,

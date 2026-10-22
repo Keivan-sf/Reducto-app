@@ -20,8 +20,10 @@ export function VoiceRecordButton({
   onSend,
   onError,
   onActive,
+  onBeforeRecord,
 }: {
   disabled: boolean;
+  onBeforeRecord?: () => boolean;
   onSend: (voice: RecordedVoice, signal: AbortSignal) => Promise<void>;
   onError: (error: string) => void;
   onActive: (active: boolean) => void;
@@ -89,7 +91,11 @@ export function VoiceRecordButton({
         accessibilityHint="Keep holding while speaking. Release to send."
         disabled={disabled || working}
         onPressIn={() => {
-          if (phase === 'idle') {
+          onBeforeRecord?.();
+        }}
+        delayLongPress={150}
+        onLongPress={() => {
+          if (phase === 'idle' && onBeforeRecord?.() !== false) {
             setElapsed(0);
             onError('');
             void controller.press();
@@ -104,7 +110,6 @@ export function VoiceRecordButton({
           if (!event.nativeEvent.touches.length) controller.release();
         }}
         onTouchCancel={() => controller.cancel()}
-        onLongPress={() => {}}
         {...(Platform.OS === 'web'
           ? {
               onContextMenu: (event: { preventDefault: () => void }) => event.preventDefault(),

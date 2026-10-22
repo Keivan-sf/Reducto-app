@@ -52,7 +52,7 @@ import { GifPreview } from './GifPreview';
 import { useGifs } from '../../context/GifsContext';
 import { ReplyPreview, ReplyQuote } from './ReplyPreview';
 import { VoiceMessage } from './VoiceMessage';
-import { VoiceRecordButton } from './VoiceRecordButton';
+import { MessageComposer } from './MessageComposer';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { voicePlayback } from '../../lib/voice-playback';
 import { VideoCard } from './VideoCard';
@@ -115,7 +115,6 @@ export default function ChatView({ id }: { id?: string }) {
   const scrollTarget = useRef<{ id: string; index: number; attempts: number } | null>(null);
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [seekingVoice, setSeekingVoice] = useState(false);
@@ -415,15 +414,15 @@ export default function ChatView({ id }: { id?: string }) {
   useEffect(() => {
     loadVisibleEdges();
   }, [loadVisibleEdges]);
-  async function send(gifId?: string) {
-    if (!id || busy || (!draft.trim() && !attachment && !gifId)) return;
+  async function send(gifId?: string, text = ''): Promise<boolean> {
+    if (!id || busy || (!text.trim() && !attachment && !gifId)) return false;
     setBusy(true);
     setError('');
     try {
       const { message } = await api.post<{ message: Message }>(
         `/api/conversations/${id}/messages`,
         {
-          ...(draft.trim() && !gifId ? { text: draft.trim() } : {}),
+          ...(text.trim() && !gifId ? { text: text.trim() } : {}),
           ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
           ...(gifId || attachment
             ? { attachment: gifId ? { type: 'gif', gifId } : attachment }
@@ -434,14 +433,15 @@ export default function ChatView({ id }: { id?: string }) {
       setReplyTo(null);
       showLatest();
       if (!gifId) {
-        setDraft('');
         setAttachment(undefined);
         setAttachmentName('');
       }
       list.current?.scrollToOffset({ offset: 0, animated: true });
+      return true;
     } catch (err) {
       setError((err as Error).message);
       if (gifId) throw err;
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1002,71 +1002,19 @@ export default function ChatView({ id }: { id?: string }) {
             />
           </View>
         )}
-        <View style={s.composer}>
-          <IconButton
-            name="attach-outline"
-            label="Attach a file"
-            disabled={busy || voiceActive}
-            onPress={() => void upload().catch((err) => setError(err.message))}
-          />
-          <TextInput
-            accessibilityLabel="Message"
-            editable={!busy && !voiceActive}
-            multiline
-            placeholder="Write a message…"
-            placeholderTextColor="#96A3B0"
-            value={draft}
-            onChangeText={setDraft}
-            maxLength={10000}
-            style={s.messageInput}
-            onKeyPress={(event) => {
-              if (
-                Platform.OS === 'web' &&
-                event.nativeEvent.key === 'Enter' &&
-                !(event.nativeEvent as unknown as { shiftKey: boolean }).shiftKey
-              ) {
-                event.preventDefault();
-                void send();
-              }
-            }}
-          />
-          <IconButton
-            name="happy-outline"
-            label="Open GIF library"
-            disabled={busy || voiceActive}
-            onPress={() => setGifs(true)}
-          />
-          {!draft.trim() && !attachment ? (
-            <VoiceRecordButton
-              disabled={busy}
-              onSend={sendVoice}
-              onError={setError}
-              onActive={(active) => {
-                if (active) voicePlayback.pause();
-                setVoiceActive(active);
-              }}
-            />
-          ) : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Send message"
-              disabled={busy || (!draft.trim() && !attachment)}
-              onPress={() => void send()}
-              style={[s.send, (busy || (!draft.trim() && !attachment)) && { opacity: 0.45 }]}
-            >
-              {busy ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Icon name="send" color="white" size={20} />
-              )}
-            </Pressable>
-          )}
-        </View>
-        <Text style={s.composerHint}>
-          {Platform.OS === 'web'
-            ? 'Enter to send · Shift + Enter for a new line'
-            : 'A little hello goes a long way'}
-        </Text>
+        <MessageComposer
+          busy={busy}
+          hasAttachment={!!attachment}
+          onSend={(text) => send(undefined, text)}
+          onSendVoice={sendVoice}
+          onAttach={() => void upload().catch((err) => setError(err.message))}
+          onOpenGifs={() => setGifs(true)}
+          onError={setError}
+          onVoiceActive={(active) => {
+            if (active) voicePlayback.pause();
+            setVoiceActive(active);
+          }}
+        />
       </View>
       {playingVideo && (
         <VideoViewer
@@ -1077,7 +1025,13 @@ export default function ChatView({ id }: { id?: string }) {
         />
       )}
       <GroupDialog chat={chat} visible={details} onClose={() => setDetails(false)} />
-      <GifDialog visible={gifs} onClose={() => setGifs(false)} onSend={send} />
+      <GifDialog
+        visible={gifs}
+        onClose={() => setGifs(false)}
+        onSend={async (gifId) => {
+          await send(gifId);
+        }}
+      />
       <Dialog visible={forward} title="Forward to…" onClose={() => setForward(false)}>
         {conversations.map((destination) => (
           <Button
@@ -1225,42 +1179,6 @@ const s = StyleSheet.create({
     fontSize: 12,
   },
   composerWrap: { padding: 14, paddingBottom: 8, backgroundColor: '#E8EFF3' },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 4,
-    padding: 7,
-    borderRadius: 17,
-    backgroundColor: 'white',
-    maxWidth: 900,
-    width: '100%',
-    alignSelf: 'center',
-  },
-  messageInput: {
-    flex: 1,
-    minHeight: 44,
-    maxHeight: 140,
-    paddingVertical: 12,
-    paddingHorizontal: 6,
-    fontSize: 15,
-    color: colors.dark,
-    outlineWidth: 0,
-  },
-  send: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: colors.blue,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  composerHint: {
-    color: '#9AAAB7',
-    fontSize: 10,
-    textAlign: 'center',
-    paddingTop: 9,
-    paddingBottom: 2,
-  },
   pending: {
     flexDirection: 'row',
     gap: 8,
