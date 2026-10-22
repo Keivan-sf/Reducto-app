@@ -105,9 +105,10 @@ export function ChatsProvider({ children }: PropsWithChildren) {
   const acceptMessage = useCallback(
     (message: Message) => {
       readState.created(message);
+      if (message.senderId === userId) readState.sent(message);
       messageCache.accept(message);
     },
-    [messageCache, readState],
+    [messageCache, readState, userId],
   );
   const readVisible = useCallback(
     (id: string, visible: Message[], window: Message[], hasBefore: boolean, hasAfter: boolean) => {

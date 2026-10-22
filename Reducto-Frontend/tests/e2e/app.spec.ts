@@ -1112,6 +1112,75 @@ test('API unread counts decrease as visible messages are read, persist seen posi
   }
 });
 
+test('sending marks the returned message seen before latest history loads', async ({
+  page,
+}, testInfo) => {
+  const history = Array.from({ length: 101 }, (_, index) => ({
+    ...first,
+    id: `before-send-${index}`,
+    text: `Earlier unread ${index}`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  const sent = {
+    ...first,
+    id: 'sent-and-seen',
+    senderId: user.id,
+    text: 'My new message',
+    createdAt: '2026-10-18T13:00:00Z',
+  };
+  await mockApi(page, history);
+  let serverState = { lastSeenMessageId: history[0].id, unreadCount: 100 };
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [{ ...chat, ...serverState }] } }),
+  );
+  await page.route('**/api/conversations/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    expect(route.request().postDataJSON().text).toBe(sent.text);
+    return route.fulfill({ json: { message: sent } });
+  });
+  let releaseTail: (() => Promise<void>) | undefined;
+  await page.route(/\/api\/conversations\/[^/]+\/messages\?limit=50$/, (route) => {
+    releaseTail = () =>
+      route.fulfill({
+        json: { messages: [sent, ...history.slice(-49).reverse()], nextCursor: history[52].id },
+      });
+  });
+  let releaseSeen!: () => void;
+  const seenGate = new Promise<void>((resolve) => {
+    releaseSeen = resolve;
+  });
+  const seen: string[] = [];
+  await page.route('**/api/conversations/*/seen', async (route) => {
+    const id = route.request().postDataJSON().messageId;
+    seen.push(id);
+    if (id === sent.id) {
+      expect(route.request().method()).toBe('PUT');
+      expect(route.request().headers().authorization).toBe('Bearer access-token');
+      serverState = { lastSeenMessageId: sent.id, unreadCount: 0 };
+      await seenGate;
+    }
+    return route.fulfill({ json: serverState });
+  });
+  try {
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await expect(page.getByTestId(`message-${history[0].id}`)).toBeInViewport();
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill(sent.text);
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await expect.poll(() => !!releaseTail).toBe(true);
+    await expect.poll(() => seen).toContain(sent.id);
+    // The sent message cannot be visible yet: the latest history is still pending.
+    await expect(page.getByTestId(`message-${sent.id}`)).toHaveCount(0);
+    if (testInfo.project.name === 'mobile')
+      await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+    await expect(page.getByTestId(`unread-${chat.id}`)).toHaveCount(0);
+    expect(serverState.lastSeenMessageId).toBe(sent.id);
+  } finally {
+    releaseSeen();
+    await releaseTail?.();
+  }
+});
+
 test('unread opening resolves an older seen position through the around API without clearing the whole badge', async ({
   page,
 }, testInfo) => {

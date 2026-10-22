@@ -13,7 +13,7 @@ interface Entry extends SeenState {
   controller?: AbortController;
 }
 
-/** Account-scoped read watermarks. Only actually viewed messages advance them.
+/** Account-scoped read watermarks. Viewing or sending messages advances them.
  * Local counts are optimistic; serialized PUTs and list snapshots reconcile them. */
 export class ReadState {
   private entries = new Map<string, Entry>();
@@ -79,6 +79,27 @@ export class ReadState {
     entry.unreadCount++;
     entry.revision = ++this.revision;
     this.emit();
+  }
+  sent(message: Message) {
+    if (this.disposed) return;
+    const id = message.conversationId;
+    let entry = this.entries.get(id);
+    if (!entry) {
+      entry = {
+        lastSeenMessageId: null,
+        unreadCount: 0,
+        known: new Map(),
+        revision: this.revision,
+      };
+      this.entries.set(id, entry);
+    }
+    entry.known.set(message.id, message);
+    // Sending acknowledges everything through this message, even across an
+    // unloaded history gap. Preserve any later messages already received.
+    const remaining = [...entry.known.values()].filter(
+      (known) => comparePosition(known, message) >= 0,
+    );
+    this.view(id, [message], remaining, true, false);
   }
   view(
     id: string,

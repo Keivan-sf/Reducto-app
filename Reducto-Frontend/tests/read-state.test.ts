@@ -149,3 +149,79 @@ test('failed writes retry without losing the optimistic read position; removed c
   assert.equal(state.peek(chat.id), undefined);
   state.dispose();
 });
+
+test('sending advances seen across unloaded history, clears unread immediately and ignores its duplicate echo', async () => {
+  const calls: string[] = [];
+  let count = 0;
+  const state = new ReadState(
+    async (_id, messageId) => {
+      calls.push(messageId);
+      return { lastSeenMessageId: messageId, unreadCount: 0 };
+    },
+    (counts) => {
+      count = counts.chat;
+    },
+    0,
+  );
+  state.sync([chat], state.version());
+  const own = { ...messages[10], id: 'own', senderId: 'me', createdAt: '2026-10-22T00:01:00Z' };
+  state.created(own);
+  state.sent(own);
+  assert.deepEqual(state.peek(chat.id), { lastSeenMessageId: own.id, unreadCount: 0 });
+  state.created(own);
+  state.sent(own);
+  state.view(chat.id, [messages[1]], messages, false, false);
+  assert.equal(count, 0);
+  await tick();
+  assert.deepEqual(calls, [own.id]);
+  assert.equal(state.peek(chat.id)?.lastSeenMessageId, own.id);
+  state.dispose();
+});
+
+test('sending preserves newer incoming messages and an older in-flight seen response cannot undo it', async () => {
+  const calls: string[] = [];
+  const completions: ((value: SeenState) => void)[] = [];
+  const state = new ReadState(
+    async (_id, messageId) => {
+      calls.push(messageId);
+      return new Promise<SeenState>((resolve) => completions.push(resolve));
+    },
+    () => {},
+    0,
+  );
+  state.sync([chat], state.version());
+  state.view(chat.id, [messages[3]], messages, false, false);
+  await tick();
+  const stale = state.version();
+  const own = { ...messages[10], id: 'own', senderId: 'me', createdAt: '2026-10-22T00:01:00Z' };
+  state.created(own);
+  state.created({ ...own, id: 'later', senderId: 'peer', createdAt: '2026-10-22T00:01:01Z' });
+  state.sent(own);
+  assert.deepEqual(state.peek(chat.id), { lastSeenMessageId: own.id, unreadCount: 1 });
+  state.sync([chat], stale);
+  completions[0]({ lastSeenMessageId: messages[3].id, unreadCount: 7 });
+  await tick();
+  assert.deepEqual(calls, [messages[3].id, own.id]);
+  assert.equal(state.peek(chat.id)?.unreadCount, 1);
+  completions[1]({ lastSeenMessageId: own.id, unreadCount: 1 });
+  await tick();
+  assert.deepEqual(state.peek(chat.id), { lastSeenMessageId: own.id, unreadCount: 1 });
+  state.dispose();
+});
+
+test('sending in a newly discovered conversation persists seen without waiting for its list snapshot', async () => {
+  const calls: string[] = [];
+  const state = new ReadState(
+    async (_id, messageId) => {
+      calls.push(messageId);
+      return { lastSeenMessageId: messageId, unreadCount: 0 };
+    },
+    () => {},
+    0,
+  );
+  state.sent(messages[0]);
+  await tick();
+  assert.deepEqual(calls, [messages[0].id]);
+  assert.deepEqual(state.peek(chat.id), { lastSeenMessageId: messages[0].id, unreadCount: 0 });
+  state.dispose();
+});
