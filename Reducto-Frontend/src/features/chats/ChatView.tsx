@@ -99,6 +99,7 @@ export default function ChatView({ id }: { id?: string }) {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
+  const [seekingVoice, setSeekingVoice] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState('');
   const [details, setDetails] = useState(false);
@@ -131,6 +132,12 @@ export default function ChatView({ id }: { id?: string }) {
     [setJumpTarget, setHighlighted],
   );
   const list = useRef<FlatList<Message>>(null);
+  const onVoiceSeekingChange = useCallback((seeking: boolean) => {
+    // Apply immediately to Android's native ScrollView, then keep the rendered
+    // prop in sync so any intervening render preserves the lock.
+    if (Platform.OS !== 'web') list.current?.setNativeProps({ scrollEnabled: !seeking });
+    setSeekingVoice(seeking);
+  }, []);
   const wide = useWindowDimensions().width >= 850;
   const peerId = id
     ? members[id]?.find((member) => member.userId !== session!.user.id)?.userId
@@ -581,6 +588,8 @@ export default function ChatView({ id }: { id?: string }) {
       )}
       <FlatList
         ref={list}
+        testID="chat-history"
+        scrollEnabled={!seekingVoice}
         style={{ flex: 1 }}
         contentContainerStyle={s.history}
         inverted
@@ -703,6 +712,7 @@ export default function ChatView({ id }: { id?: string }) {
                   )}
                   {message.attachment?.type === 'voice' ? (
                     <VoiceMessage
+                      onSeekingChange={onVoiceSeekingChange}
                       conversationId={id}
                       mediaId={message.attachment.mediaId}
                       active={

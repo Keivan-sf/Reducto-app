@@ -2051,6 +2051,39 @@ test('voice attachments play, pause, seek on a straight progress line, and expos
   const bounds = (await progress.boundingBox())!;
   await progress.click({ position: { x: bounds.width * 0.6, y: bounds.height / 2 } });
   await expect(progress).toHaveAttribute('aria-valuenow', '1');
+  // Keep dragging when the pointer leaves both the track and its message bubble.
+  await page.mouse.move(bounds.x + bounds.width * 0.6, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width + 50, bounds.y - 60);
+  await expect(page.getByTestId('chat-history')).toHaveCSS('overflow-y', 'hidden');
+  await expect(progress).toHaveAttribute('aria-valuenow', '3');
+  await page.mouse.up();
+  await expect(page.getByTestId('chat-history')).not.toHaveCSS('overflow-y', 'hidden');
+  await expect(progress).toHaveAttribute('aria-valuenow', '3');
+  await page.mouse.move(bounds.x + bounds.width * 0.8, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x - 60, bounds.y + 60);
+  await expect(progress).toHaveAttribute('aria-valuenow', '0');
+  await page.mouse.up();
+  await expect(progress).toHaveAttribute('aria-valuenow', '0');
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
+  if (testInfo.project.name === 'mobile') {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: bounds.x + 10, y: bounds.y + bounds.height / 2 }],
+    });
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: bounds.x + bounds.width + 10, y: bounds.y + 60 }],
+    });
+    await expect(page.getByTestId('chat-history')).toHaveCSS('overflow-y', 'hidden');
+    await expect(progress).toHaveAttribute('aria-valuenow', '3');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect(page.getByTestId('chat-history')).not.toHaveCSS('overflow-y', 'hidden');
+    await expect(progress).toHaveAttribute('aria-valuenow', '3');
+    await cdp.detach();
+  }
   await page.screenshot({ path: testInfo.outputPath('voice-message.png') });
   await expect(page.getByTestId('message-options')).toHaveCount(0);
   await page.getByRole('button', { name: 'Message actions', exact: true }).click();

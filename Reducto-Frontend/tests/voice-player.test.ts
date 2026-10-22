@@ -81,6 +81,7 @@ function nativeVoicePlayer() {
         };
       if (name.endsWith('/video-download.types')) return { videoTime: () => '0:03' };
       if (name.endsWith('/voice-playback')) return { voicePlayback };
+      if (name === './VoiceSeekBar') return { VoiceSeekBar: 'VoiceSeekBar' };
       throw new Error(`Unexpected import ${name}`);
     },
   });
