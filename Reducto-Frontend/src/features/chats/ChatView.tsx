@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   View,
   type ViewToken,
+  type GestureResponderEvent,
 } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -27,9 +28,18 @@ import {
   Notice,
   styles,
 } from '../../components/ui';
-import { EMOJIS, type Attachment, type Emoji, type Gif, type Message } from '../../api/types';
+import {
+  EMOJIS,
+  type Attachment,
+  type AttachmentMetadata,
+  type Emoji,
+  type Gif,
+  type Message,
+} from '../../api/types';
 import { conversationName, profileName, timeLabel, mergeMessages } from '../../lib/messages';
 import { useProfiles } from '../../context/ProfilesContext';
+import { retainUpload, saveLocalFile } from '../../lib/local-attachments';
+import type { VideoFile } from '../../api/video-cache';
 import { fileForm } from '../../lib/uploads';
 import { downloadAttachment } from '../../lib/download';
 import { AttachmentImage } from './AttachmentImage';
@@ -39,6 +49,12 @@ import { MessageText } from './MessageText';
 import { GifPreview } from './GifPreview';
 import { useGifs } from '../../context/GifsContext';
 import { ReplyPreview, ReplyQuote } from './ReplyPreview';
+import { VideoCard } from './VideoCard';
+import { VideoViewer } from './VideoViewer';
+import { useVideos, videoKey, gifFileKey } from '../../context/VideosContext';
+import { useMediaMetadata } from '../../context/MediaMetadataContext';
+import { saveVideoFile } from '../../lib/video-download';
+import { MessageMenu, type MessageMenuAction } from './MessageMenu';
 
 export default function ChatView({ id }: { id?: string }) {
   const { session } = useSession();
@@ -83,13 +99,16 @@ export default function ChatView({ id }: { id?: string }) {
   const [details, setDetails] = useState(false);
   const [gifs, setGifs] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
-  // Preserve the selection while Modal fades out; clearing it removes only some buttons.
   const [actionsVisible, setActionsVisible] = useState(false);
   const [forward, setForward] = useState(false);
+  const [actionAnchor, setActionAnchor] = useState<{ x: number; y: number } | null>(null);
   const [attachment, setAttachment] = useState<Attachment | undefined>();
   const [attachmentName, setAttachmentName] = useState('');
   const [search, setSearch] = useState<string | null>(null);
   const gifCache = useGifs();
+  const videoCache = useVideos();
+  const mediaMetadata = useMediaMetadata();
+  const [playingVideo, setPlayingVideo] = useState<string | null>(null);
   const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<Message>[] }) => {
@@ -258,33 +277,49 @@ export default function ChatView({ id }: { id?: string }) {
     if ((file.size ?? 0) > 50 * 1024 * 1024) return setError('Choose a file smaller than 50 MB.');
     setBusy(true);
     setError('');
+    let local: VideoFile | undefined;
     try {
+      local = await retainUpload(file);
       if (file.mimeType === 'image/gif') {
-        const body = await fileForm('gif', file);
+        const body = await fileForm('gif', { ...file, uri: local.uri });
         const { gif } = await api.request<{ gif: Gif }>('/api/gifs', {
           method: 'POST',
           body,
           signal: AbortSignal.timeout(120000),
         });
         gifCache.remember(gif);
+        videoCache.remember(gifFileKey(gif.id), local);
+        local = undefined;
         setAttachment({ type: 'gif', gifId: gif.id });
       } else {
-        const body = await fileForm('file', file);
+        const body = await fileForm('file', { ...file, uri: local.uri });
         const { attachment: media } = await api.request<{
-          attachment: { id: string; type: Exclude<Attachment['type'], 'gif'> };
+          attachment: AttachmentMetadata;
         }>(`/api/conversations/${id}/attachments`, {
           method: 'POST',
           body,
           signal: AbortSignal.timeout(120000),
         });
+        mediaMetadata.remember(id, media);
+        videoCache.remember(videoKey(id, media.id), local);
+        local = undefined;
         setAttachment({ type: media.type, mediaId: media.id });
       }
       setAttachmentName(file.name);
     } catch (err) {
+      local?.dispose();
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+  function openMessageMenu(message: Message, event: GestureResponderEvent) {
+    event.stopPropagation();
+    setError('');
+    setActionMessage(message);
+    setActionAnchor({ x: event.nativeEvent.pageX, y: event.nativeEvent.pageY });
+    setActionsVisible(true);
+    setForward(false);
   }
   async function react(emoji: Emoji) {
     if (!actionsVisible || !actionMessage || !id || busy) return;
@@ -313,6 +348,80 @@ export default function ChatView({ id }: { id?: string }) {
       setBusy(false);
     }
   }
+  const messageActions: MessageMenuAction[] = [
+    {
+      label: 'Reply',
+      icon: 'arrow-undo-outline',
+      onPress: () => {
+        setReplyTo(actionMessage);
+        setActionsVisible(false);
+      },
+    },
+    ...(actionMessage?.text
+      ? [
+          {
+            label: 'Copy',
+            icon: 'copy-outline' as const,
+            onPress: () => {
+              const text = actionMessage.text!;
+              setActionsVisible(false);
+              void Clipboard.setStringAsync(text).catch((err) => setError(err.message));
+            },
+          },
+        ]
+      : []),
+    ...(actionMessage?.attachment && actionMessage.attachment.type !== 'gif'
+      ? [
+          {
+            label: 'Save attachment',
+            icon: 'download-outline' as const,
+            onPress: () => {
+              const attachment = actionMessage.attachment!;
+              setActionsVisible(false);
+              if (id && attachment.type === 'video')
+                void videoCache
+                  .get(videoKey(id, attachment.mediaId))
+                  .then(saveVideoFile)
+                  .catch((err) => setError(err.message));
+              else if (id && attachment.type !== 'gif') {
+                const cached = videoCache.read(videoKey(id, attachment.mediaId));
+                const save =
+                  cached.status === 'ready' && (!cached.file.exists || cached.file.exists())
+                    ? saveLocalFile(cached.file)
+                    : downloadAttachment(id, attachment.mediaId);
+                void save.catch((err) => setError(err.message));
+              }
+            },
+          },
+        ]
+      : []),
+    ...(actionMessage?.attachment?.type === 'gif'
+      ? [
+          {
+            label: 'Save GIF',
+            icon: 'bookmark-outline' as const,
+            onPress: () => {
+              const attachment = actionMessage.attachment!;
+              if (attachment.type !== 'gif') return;
+              setActionsVisible(false);
+              setBusy(true);
+              void api
+                .request(`/api/gifs/${attachment.gifId}`, { method: 'PUT' })
+                .catch((err) => setError(err.message))
+                .finally(() => setBusy(false));
+            },
+          },
+        ]
+      : []),
+    {
+      label: 'Forward',
+      icon: 'arrow-redo-outline',
+      onPress: () => {
+        setActionsVisible(false);
+        setForward(true);
+      },
+    },
+  ];
   if (!id)
     return (
       <View style={s.welcome}>
@@ -498,7 +607,21 @@ export default function ChatView({ id }: { id?: string }) {
                   </Text>
                 </View>
               )}
-              <View style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}>
+              <Pressable
+                accessible={false}
+                testID={`message-row-${message.id}`}
+                onPress={(event) => openMessageMenu(message, event)}
+                onLongPress={(event) => openMessageMenu(message, event)}
+                {...(Platform.OS === 'web'
+                  ? {
+                      onContextMenu: (event: GestureResponderEvent) => {
+                        event.preventDefault();
+                        openMessageMenu(message, event);
+                      },
+                    }
+                  : {})}
+                style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}
+              >
                 {!mine && chat.type === 'group' && (
                   <View style={{ marginRight: 8, alignSelf: 'flex-end' }}>
                     <Avatar
@@ -531,26 +654,25 @@ export default function ChatView({ id }: { id?: string }) {
                       onJump={(target) => void jumpToMessage(target)}
                     />
                   )}
-                  {message.attachment && (
+                  {message.attachment?.type === 'video' ? (
+                    <VideoCard
+                      conversationId={id}
+                      mediaId={message.attachment.mediaId}
+                      active={!playingVideo && visibleMessages.has(message.id)}
+                      onPlay={() =>
+                        setPlayingVideo(
+                          message.attachment!.type === 'video' ? message.attachment!.mediaId : null,
+                        )
+                      }
+                      onOptions={(event) => openMessageMenu(message, event)}
+                      onError={setError}
+                    />
+                  ) : message.attachment ? (
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Open ${message.attachment.type} attachment`}
-                      onPress={() => {
-                        if (message.attachment!.type === 'gif') {
-                          setError('');
-                          setActionMessage(message);
-                          setActionsVisible(true);
-                          setForward(false);
-                        } else
-                          void downloadAttachment(id, message.attachment!.mediaId).catch((err) =>
-                            setError(err.message),
-                          );
-                      }}
-                      onLongPress={() => {
-                        setActionMessage(message);
-                        setActionsVisible(true);
-                        setForward(false);
-                      }}
+                      onPress={(event) => openMessageMenu(message, event)}
+                      onLongPress={(event) => openMessageMenu(message, event)}
                       style={s.attachment}
                     >
                       {message.attachment.type === 'image' && (
@@ -559,59 +681,39 @@ export default function ChatView({ id }: { id?: string }) {
                       {message.attachment.type === 'gif' && (
                         <GifPreview
                           gifId={message.attachment.gifId}
-                          active={!gifs && visibleMessages.has(message.id)}
+                          active={!gifs && !playingVideo && visibleMessages.has(message.id)}
                         />
                       )}
-                      <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-                        <Icon
-                          name={
-                            message.attachment.type === 'gif' || message.attachment.type === 'video'
-                              ? 'play-circle-outline'
-                              : message.attachment.type === 'audio' ||
-                                  message.attachment.type === 'music'
+                      {!['image', 'gif'].includes(message.attachment.type) && (
+                        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                          <Icon
+                            name={
+                              ['audio', 'music'].includes(message.attachment.type)
                                 ? 'musical-notes-outline'
                                 : 'document-outline'
-                          }
-                          color={colors.blue}
-                        />
-                        <Text style={{ color: '#3974A8', fontSize: 13 }}>
-                          {message.attachment.type === 'gif'
-                            ? 'GIF · tap for options'
-                            : `${message.attachment.type} · tap to download`}
-                        </Text>
-                      </View>
+                            }
+                            color={colors.blue}
+                          />
+                          <Text style={{ color: '#3974A8', fontSize: 13 }}>
+                            {message.attachment.type}
+                          </Text>
+                        </View>
+                      )}
                     </Pressable>
-                  )}
+                  ) : null}
                   {!!message.text && (
                     <MessageText
                       text={message.text}
                       style={s.messageText}
                       onError={setError}
-                      onMessagePress={() => {
-                        setActionMessage(message);
-                        setActionsVisible(true);
-                        setForward(false);
-                      }}
+                      onMessagePress={(event) => openMessageMenu(message, event)}
                     />
                   )}
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Message actions"
-                    onPress={() => {
-                      setActionMessage(message);
-                      setActionsVisible(true);
-                      setForward(false);
-                    }}
-                    onLongPress={() => {
-                      setActionMessage(message);
-                      setActionsVisible(true);
-                      setForward(false);
-                    }}
-                    style={
-                      message.attachment && !message.text
-                        ? { minHeight: 44, justifyContent: 'center' }
-                        : undefined
-                    }
+                    onPress={(event) => openMessageMenu(message, event)}
+                    onLongPress={(event) => openMessageMenu(message, event)}
                   >
                     <View style={s.meta}>
                       <Text style={s.time}>{timeLabel(message.createdAt)}</Text>
@@ -631,7 +733,7 @@ export default function ChatView({ id }: { id?: string }) {
                     )}
                   </Pressable>
                 </View>
-              </View>
+              </Pressable>
             </View>
           );
         }}
@@ -720,124 +822,61 @@ export default function ChatView({ id }: { id?: string }) {
             : 'A little hello goes a long way'}
         </Text>
       </View>
+      {playingVideo && (
+        <VideoViewer
+          conversationId={id}
+          mediaId={playingVideo}
+          title={title}
+          onClose={() => setPlayingVideo(null)}
+        />
+      )}
       <GroupDialog chat={chat} visible={details} onClose={() => setDetails(false)} />
       <GifDialog visible={gifs} onClose={() => setGifs(false)} onSend={send} />
-      <Dialog
-        visible={actionsVisible}
-        title={forward ? 'Forward to…' : 'Message options'}
-        onClose={() => setActionsVisible(false)}
-      >
-        {forward ? (
-          conversations.map((destination) => (
-            <Button
-              key={destination.id}
-              title={conversationName(
-                destination,
-                profiles[
-                  members[destination.id]?.find((member) => member.userId !== session!.user.id)
-                    ?.userId ?? ''
-                ],
-              )}
-              secondary
-              disabled={busy}
-              onPress={() => {
-                setBusy(true);
-                void api
-                  .post<{ message: Message }>(`/api/conversations/${destination.id}/forward`, {
-                    messageId: actionMessage!.id,
-                  })
-                  .then(({ message }) => {
-                    acceptMessage(message);
-                    setActionsVisible(false);
-                    router.push(`/chat/${destination.id}`);
-                  })
-                  .catch((err) => {
-                    setError(err.message);
-                    setActionsVisible(false);
-                  })
-                  .finally(() => setBusy(false));
-              }}
-            />
-          ))
-        ) : (
-          <>
-            <Text style={styles.subtitle}>
-              React to this message. Tap an existing reaction to remove yours.
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {EMOJIS.map((emoji) => (
-                <Pressable
-                  key={emoji}
-                  accessibilityRole="button"
-                  accessibilityLabel={`React ${emoji}`}
-                  disabled={busy}
-                  onPress={() => void react(emoji)}
-                  style={{
-                    padding: 12,
-                    backgroundColor: actionMessage?.reactions?.some(
-                      (reaction) =>
-                        reaction.userId === session!.user.id && reaction.emoji === emoji,
-                    )
-                      ? '#D8EBFF'
-                      : colors.pale,
-                    borderRadius: 12,
-                  }}
-                >
-                  <Text style={{ fontSize: 23 }}>{emoji}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Button
-              title="Reply"
-              secondary
-              disabled={busy}
-              onPress={() => {
-                setReplyTo(actionMessage);
-                setActionsVisible(false);
-              }}
-            />
-            {!!actionMessage?.text && (
-              <Button
-                title="Copy text"
-                secondary
-                onPress={() =>
-                  void Clipboard.setStringAsync(actionMessage.text!)
-                    .then(() => setActionsVisible(false))
-                    .catch((err) => setError(err.message))
-                }
-              />
+      <Dialog visible={forward} title="Forward to…" onClose={() => setForward(false)}>
+        {conversations.map((destination) => (
+          <Button
+            key={destination.id}
+            title={conversationName(
+              destination,
+              profiles[
+                members[destination.id]?.find((member) => member.userId !== session!.user.id)
+                  ?.userId ?? ''
+              ],
             )}
-            {actionMessage?.attachment?.type === 'gif' && (
-              <>
-                <Text selectable style={styles.subtitle}>
-                  GIF ID: {actionMessage.attachment.gifId}
-                </Text>
-                <Button
-                  title="Save GIF to library"
-                  secondary
-                  disabled={busy}
-                  onPress={() => {
-                    const gifId =
-                      actionMessage.attachment!.type === 'gif'
-                        ? actionMessage.attachment!.gifId
-                        : '';
-                    setBusy(true);
-                    void api
-                      .request(`/api/gifs/${gifId}`, { method: 'PUT' })
-                      .then(() => setActionsVisible(false))
-                      .catch((err) => {
-                        setError(err.message);
-                        setActionsVisible(false);
-                      })
-                      .finally(() => setBusy(false));
-                  }}
-                />
-              </>
-            )}
-            <Button title="Forward message" secondary onPress={() => setForward(true)} />
-          </>
-        )}
+            secondary
+            disabled={busy}
+            onPress={() => {
+              setBusy(true);
+              void api
+                .post<{ message: Message }>(`/api/conversations/${destination.id}/forward`, {
+                  messageId: actionMessage!.id,
+                })
+                .then(({ message }) => {
+                  acceptMessage(message);
+                  setForward(false);
+                  router.push(`/chat/${destination.id}`);
+                })
+                .catch((err) => {
+                  setError(err.message);
+                  setForward(false);
+                })
+                .finally(() => setBusy(false));
+            }}
+          />
+        ))}
       </Dialog>
+      <MessageMenu
+        anchor={actionsVisible ? actionAnchor : null}
+        actions={messageActions}
+        selected={EMOJIS.filter((emoji) =>
+          actionMessage?.reactions?.some(
+            (reaction) => reaction.userId === session!.user.id && reaction.emoji === emoji,
+          ),
+        )}
+        busy={busy}
+        onReact={(emoji) => void react(emoji)}
+        onClose={() => setActionsVisible(false)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -930,7 +969,7 @@ const s = StyleSheet.create({
     borderRadius: 20,
   },
   emptyText: { color: '#7F96A7', fontSize: 13, textAlign: 'center', lineHeight: 20 },
-  attachment: { gap: 10, marginBottom: 6, padding: 4 },
+  attachment: { gap: 10 },
   reactions: { flexDirection: 'row', gap: 5, flexWrap: 'wrap', paddingTop: 5 },
   reaction: {
     paddingVertical: 4,

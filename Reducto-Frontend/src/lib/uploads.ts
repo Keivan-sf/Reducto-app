@@ -1,7 +1,7 @@
 import { File as NativeFile } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-type UploadAsset = { uri: string; name: string; mimeType?: string; file?: File };
+export type UploadAsset = { uri: string; name: string; mimeType?: string; file?: File };
 
 export async function fileForm(field: string, file: UploadAsset) {
   const form = new FormData();

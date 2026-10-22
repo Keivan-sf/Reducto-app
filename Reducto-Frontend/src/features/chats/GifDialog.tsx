@@ -6,6 +6,9 @@ import type { Gif } from '../../api/types';
 import { Button, Dialog, Field, Notice, styles } from '../../components/ui';
 import { fileForm } from '../../lib/uploads';
 import { GifPreview } from './GifPreview';
+import { useVideos, gifFileKey } from '../../context/VideosContext';
+import { retainUpload } from '../../lib/local-attachments';
+import type { VideoFile } from '../../api/video-cache';
 import { useGifs } from '../../context/GifsContext';
 
 export function GifDialog({
@@ -18,6 +21,7 @@ export function GifDialog({
   onSend: (id: string) => Promise<void>;
 }) {
   const cache = useGifs();
+  const files = useVideos();
   const [gifs, setGifs] = useState<Gif[]>([]);
   const [gifId, setGifId] = useState('');
   const [error, setError] = useState('');
@@ -63,13 +67,21 @@ export function GifDialog({
       const file = picked.assets[0];
       if ((file.size ?? 0) > 50 * 1024 * 1024)
         throw new Error('Choose a GIF or video smaller than 50 MB.');
-      const body = await fileForm('gif', file);
-      const { gif } = await api.request<{ gif: Gif }>('/api/gifs', {
-        method: 'POST',
-        body,
-        signal: AbortSignal.timeout(120000),
-      });
-      cache.remember(gif);
+      let local: VideoFile | undefined;
+      try {
+        local = await retainUpload(file);
+        const body = await fileForm('gif', { ...file, uri: local.uri });
+        const { gif } = await api.request<{ gif: Gif }>('/api/gifs', {
+          method: 'POST',
+          body,
+          signal: AbortSignal.timeout(120000),
+        });
+        cache.remember(gif);
+        files.remember(gifFileKey(gif.id), local);
+        local = undefined;
+      } finally {
+        local?.dispose();
+      }
       await load();
     });
   }

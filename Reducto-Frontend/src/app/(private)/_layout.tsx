@@ -3,6 +3,8 @@ import { Redirect, Slot, usePathname } from 'expo-router';
 import { useSession } from '../../context/SessionContext';
 import { ChatsProvider } from '../../context/ChatsContext';
 import { ProfilesProvider } from '../../context/ProfilesContext';
+import { MediaMetadataProvider } from '../../context/MediaMetadataContext';
+import { VideosProvider } from '../../context/VideosContext';
 import { GifsProvider } from '../../context/GifsContext';
 import { inviteTokenFromPath } from '../../lib/links';
 function SignInRedirect({ token }: { token: string | null }) {
@@ -16,9 +18,13 @@ export default function PrivateLayout() {
   return session ? (
     <ProfilesProvider key={`${session.serverUrl}:${session.user.id}`}>
       <GifsProvider>
-        <ChatsProvider>
-          <Slot />
-        </ChatsProvider>
+        <MediaMetadataProvider>
+          <VideosProvider>
+            <ChatsProvider>
+              <Slot />
+            </ChatsProvider>
+          </VideosProvider>
+        </MediaMetadataProvider>
       </GifsProvider>
     </ProfilesProvider>
   ) : (

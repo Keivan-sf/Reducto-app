@@ -1,5 +1,7 @@
 import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
 import path from 'node:path';
+import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 const inviteToken = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
 const inviteUri = `reducto:///api/groups/join/${inviteToken}`;
 
@@ -66,7 +68,7 @@ test('GIF previews autoplay muted, loop, and never expose video controls', async
     })
     .toBeGreaterThan(1);
   await page.getByRole('button', { name: 'Open gif attachment' }).click();
-  await expect(page.getByRole('button', { name: 'Save GIF to library' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save GIF' })).toBeVisible();
   expect(lookups).toBe(1);
 });
 
@@ -645,7 +647,7 @@ test('reply composer sends reply IDs, renders a compact preview, and supports ca
   await expect(
     page.getByTestId('reply-composer').getByText('Grace Hopper', { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Here is my reply');
   const sending = page.waitForRequest(
     (request) =>
@@ -693,7 +695,7 @@ test('failed replies preserve the draft and target until cancelled or sent', asy
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   await page.getByRole('button', { name: 'Message actions', exact: true }).click();
   await page.getByRole('button', { name: 'Reply', exact: true }).click();
-  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Keep this draft');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Reply target is unavailable', { exact: true })).toBeVisible();
@@ -875,9 +877,7 @@ test('reopening a cached conversation does not request its history again', async
 });
 
 for (const gif of [false, true]) {
-  test(`${gif ? 'GIF' : 'text'} message options fade out as one complete dialog`, async ({
-    page,
-  }) => {
+  test(`${gif ? 'GIF' : 'text'} message options dismiss as one complete menu`, async ({ page }) => {
     await mockApi(page, [
       {
         ...first,
@@ -891,22 +891,22 @@ for (const gif of [false, true]) {
       gif
         ? page.getByRole('button', { name: 'Open gif attachment' }).click()
         : page.getByRole('button', { name: 'Message actions', exact: true }).click();
-    const label = gif ? 'Save GIF to library' : 'Copy text';
+    const label = gif ? 'Save GIF' : 'Copy';
     await open();
     await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
     const partialFrames = await page.evaluate(async (label) => {
       let partial = 0;
       const start = performance.now();
       const check = () => {
-        const title = document.body.textContent?.includes('Message options') ?? false;
+        const title = !!document.querySelector('[data-testid="message-options"]');
         const action = Array.from(document.querySelectorAll('button, [role="button"]')).some(
-          (element) => element.textContent?.trim() === label,
+          (element) => element.getAttribute('aria-label') === label,
         );
         if (title !== action) partial++;
       };
       const observer = new MutationObserver(check);
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-      document.querySelector<HTMLElement>('[aria-label="Close dialog"]')!.click();
+      document.querySelector<HTMLElement>('[aria-label="Close message options"]')!.click();
       await new Promise<void>((resolve) => {
         const frame = () => {
           check();
@@ -919,7 +919,7 @@ for (const gif of [false, true]) {
       return partial;
     }, label);
     expect(partialFrames).toBe(0);
-    await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('message-options')).toHaveCount(0);
     await open();
     await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
   });
@@ -950,19 +950,20 @@ test('attachment downloads and message actions use separate buttons', async ({ p
   await expect(page.locator('button button')).toHaveCount(0);
   expect(nestingErrors).toEqual([]);
 
-  const downloading = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Open document attachment' }).click();
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save attachment', exact: true }).click();
   expect((await downloading).suggestedFilename()).toBe('notes.txt');
-  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
   await page.getByRole('button', { name: 'Message actions', exact: true }).click();
-  await expect(page.getByText('Message options', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Forward message', exact: true })).toBeVisible();
+  await expect(page.getByTestId('message-options')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Forward', exact: true })).toBeVisible();
   const reaction = page.waitForRequest((request) => request.url().endsWith('/reactions'));
   await page.getByRole('button', { name: 'React 👍', exact: true }).click();
   const request = await reaction;
   expect(request.method()).toBe('PUT');
   expect(request.postDataJSON()).toEqual({ emoji: '👍' });
-  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
   expect(nestingErrors).toEqual([]);
 });
 
@@ -1067,7 +1068,7 @@ test('chat URLs are blue links and Reducto invites join internally with authoriz
   const popup = await opening;
   await expect(popup).toHaveURL('https://example.org/docs');
   await popup.close();
-  await expect(page.getByText('Message options', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
 
   await page.getByRole('link', { name: 'reducto:///unknown', exact: true }).click();
   await expect(page.getByText('Unsupported Reducto link', { exact: true })).toBeVisible();
@@ -1238,4 +1239,662 @@ test('reconnecting refreshes profile changes missed while offline', async ({ pag
   await expect(
     page.getByRole('img', { name: 'Updated while offline profile photo' }).last(),
   ).toHaveAttribute('src', current.avatarUrl);
+});
+
+test('message menus anchor to row whitespace, fit the screen, and close with Escape', async ({
+  page,
+}, testInfo) => {
+  const nestingErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /nested|descendant|contain|hydration/i.test(message.text()))
+      nestingErrors.push(message.text());
+  });
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const row = page.getByTestId(`message-row-${first.id}`);
+  const bubble = page.getByTestId(`message-${first.id}`);
+  await expect(row).toBeVisible();
+  const rowBox = (await row.boundingBox())!;
+  const bubbleBox = (await bubble.boundingBox())!;
+  const click = { x: rowBox.width - 4, y: rowBox.height / 2 };
+  expect(rowBox.x + click.x).toBeGreaterThan(bubbleBox.x + bubbleBox.width);
+  await row.click({ position: click });
+  const menu = page.getByTestId('message-options');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Save attachment' })).toHaveCount(0);
+  await expect(menu.getByRole('button', { name: /React / })).toHaveCount(8);
+  await expect(menu).toHaveCSS('opacity', '1');
+  await expect(menu).toHaveCSS('width', '220px');
+  const box = (await menu.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(box.x).toBeGreaterThanOrEqual(8);
+  expect(box.y).toBeGreaterThanOrEqual(8);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width - 7);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 7);
+  await page.screenshot({ path: testInfo.outputPath('message-menu.png') });
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  if (testInfo.project.name === 'desktop') {
+    await row.click({ button: 'right', position: { x: 90, y: click.y } });
+    await expect(menu).toBeVisible();
+    const rightClickBox = (await menu.boundingBox())!;
+    expect(Math.abs(rightClickBox.x - rowBox.x - 90)).toBeLessThan(2);
+    await page
+      .getByRole('button', { name: 'Close message options' })
+      .click({ position: { x: 2, y: 2 } });
+    await expect(menu).toHaveCount(0);
+  }
+  expect(nestingErrors).toEqual([]);
+});
+
+test('message menu scales and fades on opening, closing, and reopening', async ({ page }) => {
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const opening = await page.evaluate(async () => {
+      document.querySelector<HTMLElement>('[aria-label="Message actions"]')!.click();
+      const frames: { opacity: number; scale: number }[] = [];
+      const start = performance.now();
+      while (performance.now() - start < 700) {
+        await new Promise(requestAnimationFrame);
+        const element = document.querySelector<HTMLElement>('[data-testid="message-options"]');
+        if (!element) continue;
+        const style = getComputedStyle(element);
+        frames.push({ opacity: Number(style.opacity), scale: new DOMMatrix(style.transform).a });
+        if (Number(style.opacity) === 1) break;
+      }
+      return frames;
+    });
+    expect(opening.some((frame) => frame.opacity > 0 && frame.opacity < 1)).toBeTruthy();
+    expect(opening.at(-1)).toEqual({ opacity: 1, scale: 1 });
+    expect(opening.every((frame) => Math.abs(frame.opacity - frame.scale) < 0.01)).toBeTruthy();
+    const closing = await page.evaluate(async () => {
+      document.querySelector<HTMLElement>('[aria-label="Close message options"]')!.click();
+      const frames: { opacity: number; scale: number; buttons: number }[] = [];
+      const start = performance.now();
+      while (performance.now() - start < 700) {
+        await new Promise(requestAnimationFrame);
+        const element = document.querySelector<HTMLElement>('[data-testid="message-options"]');
+        if (!element) break;
+        const style = getComputedStyle(element);
+        frames.push({
+          opacity: Number(style.opacity),
+          scale: new DOMMatrix(style.transform).a,
+          buttons: element.querySelectorAll('[role="button"],button').length,
+        });
+      }
+      return frames;
+    });
+    expect(closing.some((frame) => frame.opacity > 0 && frame.opacity < 1)).toBeTruthy();
+    expect(closing.every((frame) => Math.abs(frame.opacity - frame.scale) < 0.01)).toBeTruthy();
+    expect(new Set(closing.map((frame) => frame.buttons)).size).toBe(1);
+    await expect(page.getByTestId('message-options')).toHaveCount(0);
+  }
+});
+
+test('video cards use server thumbnails without downloading and open the full-page player on demand', async ({
+  page,
+}, testInfo) => {
+  let downloads = 0;
+  const mediaId = 'test-video';
+  await mockApi(page, [{ ...first, text: null, attachment: { type: 'video', mediaId } }]);
+  await page.route(`**/api/conversations/*/attachments/${mediaId}`, (route) => {
+    downloads++;
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    return route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.mp4'),
+      contentType: 'application/octet-stream',
+    });
+  });
+  await page.route(`**/api/conversations/*/attachments/${mediaId}/metadata`, (route) =>
+    route.fulfill({
+      json: {
+        attachment: {
+          id: mediaId,
+          type: 'video',
+          width: 360,
+          height: 640,
+          fileSize: 9000,
+          thumbnailUrl: 'https://media.example/video-thumbnail.jpg',
+        },
+      },
+    }),
+  );
+  await page.route('https://media.example/video-thumbnail.jpg', (route) => {
+    expect(route.request().headers().authorization).toBeUndefined();
+    return route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.png'),
+      contentType: 'image/jpeg',
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const card = page.getByTestId(`video-card-${mediaId}`);
+  await expect(card.getByRole('img', { name: 'Video thumbnail' })).toBeVisible();
+  await expect(card.locator('video')).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Download video', exact: true })).toBeVisible();
+  expect(downloads).toBe(0);
+  await expect(card.getByRole('button', { name: 'Video message options' })).toBeVisible();
+  await expect(page.locator('button button')).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('video-card.png') });
+  await card.getByRole('button', { name: 'Play video', exact: true }).click();
+  const viewer = page.getByTestId('video-viewer');
+  await expect(viewer).toBeVisible();
+  const player = viewer.locator('video');
+  await expect
+    .poll(() =>
+      player.evaluate((video: HTMLVideoElement) => ({
+        playing: !video.paused,
+        controls: video.controls,
+        decoded: video.videoWidth > 0,
+      })),
+    )
+    .toEqual({ playing: true, controls: true, decoded: true });
+  const bounds = (await viewer.boundingBox())!;
+  expect(bounds.width).toBe(page.viewportSize()!.width);
+  expect(bounds.height).toBe(page.viewportSize()!.height);
+  await player.evaluate((video: HTMLVideoElement) => {
+    video.pause();
+    video.currentTime = 0.1;
+  });
+  await expect.poll(() => player.evaluate((video: HTMLVideoElement) => video.paused)).toBeTruthy();
+  await expect
+    .poll(() =>
+      viewer.evaluate((element) => {
+        let opacity = 1;
+        for (let current: Element | null = element; current; current = current.parentElement)
+          opacity *= Number(getComputedStyle(current).opacity);
+        return opacity;
+      }),
+    )
+    .toBe(1);
+  await page.screenshot({ path: testInfo.outputPath('video-player.png') });
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await expect(viewer).toHaveCount(0);
+  await card.getByRole('button', { name: 'Play video', exact: true }).click();
+  await expect(viewer).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toHaveCount(0);
+  expect(downloads).toBe(1);
+  const saved = page.waitForEvent('download');
+  await card.getByRole('button', { name: 'Save video', exact: true }).click();
+  expect((await saved).suggestedFilename()).toBe('video.mp4');
+  expect(downloads).toBe(1);
+});
+
+test('video downloads display real streamed progress, refresh authentication, cancel and retry', async ({
+  page,
+}, testInfo) => {
+  const bytes = readFileSync(path.join(__dirname, '../fixtures/portrait.mp4'));
+  let requests = 0;
+  const server = createServer((request, response) => {
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Authorization');
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204).end();
+      return;
+    }
+    if (!request.url?.includes('/attachments/slow-video')) {
+      response.writeHead(404).end();
+      return;
+    }
+    requests++;
+    if (requests === 1) {
+      response.writeHead(401).end();
+      return;
+    }
+    if (request.headers.authorization !== 'Bearer renewed-token') {
+      response.writeHead(403).end();
+      return;
+    }
+    response.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': bytes.length,
+    });
+    let offset = 0;
+    const chunk = Math.ceil(bytes.length / 16);
+    const timer = setInterval(() => {
+      const end = Math.min(bytes.length, offset + chunk);
+      response.write(bytes.subarray(offset, end));
+      offset = end;
+      if (offset === bytes.length) {
+        clearInterval(timer);
+        response.end();
+      }
+    }, 80);
+    response.on('close', () => clearInterval(timer));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing test server');
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    await mockApi(
+      page,
+      [{ ...first, text: null, attachment: { type: 'video', mediaId: 'slow-video' } }],
+      origin,
+    );
+    await page.route(`${origin}/api/conversations/*/attachments/slow-video`, (route) =>
+      route.continue(),
+    );
+    await page.route(`${origin}/api/auth/refresh`, (route) =>
+      route.fulfill({ json: { accessToken: 'renewed-token', refreshToken: 'renewed-refresh' } }),
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const card = page.getByTestId('video-card-slow-video');
+    await card.getByRole('button', { name: 'Download video', exact: true }).click();
+    await expect(card.getByText(/ · [1-9][0-9]?%/)).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('video-download-progress.png') });
+    await card.getByRole('button', { name: 'Cancel video download', exact: true }).click();
+    await expect(card.getByRole('button', { name: 'Download video', exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Download video', exact: true }).click();
+    await expect(card.getByText(/ · [1-9][0-9]?%/)).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Save video', exact: true })).toBeVisible();
+    await expect(card.locator('video')).toHaveCount(0);
+    expect(requests).toBe(3);
+    await card.getByRole('button', { name: 'Play video', exact: true }).click();
+    await expect(page.getByTestId('video-viewer').locator('video')).toBeVisible();
+    await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+    expect(requests).toBe(3);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+for (const kind of ['image', 'video', 'gif'] as const) {
+  test(`${kind} previews reserve server dimensions before media loads and use server thumbnails`, async ({
+    page,
+  }) => {
+    let releaseMetadata!: () => void;
+    let releaseMedia!: () => void;
+    const metadataGate = new Promise<void>((resolve) => {
+      releaseMetadata = resolve;
+    });
+    const mediaGate = new Promise<void>((resolve) => {
+      releaseMedia = resolve;
+    });
+    const mediaId = 'sized-media';
+    let originalDownloads = 0;
+    const attachment = kind === 'gif' ? { type: kind, gifId: mediaId } : { type: kind, mediaId };
+    await mockApi(page, [{ ...first, text: null, attachment }]);
+    const thumbnailUrl = 'https://media.example/server-thumbnail.jpg';
+    await page.route('https://media.example/server-thumbnail.jpg', async (route) => {
+      expect(route.request().headers().authorization).toBeUndefined();
+      await mediaGate;
+      await route.fulfill({
+        path: path.join(__dirname, '../fixtures/portrait.png'),
+        contentType: 'image/jpeg',
+      });
+    });
+    await page.route('https://media.example/sized.mp4', async (route) => {
+      await mediaGate;
+      await route.fulfill({
+        path: path.join(__dirname, '../fixtures/portrait.mp4'),
+        contentType: 'video/mp4',
+      });
+    });
+    await page.route(`**/api/conversations/*/attachments/${mediaId}`, async (route) => {
+      originalDownloads++;
+      await mediaGate;
+      await route.fulfill({
+        path: path.join(__dirname, '../fixtures/portrait.png'),
+        contentType: 'image/png',
+      });
+    });
+    const metadataPath =
+      kind === 'gif'
+        ? `**/api/gifs/${mediaId}`
+        : `**/api/conversations/*/attachments/${mediaId}/metadata`;
+    await page.route(metadataPath, async (route) => {
+      expect(route.request().headers().authorization).toBe('Bearer access-token');
+      await metadataGate;
+      const media = {
+        id: mediaId,
+        type: kind,
+        width: 360,
+        height: 640,
+        fileSize: 9000,
+        thumbnailUrl,
+        playbackUrl: 'https://media.example/sized.mp4',
+      };
+      await route.fulfill({ json: kind === 'gif' ? { gif: media } : { attachment: media } });
+    });
+    try {
+      await signIn(page);
+      await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+      const frame =
+        kind === 'video'
+          ? page.getByTestId(`video-card-${mediaId}`)
+          : kind === 'image'
+            ? page.getByLabel('Image preview', { exact: true })
+            : page.locator('[aria-label="GIF preview"], [aria-label="Animated GIF"]');
+      await expect
+        .poll(async () => {
+          const box = await frame.boundingBox();
+          return box ? box.width / box.height : 0;
+        })
+        .toBeCloseTo(1, 2);
+      releaseMetadata();
+      await expect
+        .poll(async () => {
+          const box = await frame.boundingBox();
+          return box ? box.width / box.height : 0;
+        })
+        .toBeCloseTo(0.6, 2);
+      if (kind !== 'image') {
+        await expect(
+          page.getByRole('img', {
+            name: kind === 'gif' ? 'GIF thumbnail' : 'Video thumbnail',
+            exact: true,
+          }),
+        ).toHaveAttribute('src', thumbnailUrl);
+      }
+      if (kind === 'video') {
+        expect(originalDownloads).toBe(0);
+        await expect(frame.locator('video')).toHaveCount(0);
+      }
+      releaseMedia();
+      if (kind === 'gif') {
+        await expect
+          .poll(() =>
+            frame
+              .locator('video')
+              .evaluate((video: HTMLVideoElement) => video.readyState >= 2 && !video.paused),
+          )
+          .toBe(true);
+        await expect(page.getByRole('img', { name: 'GIF thumbnail', exact: true })).toHaveCount(0);
+      }
+      await expect
+        .poll(async () => {
+          const box = await frame.boundingBox();
+          return box ? box.width / box.height : 0;
+        })
+        .toBeCloseTo(0.6, 2);
+    } finally {
+      releaseMetadata();
+      releaseMedia();
+    }
+  });
+}
+
+test('video thumbnail URLs renew from cached metadata without downloading the video', async ({
+  page,
+}) => {
+  await page.clock.install();
+  let lookups = 0;
+  let downloads = 0;
+  const mediaId = 'renewing-video';
+  await mockApi(page, [{ ...first, text: null, attachment: { type: 'video', mediaId } }]);
+  await page.route(`**/api/conversations/*/attachments/${mediaId}/metadata`, (route) =>
+    route.fulfill({
+      json: {
+        attachment: {
+          id: mediaId,
+          type: 'video',
+          width: 640,
+          height: 360,
+          fileSize: 1024,
+          thumbnailUrl: `https://media.example/renewing-thumb.jpg?v=${++lookups}`,
+        },
+      },
+    }),
+  );
+  await page.route('https://media.example/renewing-thumb.jpg*', (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.png'),
+      contentType: 'image/jpeg',
+    }),
+  );
+  await page.route(`**/api/conversations/*/attachments/${mediaId}`, (route) => {
+    downloads++;
+    return route.fulfill({ status: 500 });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const thumbnail = page.getByRole('img', { name: 'Video thumbnail', exact: true });
+  await expect(thumbnail).toHaveAttribute('src', 'https://media.example/renewing-thumb.jpg?v=1');
+  await page.clock.fastForward(10 * 60 * 1000 + 1000);
+  await expect(thumbnail).toHaveAttribute('src', 'https://media.example/renewing-thumb.jpg?v=2');
+  expect(lookups).toBe(2);
+  expect(downloads).toBe(0);
+});
+
+test('historical video metadata without dimensions or thumbnails keeps a square usable preview', async ({
+  page,
+}) => {
+  let downloads = 0;
+  const mediaId = 'old-video';
+  await mockApi(page, [{ ...first, text: null, attachment: { type: 'video', mediaId } }]);
+  await page.route(`**/api/conversations/*/attachments/${mediaId}/metadata`, (route) =>
+    route.fulfill({
+      json: {
+        attachment: { id: mediaId, type: 'video', width: null, height: null, thumbnailUrl: null },
+      },
+    }),
+  );
+  await page.route(`**/api/conversations/*/attachments/${mediaId}`, (route) => {
+    downloads++;
+    return route.fulfill({ path: path.join(__dirname, '../fixtures/portrait.mp4') });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const card = page.getByTestId(`video-card-${mediaId}`);
+  await expect(card.getByRole('button', { name: 'Play video', exact: true })).toBeVisible();
+  const box = (await card.boundingBox())!;
+  expect(box.width / box.height).toBeCloseTo(1, 2);
+  await expect(card.getByRole('img', { name: 'Video thumbnail', exact: true })).toHaveCount(0);
+  await expect(card.locator('video')).toHaveCount(0);
+  expect(downloads).toBe(0);
+});
+
+for (const kind of ['image', 'video', 'document', 'audio'] as const) {
+  test(`uploaded ${kind} attachments reuse local bytes for previews, playback, saving, and reopening`, async ({
+    page,
+  }, testInfo) => {
+    await mockApi(page, []);
+    let downloads = 0;
+    const id = `uploaded-${kind}`;
+    const name =
+      kind === 'image'
+        ? 'uploaded.png'
+        : kind === 'video'
+          ? 'uploaded.mp4'
+          : kind === 'audio'
+            ? 'sound.mp3'
+            : 'notes.txt';
+    const mimeType =
+      kind === 'image'
+        ? 'image/png'
+        : kind === 'video'
+          ? 'video/mp4'
+          : kind === 'audio'
+            ? 'audio/mpeg'
+            : 'text/plain';
+    const buffer =
+      kind === 'image'
+        ? readFileSync(path.join(__dirname, '../fixtures/portrait.png'))
+        : kind === 'video'
+          ? readFileSync(path.join(__dirname, '../fixtures/portrait.mp4'))
+          : Buffer.from('original uploaded bytes');
+    await page.route('**/api/conversations/*/attachments', (route) => {
+      expect(route.request().method()).toBe('POST');
+      return route.fulfill({
+        status: 201,
+        json: {
+          attachment: {
+            id,
+            type: kind,
+            fileName: name,
+            contentType: mimeType,
+            fileSize: buffer.length,
+            width: 360,
+            height: 640,
+            thumbnailUrl: kind === 'video' ? 'https://media.example/uploaded-thumb.jpg' : null,
+          },
+        },
+      });
+    });
+    await page.route(`**/api/conversations/*/attachments/${id}*`, (route) => {
+      downloads++;
+      return route.fulfill({ status: 500 });
+    });
+    await page.route('https://media.example/uploaded-thumb.jpg', (route) =>
+      route.fulfill({
+        path: path.join(__dirname, '../fixtures/portrait.png'),
+        contentType: 'image/jpeg',
+      }),
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const picker = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+    await (await picker).setFiles({ name, mimeType, buffer });
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    const message = page.getByTestId('message-44444444-4444-4444-8444-444444444444');
+    await expect(message).toBeVisible();
+    if (kind === 'image') {
+      await expect(message.locator('img')).toHaveAttribute('src', /^blob:/);
+      await expect
+        .poll(() =>
+          message.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth > 0),
+        )
+        .toBeTruthy();
+    }
+    if (kind === 'video') {
+      await expect(message.getByRole('button', { name: 'Save video', exact: true })).toBeVisible();
+      await message.getByRole('button', { name: 'Play video', exact: true }).click();
+      await expect
+        .poll(() =>
+          page
+            .getByTestId('video-viewer')
+            .locator('video')
+            .evaluate((video: HTMLVideoElement) => video.readyState >= 2),
+        )
+        .toBeTruthy();
+      await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+    }
+    await message.getByRole('button', { name: 'Message actions', exact: true }).click();
+    const saved = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save attachment', exact: true }).click();
+    expect((await saved).suggestedFilename()).toBe(name);
+    await expect(page.getByTestId('message-options')).toHaveCount(0);
+    if (testInfo.project.name === 'mobile')
+      await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await expect(message).toBeVisible();
+    if (kind === 'video')
+      await expect(message.getByRole('button', { name: 'Save video', exact: true })).toBeVisible();
+    if (kind === 'image') await expect(message.locator('img')).toHaveAttribute('src', /^blob:/);
+    expect(downloads).toBe(0);
+  });
+}
+
+test('uploaded GIFs preview from local bytes instead of fetching the converted server video', async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  let mediaDownloads = 0;
+  const gifId = 'local-uploaded-gif';
+  await page.route('**/api/gifs', (route) =>
+    route.fulfill({
+      status: 201,
+      json: {
+        gif: {
+          id: gifId,
+          width: 10,
+          height: 10,
+          objectKey: 'gifs/converted.mp4',
+          fileSize: 100,
+          playbackUrl: 'https://media.example/converted.mp4',
+        },
+      },
+    }),
+  );
+  await page.route('https://media.example/converted.mp4', (route) => {
+    mediaDownloads++;
+    return route.fulfill({ status: 500 });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const picker = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+  await (
+    await picker
+  ).setFiles({
+    name: 'animated.gif',
+    mimeType: 'image/gif',
+    buffer: Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'),
+  });
+  await expect(page.getByText('animated.gif', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  const image = page.getByRole('img', { name: 'Uploaded GIF', exact: true });
+  await expect(image).toHaveAttribute('src', /^blob:/);
+  await expect
+    .poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth > 0))
+    .toBeTruthy();
+  expect(mediaDownloads).toBe(0);
+});
+
+test('GIF library uploads reuse the original local video for preview and sending', async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  let uploaded = false;
+  let downloads = 0;
+  const gif = {
+    id: 'library-local-video',
+    width: 160,
+    height: 120,
+    fileSize: 4000,
+    objectKey: 'gifs/library-upload.mp4',
+    playbackUrl: 'https://media.example/library-upload.mp4',
+  };
+  await page.route('**/api/gifs', (route) => {
+    if (route.request().method() === 'POST') {
+      uploaded = true;
+      return route.fulfill({ status: 201, json: { gif } });
+    }
+    return route.fulfill({ json: { gifs: uploaded ? [gif] : [] } });
+  });
+  await page.route(gif.playbackUrl, (route) => {
+    downloads++;
+    return route.fulfill({ status: 500 });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Open GIF library', exact: true }).click();
+  const picker = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Upload GIF or video', exact: true }).click();
+  await (await picker).setFiles(path.join(__dirname, '../fixtures/loop.mp4'));
+  await expect(page.getByRole('button', { name: 'Send GIF', exact: true })).toBeVisible();
+  const preview = page.locator('video');
+  await expect(preview).toHaveAttribute('src', /^blob:/);
+  await expect
+    .poll(() =>
+      preview.evaluate(
+        (video: HTMLVideoElement) =>
+          video.readyState >= 2 && !video.paused && video.muted && video.loop,
+      ),
+    )
+    .toBeTruthy();
+  await page.getByRole('button', { name: 'Send GIF', exact: true }).click();
+  await expect(page.getByText('Your GIF library', { exact: true })).toHaveCount(0);
+  const message = page.getByTestId('message-44444444-4444-4444-8444-444444444444');
+  await expect(message.locator('video')).toHaveAttribute('src', /^blob:/);
+  await expect
+    .poll(() =>
+      message
+        .locator('video')
+        .evaluate((video: HTMLVideoElement) => video.readyState >= 2 && !video.paused),
+    )
+    .toBeTruthy();
+  expect(downloads).toBe(0);
 });

@@ -67,7 +67,20 @@ export interface AroundMessages {
   hasMoreBefore: boolean;
   hasMoreAfter: boolean;
 }
-export interface Gif {
+export interface VisualMediaMetadata {
+  width?: number | null;
+  height?: number | null;
+  thumbnailKey?: string | null;
+  thumbnailUrl?: string | null;
+}
+export interface AttachmentMetadata extends VisualMediaMetadata {
+  id: string;
+  type: 'image' | 'video' | 'audio' | 'music' | 'document';
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+}
+export interface Gif extends VisualMediaMetadata {
   playbackUrl: string;
   id: string;
   objectKey: string;

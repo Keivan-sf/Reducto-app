@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mediaPreviewSize } from '../src/lib/media-preview';
+import { mediaDimensions, mediaPreviewSize } from '../src/lib/media-preview';
 
 test('normal media retains its aspect ratio and small GIFs stay compact', () => {
   for (const size of [
@@ -39,6 +39,20 @@ test('missing or invalid metadata uses a finite bounded placeholder', () => {
   ]) {
     const preview = mediaPreviewSize(size);
     assert.ok(Number.isFinite(preview.width) && preview.width > 0 && preview.width <= 260);
-    assert.ok(Number.isFinite(preview.aspectRatio) && preview.aspectRatio > 0);
+    assert.equal(preview.aspectRatio, 1);
+    assert.equal(preview.width, 200);
   }
+});
+
+test('server metadata yields usable dimensions only for positive finite pairs', () => {
+  assert.deepEqual(mediaDimensions({ width: 640, height: 480 }), { width: 640, height: 480 });
+  for (const media of [
+    undefined,
+    {},
+    { width: null, height: null },
+    { width: 640, height: null },
+    { width: -1, height: 4 },
+    { width: Infinity, height: 4 },
+  ])
+    assert.equal(mediaDimensions(media), undefined);
 });

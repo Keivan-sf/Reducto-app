@@ -4,9 +4,12 @@ import { useFocusEffect } from 'expo-router';
 import { colors } from '../../components/ui';
 import type { MediaSize } from '../../lib/media-preview';
 import { MediaPreview } from './MediaPreview';
+import type { GifPlayerProps } from './GifPlayer';
+import { ServerThumbnail } from './ServerThumbnail';
 
 /** Size the browser's replaced video element explicitly; intrinsic sizing can overflow. */
-export function GifPlayer({ uri, active = true }: { uri: string; active?: boolean }) {
+export function GifPlayer({ uri, active = true, size, thumbnailUrl, onError }: GifPlayerProps) {
+  const [readyUri, setReadyUri] = useState<string>();
   const video = useRef<HTMLVideoElement>(null);
   const [metadata, setMetadata] = useState<{ uri: string; size: MediaSize }>();
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -31,10 +34,14 @@ export function GifPlayer({ uri, active = true }: { uri: string; active?: boolea
   );
 
   return (
-    <MediaPreview size={metadata?.uri === uri ? metadata.size : undefined} label="Animated GIF">
+    <MediaPreview
+      size={size ?? (metadata?.uri === uri ? metadata.size : undefined)}
+      label="Animated GIF"
+    >
       <video
         ref={video}
         src={uri}
+        poster={thumbnailUrl ?? undefined}
         muted
         loop
         playsInline
@@ -57,9 +64,18 @@ export function GifPlayer({ uri, active = true }: { uri: string; active?: boolea
             size: { width: currentTarget.videoWidth, height: currentTarget.videoHeight },
           })
         }
-        onLoadedData={() => setStatus('ready')}
-        onError={() => setStatus('error')}
+        onLoadedData={() => {
+          setReadyUri(uri);
+          setStatus('ready');
+        }}
+        onError={() => {
+          setStatus('error');
+          onError?.();
+        }}
       />
+      {(!active || readyUri !== uri) && (
+        <ServerThumbnail uri={thumbnailUrl} label="GIF thumbnail" />
+      )}
       {status === 'loading' && <ActivityIndicator color={colors.blue} />}
       {status === 'error' && <Text style={{ color: colors.muted }}>GIF unavailable</Text>}
     </MediaPreview>

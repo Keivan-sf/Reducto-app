@@ -1,14 +1,31 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, StyleSheet, Text } from 'react-native';
 import { useEvent } from 'expo';
 import { useIsFocused } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { colors } from '../../components/ui';
 import { MediaPreview } from './MediaPreview';
+import type { MediaSize } from '../../lib/media-preview';
+import { ServerThumbnail } from './ServerThumbnail';
 import { watchGifPlayback } from '../../lib/gif-playback';
 
+export interface GifPlayerProps {
+  uri: string;
+  active?: boolean;
+  size?: MediaSize;
+  thumbnailUrl?: string | null;
+  onError?: () => void;
+}
+
 /** The backend converts GIFs to silent MP4s. Keep their playback inline and automatic. */
-export function GifPlayer({ uri, active = true }: { uri: string; active?: boolean }) {
+export function GifPlayer({
+  uri,
+  active = true,
+  size: metadataSize,
+  thumbnailUrl,
+  onError,
+}: GifPlayerProps) {
+  const [frameUri, setFrameUri] = useState<string>();
   const focused = useIsFocused();
   const player = useVideoPlayer({ uri, contentType: 'progressive' }, (video) => {
     video.muted = true;
@@ -16,6 +33,9 @@ export function GifPlayer({ uri, active = true }: { uri: string; active?: boolea
   });
   const { status } = useEvent(player, 'statusChange', { status: player.status });
   const loaded = useEvent(player, 'sourceLoad');
+  useEffect(() => {
+    if (status === 'error') onError?.();
+  }, [status, onError]);
   const { videoTrack } = useEvent(player, 'videoTrackChange', { videoTrack: player.videoTrack });
   const size =
     videoTrack?.size ??
@@ -36,9 +56,10 @@ export function GifPlayer({ uri, active = true }: { uri: string; active?: boolea
   );
 
   return (
-    <MediaPreview size={size} label="Animated GIF">
+    <MediaPreview size={metadataSize ?? size} label="Animated GIF">
       <VideoView
         player={player}
+        onFirstFrameRender={() => setFrameUri(uri)}
         style={[StyleSheet.absoluteFill, { width: '100%', height: '100%' }]}
         nativeControls={false}
         playsInline
@@ -47,6 +68,9 @@ export function GifPlayer({ uri, active = true }: { uri: string; active?: boolea
         contentFit="contain"
         surfaceType="textureView"
       />
+      {(!active || frameUri !== uri) && (
+        <ServerThumbnail uri={thumbnailUrl} label="GIF thumbnail" />
+      )}
       {(status === 'loading' || status === 'idle') && <ActivityIndicator color={colors.blue} />}
       {status === 'error' && <Text style={s.error}>GIF unavailable</Text>}
     </MediaPreview>

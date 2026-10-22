@@ -62,7 +62,10 @@ export function ReplyPreview({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Jump to replied message ${messageId}`}
-      onPress={() => onJump(messageId)}
+      onPress={(event) => {
+        event.stopPropagation();
+        onJump(messageId);
+      }}
       style={{ marginBottom: 7 }}
     >
       <ReplyQuote message={message} unavailable={unavailable} />

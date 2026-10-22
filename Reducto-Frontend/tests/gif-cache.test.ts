@@ -70,3 +70,20 @@ test('failed GIF lookups can retry and session caches stay independent', async (
   });
   await assert.rejects(otherSession.get(gif.id), /Unauthorized/);
 });
+
+test('GIF metadata preserves dimensions and renews when the thumbnail expires first', async () => {
+  const now = Date.parse('2026-10-19T00:10:00Z');
+  const cache = new GifCache(
+    async () => ({ gif }),
+    () => now,
+  );
+  const entry = cache.remember({
+    ...gif,
+    width: 640,
+    height: 480,
+    thumbnailUrl: 'https://storage.example/thumb.jpg?X-Amz-Date=20261019T000000Z&X-Amz-Expires=900',
+  });
+  assert.equal(entry.renewAt, Date.parse('2026-10-19T00:14:00Z'));
+  assert.equal(cache.peek(gif.id)?.gif.width, 640);
+  assert.equal(cache.peek(gif.id)?.gif.thumbnailUrl, entry.gif.thumbnailUrl);
+});

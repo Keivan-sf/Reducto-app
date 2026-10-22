@@ -1,6 +1,12 @@
 import { Link } from 'expo-router';
 import * as Linking from 'expo-linking';
-import { Platform, Text, type StyleProp, type TextStyle } from 'react-native';
+import {
+  Platform,
+  Text,
+  type StyleProp,
+  type TextStyle,
+  type GestureResponderEvent,
+} from 'react-native';
 import { colors } from '../../components/ui';
 import { internalLinkPath, linkify } from '../../lib/links';
 
@@ -12,7 +18,7 @@ export function MessageText({
 }: {
   text: string;
   style?: StyleProp<TextStyle>;
-  onMessagePress: () => void;
+  onMessagePress: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
 }) {
   return (
