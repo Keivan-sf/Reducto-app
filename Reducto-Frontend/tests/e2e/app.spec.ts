@@ -1898,3 +1898,236 @@ test('GIF library uploads reuse the original local video for preview and sending
     .toBeTruthy();
   expect(downloads).toBe(0);
 });
+
+test('voice attachments play, pause, seek on a straight progress line, and expose message options', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page, [
+    { ...first, text: null, attachment: { type: 'voice', mediaId: 'incoming-voice' } },
+  ]);
+  let downloads = 0;
+  await page.route('**/api/conversations/*/attachments/incoming-voice', (route) => {
+    downloads++;
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    return route.fulfill({
+      path: path.join(__dirname, '../fixtures/voice.ogg'),
+      contentType: 'application/octet-stream',
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const voice = page.getByTestId('voice-player');
+  await expect(voice).toBeVisible();
+  await expect(voice.getByText('0:03', { exact: true })).toBeVisible();
+  await voice.getByRole('button', { name: 'Play voice message', exact: true }).click();
+  await expect(
+    voice.getByRole('button', { name: 'Pause voice message', exact: true }),
+  ).toBeVisible();
+  await voice.getByRole('button', { name: 'Pause voice message', exact: true }).click();
+  const progress = voice.getByRole('slider', { name: 'Voice message progress', exact: true });
+  const bounds = (await progress.boundingBox())!;
+  await progress.click({ position: { x: bounds.width * 0.6, y: bounds.height / 2 } });
+  await expect(progress).toHaveAttribute('aria-valuenow', '1');
+  await page.screenshot({ path: testInfo.outputPath('voice-message.png') });
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Message actions', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(
+    page.getByTestId('reply-composer').getByText('Voice message', { exact: true }),
+  ).toBeVisible();
+  expect(downloads).toBe(1);
+});
+
+async function mockMicrophone(page: Page, mode: 'granted' | 'denied' | 'delayed' = 'granted') {
+  await page.addInitScript((mode) => {
+    const stats = { stopped: 0, resolve: undefined as undefined | (() => void) };
+    Object.assign(window, { __voiceMicrophone: stats });
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+      configurable: true,
+      value: async () => {
+        if (mode === 'denied') throw new DOMException('Permission denied', 'NotAllowedError');
+        const context = new AudioContext();
+        const source = context.createOscillator();
+        const destination = context.createMediaStreamDestination();
+        source.connect(destination);
+        source.start();
+        destination.stream.getTracks().forEach((track) => {
+          const stop = track.stop.bind(track);
+          track.stop = () => {
+            stats.stopped++;
+            stop();
+            source.stop();
+            void context.close();
+          };
+        });
+        if (mode === 'delayed')
+          await new Promise<void>((resolve) => {
+            stats.resolve = resolve;
+          });
+        return destination.stream;
+      },
+    });
+  }, mode);
+}
+
+test('hold-to-record releases, uploads kind=voice, sends a reply and reuses the local recording', async ({
+  page,
+}) => {
+  await mockApi(page, [
+    { ...first, text: null, attachment: { type: 'voice', mediaId: 'reply-voice' } },
+  ]);
+  await mockMicrophone(page);
+  await page.route('**/api/conversations/*/attachments/reply-voice', (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/voice.ogg'),
+      contentType: 'audio/ogg',
+    }),
+  );
+  let uploads = 0;
+  let downloads = 0;
+  await page.route('**/api/conversations/*/attachments', (route) => {
+    uploads++;
+    const body = route.request().postDataBuffer()!.toString('latin1');
+    expect(body).toContain('name="kind"\r\n\r\nvoice');
+    expect(body).toContain('name="file"');
+    expect(body).toContain('audio/webm');
+    return route.fulfill({
+      status: 201,
+      json: {
+        attachment: {
+          id: 'recorded-voice',
+          type: 'voice',
+          fileName: 'voice.ogg',
+          contentType: 'audio/ogg',
+          fileSize: 1234,
+        },
+      },
+    });
+  });
+  await page.route('**/api/conversations/*/attachments/recorded-voice', (route) => {
+    downloads++;
+    return route.fulfill({ status: 500 });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Message actions', exact: true }).click();
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
+  await expect(page.getByTestId('reply-composer')).toContainText('Voice message');
+  const mic = page.getByRole('button', { name: 'Hold to record voice message', exact: true });
+  const box = (await mic.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.getByText(/Recording 0:00 · release to send/)).toBeVisible();
+  await page.waitForTimeout(450);
+  const sent = page.waitForRequest(
+    (request) => request.url().endsWith('/messages') && request.method() === 'POST',
+  );
+  await page.mouse.move(box.x - 120, box.y - 70);
+  await page.mouse.up();
+  expect((await sent).postDataJSON()).toEqual({
+    attachment: { type: 'voice', mediaId: 'recorded-voice' },
+    replyToMessageId: first.id,
+  });
+  const voice = page.getByTestId('voice-player').last();
+  await expect(voice).toBeVisible();
+  await voice.getByRole('button', { name: 'Play voice message', exact: true }).click();
+  await expect(
+    voice.getByRole('button', { name: 'Pause voice message', exact: true }),
+  ).toBeVisible();
+  await voice.getByRole('button', { name: 'Pause voice message', exact: true }).click();
+  expect(uploads).toBe(1);
+  expect(downloads).toBe(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __voiceMicrophone: { stopped: number } }).__voiceMicrophone
+            .stopped,
+      ),
+    )
+    .toBe(1);
+});
+
+for (const mode of ['denied', 'delayed'] as const) {
+  test(`voice recording ${mode === 'denied' ? 'permission denial' : 'release during permission'} never uploads or keeps the microphone active`, async ({
+    page,
+  }) => {
+    await mockApi(page);
+    await mockMicrophone(page, mode);
+    let uploads = 0;
+    await page.route('**/api/conversations/*/attachments', (route) => {
+      uploads++;
+      return route.fulfill({ status: 500 });
+    });
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const mic = page.getByRole('button', { name: 'Hold to record voice message', exact: true });
+    const box = (await mic.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    if (mode === 'denied')
+      await expect(
+        page.getByText('Allow microphone access to record voice messages.'),
+      ).toBeVisible();
+    else await expect(page.getByText('Preparing microphone…')).toBeVisible();
+    await page.mouse.up();
+    if (mode === 'delayed') {
+      await page.evaluate(() =>
+        (
+          window as unknown as { __voiceMicrophone: { resolve?: () => void } }
+        ).__voiceMicrophone.resolve?.(),
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as unknown as { __voiceMicrophone: { stopped: number } }).__voiceMicrophone
+                .stopped,
+          ),
+        )
+        .toBe(1);
+    }
+    await expect(page.getByText(/Recording .*release to send/)).toHaveCount(0);
+    await expect(mic).toBeEnabled();
+    expect(uploads).toBe(0);
+  });
+}
+
+test('moving away while holding keeps recording until release; leaving the chat cancels without sending', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await mockMicrophone(page);
+  let uploads = 0;
+  await page.route('**/api/conversations/*/attachments', (route) => {
+    uploads++;
+    return route.fulfill({ status: 500 });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const mic = page.getByRole('button', { name: 'Hold to record voice message', exact: true });
+  const box = (await mic.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.getByText(/Recording .*release to send/)).toBeVisible();
+  await page.mouse.move(box.x - 160, box.y - 100);
+  await page.waitForTimeout(300);
+  await expect(page.getByText(/Recording .*release to send/)).toBeVisible();
+  expect(uploads).toBe(0);
+  // Browser history navigation is equivalent to leaving the conversation while held.
+  await page.goBack();
+  await page.mouse.up();
+  await expect(page.getByText(/Recording .*release to send/)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __voiceMicrophone: { stopped: number } }).__voiceMicrophone
+            .stopped,
+      ),
+    )
+    .toBe(1);
+  expect(uploads).toBe(0);
+});

@@ -1,6 +1,8 @@
 import type { VideoProgress } from '../api/video-cache';
 export interface VideoDownloadRequest {
   url: string;
+  mimeType?: string;
+  fileName?: string;
   headers: Record<string, string>;
   refresh: () => Promise<Record<string, string>>;
   signal: AbortSignal;

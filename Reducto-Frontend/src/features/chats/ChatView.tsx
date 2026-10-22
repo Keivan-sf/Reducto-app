@@ -49,9 +49,13 @@ import { MessageText } from './MessageText';
 import { GifPreview } from './GifPreview';
 import { useGifs } from '../../context/GifsContext';
 import { ReplyPreview, ReplyQuote } from './ReplyPreview';
+import { VoiceMessage } from './VoiceMessage';
+import { VoiceRecordButton } from './VoiceRecordButton';
+import type { RecordedVoice } from '../../lib/voice-recording.types';
+import { voicePlayback } from '../../lib/voice-playback';
 import { VideoCard } from './VideoCard';
 import { VideoViewer } from './VideoViewer';
-import { useVideos, videoKey, gifFileKey } from '../../context/VideosContext';
+import { useVideos, videoKey, gifFileKey, voiceFileKey } from '../../context/VideosContext';
 import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
 import { MessageMenu, type MessageMenuAction } from './MessageMenu';
@@ -94,6 +98,7 @@ export default function ChatView({ id }: { id?: string }) {
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState('');
   const [details, setDetails] = useState(false);
@@ -313,6 +318,43 @@ export default function ChatView({ id }: { id?: string }) {
       setBusy(false);
     }
   }
+  async function sendVoice(voice: RecordedVoice, signal: AbortSignal) {
+    if (!id) return;
+    setBusy(true);
+    setError('');
+    let local: VideoFile | undefined;
+    try {
+      local = await retainUpload(voice.asset);
+      if (local.bytes > 50 * 1024 * 1024)
+        throw new Error('Voice messages must be smaller than 50 MB.');
+      const body = await fileForm('file', { ...voice.asset, uri: local.uri });
+      body.append('kind', 'voice');
+      const { attachment: media } = await api.request<{ attachment: AttachmentMetadata }>(
+        `/api/conversations/${id}/attachments`,
+        { method: 'POST', body, signal },
+      );
+      mediaMetadata.remember(id, media);
+      videoCache.remember(voiceFileKey(id, media.id), { ...local, duration: voice.duration });
+      local = undefined;
+      const { message } = await api.request<{ message: Message }>(
+        `/api/conversations/${id}/messages`,
+        {
+          method: 'POST',
+          signal,
+          body: JSON.stringify({
+            attachment: { type: 'voice', mediaId: media.id },
+            ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
+          }),
+        },
+      );
+      acceptMessage(message);
+      setReplyTo(null);
+      showLatest();
+    } finally {
+      local?.dispose();
+      setBusy(false);
+    }
+  }
   function openMessageMenu(message: Message, event: GestureResponderEvent) {
     event.stopPropagation();
     setError('');
@@ -378,7 +420,12 @@ export default function ChatView({ id }: { id?: string }) {
             onPress: () => {
               const attachment = actionMessage.attachment!;
               setActionsVisible(false);
-              if (id && attachment.type === 'video')
+              if (id && attachment.type === 'voice')
+                void videoCache
+                  .get(voiceFileKey(id, attachment.mediaId))
+                  .then(saveLocalFile)
+                  .catch((err) => setError(err.message));
+              else if (id && attachment.type === 'video')
                 void videoCache
                   .get(videoKey(id, attachment.mediaId))
                   .then(saveVideoFile)
@@ -654,7 +701,17 @@ export default function ChatView({ id }: { id?: string }) {
                       onJump={(target) => void jumpToMessage(target)}
                     />
                   )}
-                  {message.attachment?.type === 'video' ? (
+                  {message.attachment?.type === 'voice' ? (
+                    <VoiceMessage
+                      conversationId={id}
+                      mediaId={message.attachment.mediaId}
+                      active={
+                        !voiceActive && !playingVideo && !gifs && visibleMessages.has(message.id)
+                      }
+                      onOptions={(event) => openMessageMenu(message, event)}
+                      onError={setError}
+                    />
+                  ) : message.attachment?.type === 'video' ? (
                     <VideoCard
                       conversationId={id}
                       mediaId={message.attachment.mediaId}
@@ -772,12 +829,12 @@ export default function ChatView({ id }: { id?: string }) {
           <IconButton
             name="attach-outline"
             label="Attach a file"
-            disabled={busy}
+            disabled={busy || voiceActive}
             onPress={() => void upload().catch((err) => setError(err.message))}
           />
           <TextInput
             accessibilityLabel="Message"
-            editable={!busy}
+            editable={!busy && !voiceActive}
             multiline
             placeholder="Write a message…"
             placeholderTextColor="#96A3B0"
@@ -799,22 +856,34 @@ export default function ChatView({ id }: { id?: string }) {
           <IconButton
             name="happy-outline"
             label="Open GIF library"
-            disabled={busy}
+            disabled={busy || voiceActive}
             onPress={() => setGifs(true)}
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Send message"
-            disabled={busy || (!draft.trim() && !attachment)}
-            onPress={() => void send()}
-            style={[s.send, (busy || (!draft.trim() && !attachment)) && { opacity: 0.45 }]}
-          >
-            {busy ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Icon name="send" color="white" size={20} />
-            )}
-          </Pressable>
+          {!draft.trim() && !attachment ? (
+            <VoiceRecordButton
+              disabled={busy}
+              onSend={sendVoice}
+              onError={setError}
+              onActive={(active) => {
+                if (active) voicePlayback.pause();
+                setVoiceActive(active);
+              }}
+            />
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+              disabled={busy || (!draft.trim() && !attachment)}
+              onPress={() => void send()}
+              style={[s.send, (busy || (!draft.trim() && !attachment)) && { opacity: 0.45 }]}
+            >
+              {busy ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Icon name="send" color="white" size={20} />
+              )}
+            </Pressable>
+          )}
         </View>
         <Text style={s.composerHint}>
           {Platform.OS === 'web'

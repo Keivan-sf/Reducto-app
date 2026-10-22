@@ -30,13 +30,15 @@ export function timeLabel(date: string) {
 export function preview(message?: Message) {
   return (
     message?.text ||
+    (message?.attachment?.type === 'voice' ? 'Voice message' : undefined) ||
     (message?.attachment
       ? `${message.attachment.type.toUpperCase()} attachment`
       : 'Start a conversation')
   );
 }
 export function replySnippet(message: Message) {
-  if (message.attachment) return message.attachment.type;
+  if (message.attachment)
+    return message.attachment.type === 'voice' ? 'Voice message' : message.attachment.type;
   const text = (message.text ?? '').replace(/\s+/g, ' ').trim();
   const characters = Array.from(text);
   return characters.length > 20 ? `${characters.slice(0, 20).join('')}…` : text || 'Message';

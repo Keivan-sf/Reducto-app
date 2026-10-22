@@ -39,7 +39,7 @@ export const EMOJIS = ['👍', '👎', '❤️', '😂', '😮', '😢', '🔥',
 export type Emoji = (typeof EMOJIS)[number];
 export type Attachment =
   | { type: 'gif'; gifId: string }
-  | { type: 'image' | 'video' | 'audio' | 'music' | 'document'; mediaId: string };
+  | { type: 'image' | 'video' | 'audio' | 'music' | 'voice' | 'document'; mediaId: string };
 export interface Reaction {
   userId: string;
   emoji: Emoji;
@@ -75,7 +75,7 @@ export interface VisualMediaMetadata {
 }
 export interface AttachmentMetadata extends VisualMediaMetadata {
   id: string;
-  type: 'image' | 'video' | 'audio' | 'music' | 'document';
+  type: 'image' | 'video' | 'audio' | 'music' | 'voice' | 'document';
   fileName: string;
   contentType: string;
   fileSize: number;

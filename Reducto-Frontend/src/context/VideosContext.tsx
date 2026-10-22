@@ -22,8 +22,12 @@ export function VideosProvider({ children }: PropsWithChildren) {
       return { Authorization: `Bearer ${session.accessToken}` };
     };
     return new VideoCache(async (key, signal, progress) => {
+      const voice = key.startsWith('voice:');
+      const path = voice ? key.slice('voice:'.length) : key;
       const file = await loadVideoFile({
-        url: `${owner.serverUrl}${key}`,
+        url: `${owner.serverUrl}${path}`,
+        mimeType: voice ? 'audio/ogg' : undefined,
+        fileName: voice ? 'voice.ogg' : undefined,
         headers: headers(),
         signal,
         progress,
@@ -48,6 +52,8 @@ export function VideosProvider({ children }: PropsWithChildren) {
 export const useVideos = () => useContext(Context);
 export const videoKey = (conversationId: string, mediaId: string) =>
   `/api/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(mediaId)}`;
+export const voiceFileKey = (conversationId: string, mediaId: string) =>
+  `voice:${videoKey(conversationId, mediaId)}`;
 export const gifFileKey = (gifId: string) => `/api/gifs/${encodeURIComponent(gifId)}/local`;
 export function useVideoFile(conversationId: string, mediaId: string, active = true) {
   return useCachedFile(videoKey(conversationId, mediaId), active);

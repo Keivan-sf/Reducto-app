@@ -35,7 +35,15 @@
           "microphonePermission": false
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Reducto to record voice messages.",
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": false
+        }
+      ]
     ]
   }
 }

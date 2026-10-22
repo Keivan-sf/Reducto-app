@@ -30,8 +30,16 @@ export async function loadVideoFile(request: VideoDownloadRequest): Promise<Vide
   if (response.status !== 200) throw new Error('Could not download this video.');
   if (request.signal.aborted) throw new Error('Download cancelled');
   // The attachment endpoint deliberately returns application/octet-stream.
-  const uri = URL.createObjectURL(new Blob([response.blob], { type: 'video/mp4' }));
-  return { uri, bytes: response.blob.size, dispose: () => URL.revokeObjectURL(uri) };
+  const uri = URL.createObjectURL(
+    new Blob([response.blob], { type: request.mimeType ?? 'video/mp4' }),
+  );
+  return {
+    uri,
+    bytes: response.blob.size,
+    mimeType: request.mimeType,
+    name: request.fileName,
+    dispose: () => URL.revokeObjectURL(uri),
+  };
 }
 
 export async function saveVideoFile(file: VideoFile) {

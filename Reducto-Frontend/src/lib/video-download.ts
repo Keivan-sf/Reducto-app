@@ -6,7 +6,7 @@ export async function loadVideoFile(request: VideoDownloadRequest): Promise<Vide
   const directory = new Directory(Paths.cache, 'reducto-videos');
   const destination = new File(
     directory,
-    `reducto-video-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`,
+    `reducto-media-${Date.now()}-${Math.random().toString(36).slice(2)}${request.mimeType === 'audio/ogg' ? '.ogg' : '.mp4'}`,
   );
   const dispose = () => {
     if (destination.exists) destination.delete();
@@ -40,6 +40,8 @@ export async function loadVideoFile(request: VideoDownloadRequest): Promise<Vide
         return {
           uri: file.uri,
           bytes: file.size,
+          mimeType: request.mimeType,
+          name: request.fileName,
           exists: () => file.exists && file.size > 0,
           dispose,
         };
