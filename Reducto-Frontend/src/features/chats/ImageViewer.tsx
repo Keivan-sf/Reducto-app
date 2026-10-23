@@ -4,14 +4,14 @@ import {
   Animated,
   Image,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
   type GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button, Icon, IconButton } from '../../components/ui';
+import { Button, IconButton } from '../../components/ui';
+import { saveLocalFile } from '../../lib/local-attachments';
 import { useCachedFile, useVideos, videoKey } from '../../context/VideosContext';
 
 export function ImageViewer({
@@ -22,7 +22,6 @@ export function ImageViewer({
   createdAt,
   caption,
   onClose,
-  onOptions,
   onForward,
 }: {
   visible?: boolean;
@@ -32,12 +31,31 @@ export function ImageViewer({
   createdAt: string;
   caption?: string | null;
   onClose: () => void;
-  onOptions: (event: GestureResponderEvent) => void;
   onForward: () => void;
 }) {
   const files = useVideos();
   const key = videoKey(conversationId, mediaId);
   const { state, download } = useCachedFile(key, visible, 'image/jpeg');
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<{ key: string; message: string } | null>(null);
+  async function save() {
+    if (savingRef.current || state.status !== 'ready') return;
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await saveLocalFile(await download());
+    } catch (error) {
+      setSaveError({
+        key,
+        message: error instanceof Error ? error.message : 'Could not save this image.',
+      });
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
   const [failure, setFailure] = useState({ key, visible, failed: false });
   if (failure.key !== key || failure.visible !== visible) {
     setFailure({ key, visible, failed: false });
@@ -112,15 +130,19 @@ export function ImageViewer({
           </Text>
         </View>
         <IconButton name="arrow-redo" label="Forward image" color="white" onPress={onForward} />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Image message options"
-          onPress={onOptions}
-          style={s.optionsIcon}
-        >
-          <Icon name="ellipsis-vertical" color="white" />
-        </Pressable>
+        <IconButton
+          name="download-outline"
+          label="Save attachment"
+          color="white"
+          disabled={saving || state.status !== 'ready'}
+          onPress={() => void save()}
+        />
       </View>
+      {saveError?.key === key && (
+        <Text accessibilityRole="alert" style={s.message}>
+          {saveError.message}
+        </Text>
+      )}
       <View
         testID="image-viewer-surface"
         style={[s.surface, Platform.OS === 'web' && webGestureStyle]}
@@ -231,5 +253,4 @@ const s = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14 },
   message: { color: 'white', textAlign: 'center' },
   caption: { color: 'white', padding: 16, textAlign: 'center', fontSize: 15 },
-  optionsIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });

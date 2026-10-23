@@ -18,7 +18,7 @@ const { outputText } = ts.transpileModule(
 function viewer() {
   let closes = 0,
     forwards = 0,
-    menus = 0;
+    saves = 0;
   const offsets: number[] = [];
   class Value {
     constructor(_value: number) {}
@@ -62,13 +62,19 @@ function viewer() {
       if (name === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView' };
       if (name === 'expo-status-bar') return { StatusBar: 'StatusBar' };
       if (name.endsWith('/ui')) return { Button: 'Button', IconButton: 'IconButton', Icon: 'Icon' };
+      if (name.endsWith('/local-attachments'))
+        return {
+          saveLocalFile: async () => {
+            saves++;
+          },
+        };
       if (name.endsWith('/VideosContext'))
         return {
           useVideos: () => ({}),
           videoKey: () => 'image-key',
           useCachedFile: () => ({
             state: { status: 'ready', file: { uri: 'file:///image.png' } },
-            download: async () => {},
+            download: async () => ({ uri: 'file:///image.png' }),
           }),
         };
       throw new Error(`Unexpected import ${name}`);
@@ -84,9 +90,6 @@ function viewer() {
     },
     onForward: () => {
       forwards++;
-    },
-    onOptions: () => {
-      menus++;
     },
   }) as unknown as Node;
   function find(predicate: (node: Node) => boolean, node: Node = tree): Node | undefined {
@@ -106,7 +109,7 @@ function viewer() {
       touches: Array.from({ length: fingers }, () => ({ pageX: x, pageY: y })),
     },
   });
-  return { tree, find, surface, event, offsets, counts: () => ({ closes, forwards, menus }) };
+  return { tree, find, surface, event, offsets, counts: () => ({ closes, forwards, saves }) };
 }
 
 test('Android image swipes in either vertical direction dismiss exactly once', () => {
@@ -140,10 +143,13 @@ test('Android taps, small drags, horizontal drags, cancellation and multi-touch 
   }
 });
 
-test('Android header Back, Forward and message options use their intended actions', () => {
+test('Android header Back, Forward and Save use their intended actions', async () => {
   const t = viewer();
   t.find((node) => node.props.label === 'Back to conversation')!.props.onPress();
   t.find((node) => node.props.label === 'Forward image')!.props.onPress();
-  t.find((node) => node.props.accessibilityLabel === 'Image message options')!.props.onPress({});
-  assert.deepEqual(t.counts(), { closes: 1, forwards: 1, menus: 1 });
+  const save = t.find((node) => node.props.label === 'Save attachment')!;
+  assert.equal(save.props.name, 'download-outline');
+  save.props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(t.counts(), { closes: 1, forwards: 1, saves: 1 });
 });

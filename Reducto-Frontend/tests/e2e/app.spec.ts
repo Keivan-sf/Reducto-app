@@ -3877,11 +3877,12 @@ test('image viewer opens full screen, reuses cached bytes, closes with Back, Esc
     .getByRole('button', { name: 'Close message options' })
     .click({ position: { x: 2, y: 2 } });
   await open.click();
-  await viewer.getByRole('button', { name: 'Image message options' }).click();
-  await expect(viewer).toHaveCount(0);
-  await page.getByRole('button', { name: 'Reply', exact: true }).click();
-  await expect(page.getByTestId('reply-composer')).toBeVisible();
-  await open.click();
+  const saved = page.waitForEvent('download');
+  await viewer.getByRole('button', { name: 'Save attachment', exact: true }).click();
+  expect((await saved).suggestedFilename()).toBeTruthy();
+  await expect(viewer).toBeVisible();
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
+  expect(downloads).toBe(1);
   await viewer.getByRole('button', { name: 'Forward image' }).click();
   await expect(page.getByText('Forward to…', { exact: true })).toBeVisible();
 });

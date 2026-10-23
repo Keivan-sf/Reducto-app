@@ -1039,9 +1039,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                                 title: profileName(profiles[message.senderId]),
                                 createdAt: message.createdAt,
                                 caption: message.text,
-                                onOptions: (event) => {
-                                  openMessageMenu(message, event);
-                                },
                                 onForward: () => {
                                   setActionMessage(message);
                                   setForward(true);

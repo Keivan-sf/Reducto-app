@@ -156,10 +156,6 @@ function MediaViewerHost({
             {...image}
             visible={visible && showingImage}
             onClose={close}
-            onOptions={(event) => {
-              event.persist();
-              session.close(() => image?.onOptions(event));
-            }}
             onForward={() => session.close(() => image?.onForward())}
           />
         )}
