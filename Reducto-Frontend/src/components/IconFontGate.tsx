@@ -1,22 +1,27 @@
 import { useEffect, useState, type PropsWithChildren } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { loadIconFont } from '../lib/load-icon-font';
 import { colors } from './ui';
 
 /** Keep icons from starting uncaught font downloads in their mount lifecycle. */
 export function IconFontGate({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState('');
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     void Promise.resolve()
-      .then(() => Ionicons.loadFont())
+      .then(() => loadIconFont())
       .then(() => {
         if (active) setReady(true);
       })
-      .catch(() => {
-        if (active) setFailed(true);
+      .catch((error: unknown) => {
+        if (!active) return;
+        const message = error instanceof Error ? error.message : String(error);
+        const code =
+          error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+        setFailed(code ? `${code}: ${message}` : message);
+        console.warn('Could not load app icons:', error);
       });
     return () => {
       active = false;
@@ -40,11 +45,14 @@ export function IconFontGate({ children }: PropsWithChildren) {
           <Text accessibilityRole="alert" style={{ color: colors.dark, textAlign: 'center' }}>
             Could not load app icons. Check your connection and try again.
           </Text>
+          <Text selectable style={{ color: colors.muted, textAlign: 'center', fontSize: 12 }}>
+            {failed}
+          </Text>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Retry loading icons"
             onPress={() => {
-              setFailed(false);
+              setFailed('');
               setAttempt((current) => current + 1);
             }}
             style={{ backgroundColor: colors.blue, padding: 14, borderRadius: 10 }}

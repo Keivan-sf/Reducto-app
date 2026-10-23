@@ -8,4 +8,4 @@ export interface RecordingSession {
   stop: () => Promise<RecordedVoice>;
   cancel: () => void;
 }
-export type RecordingPhase = 'idle' | 'preparing' | 'recording' | 'stopping' | 'sending';
+export type RecordingPhase = 'idle' | 'preparing' | 'recording' | 'locked' | 'stopping' | 'sending';

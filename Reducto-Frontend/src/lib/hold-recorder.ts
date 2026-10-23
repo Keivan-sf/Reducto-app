@@ -5,7 +5,7 @@ interface Callbacks {
   changed: (phase: RecordingPhase) => void;
   error: (message: string) => void;
 }
-/** Own one hold across permission, preparation, release, and asynchronous upload. */
+/** Own a held or locked recording through preparation and asynchronous upload. */
 export class HoldRecorder {
   private phase: RecordingPhase = 'idle';
   private current?: { controller: AbortController; session?: RecordingSession };
@@ -46,13 +46,20 @@ export class HoldRecorder {
     }
   }
   release() {
+    if (this.phase === 'locked') return;
+    this.send();
+  }
+  lock() {
+    if (this.phase === 'recording') this.change('locked');
+  }
+  send() {
     const current = this.current;
     if (!current) return;
     if (this.phase === 'preparing') {
       this.cancel();
       return;
     }
-    if (this.phase !== 'recording' || !current.session) return;
+    if ((this.phase !== 'recording' && this.phase !== 'locked') || !current.session) return;
     this.change('stopping');
     void this.finish(current);
   }

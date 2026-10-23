@@ -63,6 +63,51 @@ test('holding records; releasing once stops, uploads once, and disposes the reco
   assert.deepEqual(counts(), { sends: 1, stops: 1, cancels: 0, disposed: 1 });
   assert.deepEqual(states, ['preparing', 'recording', 'stopping', 'sending', 'idle']);
 });
+test('locking continues after release and sends only once on explicit send', async () => {
+  const { controller, counts, states } = setup();
+  await controller.press();
+  controller.lock();
+  controller.release();
+  controller.release();
+  await tick();
+  assert.equal(states.at(-1), 'locked');
+  assert.deepEqual(counts(), { sends: 0, stops: 0, cancels: 0, disposed: 0 });
+  controller.send();
+  controller.send();
+  controller.release();
+  await tick();
+  assert.deepEqual(counts(), { sends: 1, stops: 1, cancels: 0, disposed: 1 });
+  assert.equal(states.at(-1), 'idle');
+});
+test('cancel and unmount discard locked recordings and allow another hold', async () => {
+  for (const unmount of [false, true]) {
+    const { controller, counts, states } = setup();
+    await controller.press();
+    controller.lock();
+    if (unmount) controller.dispose();
+    else controller.cancel();
+    controller.send();
+    await tick();
+    assert.equal(states.at(-1), 'idle');
+    assert.deepEqual(counts(), { sends: 0, stops: 0, cancels: 1, disposed: 0 });
+    if (!unmount) {
+      await controller.press();
+      assert.equal(states.at(-1), 'recording');
+      controller.cancel();
+    }
+  }
+});
+test('locking before microphone preparation finishes does not keep a released hold alive', async () => {
+  const pending = deferred<RecordingSession>();
+  const t = setup(() => pending.promise);
+  const preparing = t.controller.press();
+  t.controller.lock();
+  t.controller.release();
+  pending.resolve(t.session);
+  await preparing;
+  assert.equal(t.states.at(-1), 'idle');
+  assert.equal(t.counts().sends, 0);
+});
 test('release during permission/preparation cancels a late recorder without uploading', async () => {
   const started = deferred<RecordingSession>();
   let signal!: AbortSignal;

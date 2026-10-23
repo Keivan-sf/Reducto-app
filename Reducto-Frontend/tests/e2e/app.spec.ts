@@ -3334,6 +3334,86 @@ test('hold-to-record releases, uploads kind=voice, sends a reply and reuses the 
     .toBe(1);
 });
 
+test('swiping up locks voice recording until Cancel or Send, including touch gestures', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page);
+  await mockMicrophone(page);
+  let uploads = 0;
+  await page.route('**/api/conversations/*/attachments', (route) => {
+    uploads++;
+    return route.fulfill({
+      status: 201,
+      json: {
+        attachment: {
+          id: 'locked-voice',
+          type: 'voice',
+          fileName: 'voice.ogg',
+          contentType: 'audio/ogg',
+          fileSize: 1234,
+        },
+      },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const cdp =
+    testInfo.project.name === 'mobile' ? await page.context().newCDPSession(page) : undefined;
+  for (const action of ['Cancel', 'Send']) {
+    const mic = page.getByRole('button', { name: 'Hold to record voice message', exact: true });
+    const box = (await mic.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    if (cdp) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    } else {
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+    }
+    await expect(page.getByText('Slide up to lock')).toBeVisible();
+    await page.waitForTimeout(350);
+    if (cdp) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x, y: y - 90 }],
+      });
+    } else await page.mouse.move(x, y - 90, { steps: 5 });
+    const send = page.getByRole('button', { name: 'Send voice message', exact: true });
+    await expect(send).toBeVisible();
+    if (cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    else await page.mouse.up();
+    await expect(send).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeHidden();
+    await expect(page.getByText('0:01', { exact: true })).toBeVisible();
+    expect(uploads).toBe(0);
+    await page.screenshot({ path: testInfo.outputPath(`locked-recording-${action}.png`) });
+    if (action === 'Cancel') {
+      await page.getByRole('button', { name: 'Cancel voice recording' }).click();
+    } else {
+      const sent = page.waitForRequest(
+        (request) => request.url().endsWith('/messages') && request.method() === 'POST',
+      );
+      await send.click();
+      expect((await sent).postDataJSON()).toEqual({
+        attachment: { type: 'voice', mediaId: 'locked-voice' },
+      });
+    }
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEditable();
+    await expect(mic).toBeVisible();
+  }
+  expect(uploads).toBe(1);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __voiceMicrophone: { stopped: number } }).__voiceMicrophone
+            .stopped,
+      ),
+    )
+    .toBe(2);
+  await cdp?.detach();
+});
+
 for (const mode of ['denied', 'delayed'] as const) {
   test(`voice recording ${mode === 'denied' ? 'permission denial' : 'release during permission'} never uploads or keeps the microphone active`, async ({
     page,

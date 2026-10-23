@@ -70,12 +70,14 @@ export function MessageComposer({
   return (
     <>
       <View style={s.composer}>
-        <IconButton
-          name="attach-outline"
-          label="Attach a file"
-          disabled={busy || recording || editing}
-          onPress={onAttach}
-        />
+        <View style={recording && s.hidden}>
+          <IconButton
+            name="attach-outline"
+            label="Attach a file"
+            disabled={busy || recording || editing}
+            onPress={onAttach}
+          />
+        </View>
         <TextInput
           ref={input}
           accessibilityLabel={editing ? 'Edit message text' : 'Message'}
@@ -90,7 +92,7 @@ export function MessageComposer({
             setDraft(value);
           }}
           maxLength={10000}
-          style={s.messageInput}
+          style={[s.messageInput, recording && s.hidden]}
           onKeyPress={(event) => {
             if (
               Platform.OS === 'web' &&
@@ -102,12 +104,14 @@ export function MessageComposer({
             }
           }}
         />
-        <IconButton
-          name="happy-outline"
-          label="Open GIF library"
-          disabled={busy || recording || editing}
-          onPress={onOpenGifs}
-        />
+        <View style={recording && s.hidden}>
+          <IconButton
+            name="happy-outline"
+            label="Open GIF library"
+            disabled={busy || recording || editing}
+            onPress={onOpenGifs}
+          />
+        </View>
         {canSend || editing ? (
           <Pressable
             accessibilityRole="button"
@@ -142,6 +146,7 @@ export function MessageComposer({
 }
 
 const s = StyleSheet.create({
+  hidden: { display: 'none' },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
