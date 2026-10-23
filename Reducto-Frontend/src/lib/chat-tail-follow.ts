@@ -16,6 +16,9 @@ export class ChatTailFollow {
   }
   start() {
     this.following = true;
+    // Respond to the tap immediately, before React renders or a frame is queued.
+    // The later passes only correct native anchoring and new content layout.
+    if (this.enabled) this.scroll();
     this.layout();
   }
   stop() {

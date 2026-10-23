@@ -69,6 +69,7 @@ import { messageGif, messageMedia } from '../../lib/message-attachment';
 import { seenByAnotherMember } from '../../api/receipts';
 import { captureHistoryAnchor } from '../../lib/history-anchor';
 import { ChatTailFollow } from '../../lib/chat-tail-follow';
+import { ScrollToLatestButton } from './ScrollToLatestButton';
 
 const readViewabilityConfig = { minimumViewTime: 350, viewAreaCoveragePercentThreshold: 60 };
 
@@ -79,6 +80,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     conversations,
     messages,
     outgoing,
+    unread,
     outbox,
     members,
     receiptPositions,
@@ -366,7 +368,17 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
       if (sequence === jumpSequence.current) setJumping(false);
     }
   }
+  function scrollLoadedLatest() {
+    if (jumpWindow || search !== null || jumpTarget || (id && messageCache.hasNewer(id)))
+      return false;
+    // Native scrolling can start on touch-down without rendering the chat or
+    // replacing the history window. Keep the full jump path for unloaded tails.
+    tailFollow.start();
+    return true;
+  }
   async function showLatest() {
+    if (scrollLoadedLatest()) return;
+    setAwayFromBottom(false);
     tailFollow.start();
     initialReadTarget.current = null;
     setOpeningHistory(false);
@@ -460,6 +472,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     ],
   );
   const historyMetrics = useRef({ offset: 0, height: 0, viewport: 0 });
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
   const loadVisibleEdges = useCallback(() => {
     const { offset, height, viewport } = historyMetrics.current;
     if (!height || !viewport) return;
@@ -828,20 +841,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           style={{ padding: 8 }}
         />
       )}
-      {jumpWindow && (
-        <View
-          style={{
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            gap: 8,
-            padding: 8,
-            backgroundColor: 'white',
-            justifyContent: 'center',
-          }}
-        >
-          <Button title="Back to latest messages" secondary onPress={showLatest} />
-        </View>
-      )}
       <View style={{ flex: 1 }}>
         <View
           testID="positioned-chat-history"
@@ -891,6 +890,10 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                 height: contentSize.height,
                 viewport: layoutMeasurement.height,
               };
+              // Hide as soon as the user reaches the bottom area, without
+              // waiting for the last pixels of Android's momentum to settle.
+              // A wider reveal threshold also avoids flicker near the bottom.
+              setAwayFromBottom((away) => contentOffset.y > (away ? 24 : 72));
               loadVisibleEdges();
             }}
             onContentSizeChange={(_width, height) => {
@@ -1189,6 +1192,17 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
             />
           </View>
         )}
+        <ScrollToLatestButton
+          visible={
+            !openingHistory &&
+            search === null &&
+            (awayFromBottom || (jumpWindow?.hasMoreAfter ?? hasNewer(id ?? '')))
+          }
+          unreadCount={unread[id ?? ''] ?? 0}
+          disabled={jumping || seekingVoice}
+          onPressIn={scrollLoadedLatest}
+          onPress={() => void showLatest()}
+        />
       </View>
       <View style={s.composerWrap}>
         {!!error && (

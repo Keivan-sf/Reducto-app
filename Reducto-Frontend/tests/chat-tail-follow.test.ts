@@ -35,6 +35,24 @@ function setup() {
   };
 }
 
+test('returning to latest scrolls immediately without waiting for an animation frame', () => {
+  const t = setup();
+  t.follow.start();
+  assert.equal(t.offset(), 0);
+  assert.equal(t.frames.size, 1, 'native anchor corrections remain scheduled');
+});
+
+test('starting while voice seeking defers the scroll until seeking ends', () => {
+  const t = setup();
+  t.follow.setEnabled(false);
+  t.follow.start();
+  assert.equal(t.offset(), 200);
+  assert.equal(t.frames.size, 0);
+  t.follow.setEnabled(true);
+  t.frame();
+  assert.equal(t.offset(), 0);
+});
+
 test('sending corrects a native anchor restoration after insertion and a later keyboard resize', () => {
   const t = setup();
   t.follow.start();
@@ -81,6 +99,7 @@ test('initial last-seen positioning is preserved until a send or explicit return
 test('voice seeking pauses corrections and resumes only if the chat was following latest', () => {
   const t = setup();
   t.follow.start();
+  t.move(200); // Native layout changes after the immediate scroll.
   t.follow.setEnabled(false);
   t.frame();
   assert.equal(t.offset(), 200);

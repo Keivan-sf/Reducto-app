@@ -703,6 +703,83 @@ async function mockRealtime(page: Page, accessToken = 'access-token') {
   };
 }
 
+test('scroll-to-latest shows live unread counts away from the bottom and clears after jumping', async ({
+  page,
+}) => {
+  const history = Array.from({ length: 40 }, (_, index) => ({
+    ...first,
+    id: `scroll-latest-${index}`,
+    text: `History message ${index}`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [{ ...chat, lastSeenMessageId: history.at(-1)!.id, unreadCount: 0 }],
+      },
+    }),
+  );
+  const realtime = await mockRealtime(page);
+  await signIn(page);
+  await expect.poll(realtime.connections).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const button = page.getByTestId('scroll-to-latest');
+  const badge = page.getByTestId('scroll-to-latest-unread');
+  await expect(page.getByTestId(`message-${history.at(-1)!.id}`)).toBeInViewport();
+  await expect(page.getByTestId('chat-history-loading')).toBeHidden();
+  await expect(button).toBeHidden();
+  const scrollUp = async () => {
+    await page.getByTestId('chat-history').dispatchEvent('wheel', { deltaY: -650, bubbles: true });
+    await page.getByTestId('chat-history').evaluate((element) => {
+      element.scrollTop = 650;
+    });
+  };
+  await scrollUp();
+  await expect(button).toBeVisible();
+  await expect(badge).toBeHidden();
+  // Hide before the last few pixels of a slow scroll settle at exactly zero.
+  await page.getByTestId('chat-history').evaluate((element) => {
+    element.scrollTop = 20;
+  });
+  await expect(button).toBeHidden();
+  await page.getByTestId('chat-history').evaluate((element) => {
+    element.scrollTop = 40;
+  });
+  await expect(button).toBeHidden();
+  await scrollUp();
+  await expect(button).toBeVisible();
+  for (let index = 0; index < 2; index++) {
+    realtime.emit('message.created', {
+      message: {
+        ...first,
+        id: `scroll-new-${index}`,
+        text: `New arrival ${index}`,
+        createdAt: new Date(Date.parse(first.createdAt) + (40 + index) * 1000).toISOString(),
+      },
+    });
+  }
+  await expect(badge).toHaveText('2');
+  const buttonBounds = await button.boundingBox();
+  if (!buttonBounds) throw new Error('Scroll-to-latest button must be visible');
+  await page.mouse.move(
+    buttonBounds.x + buttonBounds.width / 2,
+    buttonBounds.y + buttonBounds.height / 2,
+  );
+  await page.mouse.down();
+  // The jump must complete while held, before release/click or fade completion.
+  await expect
+    .poll(() => page.getByTestId('chat-history').evaluate((element) => element.scrollTop))
+    .toBe(0);
+  await page.mouse.up();
+  await expect(page.getByTestId('message-scroll-new-1')).toBeInViewport();
+  await expect(button).toBeHidden();
+  await page.waitForTimeout(450); // Allow the existing read-visibility dwell time.
+  await scrollUp();
+  await expect(button).toBeVisible();
+  await expect(badge).toBeHidden();
+});
+
 test('outgoing ticks update when a group member sees a message and recover after reload', async ({
   page,
 }, testInfo) => {
