@@ -3794,3 +3794,117 @@ test('switching conversations retains the mounted history, exact reading positio
   await expect(screen.getByTestId('message-retained-50')).toBeInViewport();
   await expect(draft).toHaveValue('');
 });
+
+test('image viewer opens full screen, reuses cached bytes, closes with Back, Escape and vertical swipes, and preserves message actions', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page, [{ ...first, attachment: { type: 'image', mediaId: 'viewer-photo' } }]);
+  let downloads = 0;
+  await page.route('**/api/conversations/*/attachments/viewer-photo', (route) => {
+    downloads++;
+    return route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.png'),
+      contentType: 'image/png',
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const open = page.getByRole('button', { name: 'Open image attachment', exact: true });
+  const viewer = page.getByTestId('image-viewer');
+  await open.click();
+  await expect(viewer).toBeVisible();
+  await expect(viewer.getByRole('img', { name: 'Full screen image' })).toBeVisible();
+  await expect(viewer.getByText('Grace Hopper', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
+  const box = (await viewer.boundingBox())!;
+  expect(box.width).toBe(page.viewportSize()!.width);
+  expect(box.height).toBe(page.viewportSize()!.height);
+  await expect(viewer.locator('[style*="background-image"]')).toHaveCSS(
+    'background-size',
+    'contain',
+  );
+  await expect
+    .poll(() =>
+      viewer.evaluate((element) => {
+        let opacity = 1;
+        for (let current: Element | null = element; current; current = current.parentElement)
+          opacity *= Number(getComputedStyle(current).opacity);
+        return opacity;
+      }),
+    )
+    .toBe(1);
+  await page.screenshot({ path: testInfo.outputPath('image-viewer.png') });
+  await viewer.getByRole('button', { name: 'Back to conversation' }).click();
+  await expect(viewer).toHaveCount(0);
+  await open.click();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toHaveCount(0);
+  const cdp =
+    testInfo.project.name === 'mobile' ? await page.context().newCDPSession(page) : undefined;
+  for (const [dx, dy, closes] of [
+    [5, 25, false],
+    [140, 15, false],
+    [5, -140, true],
+    [5, 140, true],
+  ] as const) {
+    if (!(await viewer.count())) await open.click();
+    const surface = (await page.getByTestId('image-viewer-surface').boundingBox())!;
+    const x = surface.x + surface.width / 2,
+      y = surface.y + surface.height / 2;
+    if (cdp) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: x + dx, y: y + dy }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } else {
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + dx, y + dy, { steps: 5 });
+      await page.mouse.up();
+    }
+    if (closes) await expect(viewer).toHaveCount(0);
+    else await expect(viewer).toBeVisible();
+  }
+  await cdp?.detach();
+  expect(downloads).toBe(1);
+  // The surrounding message row keeps its original menu instead of opening media.
+  await page.getByTestId(`message-row-${first.id}`).click({ position: { x: 2, y: 5 } });
+  for (const name of ['Reply', 'Forward', 'Save attachment'])
+    await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Close message options' })
+    .click({ position: { x: 2, y: 2 } });
+  await open.click();
+  await viewer.getByRole('button', { name: 'Image message options' }).click();
+  await expect(viewer).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.getByTestId('reply-composer')).toBeVisible();
+  await open.click();
+  await viewer.getByRole('button', { name: 'Forward image' }).click();
+  await expect(page.getByText('Forward to…', { exact: true })).toBeVisible();
+});
+
+test('image viewer recovers from a failed download using Retry image', async ({ page }) => {
+  await mockApi(page, [
+    { ...first, text: null, attachment: { type: 'image', mediaId: 'retry-photo' } },
+  ]);
+  let fail = true;
+  await page.route('**/api/conversations/*/attachments/retry-photo', (route) =>
+    fail
+      ? route.fulfill({ status: 503, body: 'Temporarily unavailable' })
+      : route.fulfill({
+          path: path.join(__dirname, '../fixtures/portrait.png'),
+          contentType: 'image/png',
+        }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Open image attachment', exact: true }).click();
+  const viewer = page.getByTestId('image-viewer');
+  await expect(viewer.getByRole('button', { name: 'Retry image' })).toBeVisible();
+  fail = false;
+  await viewer.getByRole('button', { name: 'Retry image' }).click();
+  await expect(viewer.getByRole('img', { name: 'Full screen image' })).toBeVisible();
+});
