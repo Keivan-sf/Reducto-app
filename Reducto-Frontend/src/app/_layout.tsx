@@ -1,10 +1,11 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider, useSession } from '../context/SessionContext';
 import { colors } from '../components/ui';
 import { IconFontGate } from '../components/IconFontGate';
+import { AppViewport } from '../components/AppViewport';
 
 function Navigation() {
   const { ready } = useSession();
@@ -27,20 +28,12 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <SessionProvider>
-        {/* Edge-to-edge Android windows need explicit IME avoidance. Keep this
-            outside the safe area so keyboard and layout coordinates agree. */}
-        <KeyboardAvoidingView
-          style={{ flex: 1, backgroundColor: 'white' }}
-          enabled={Platform.OS === 'android'}
-          behavior="height"
-        >
-          <SafeAreaView style={{ flex: 1 }}>
-            <StatusBar style="dark" />
-            <IconFontGate>
-              <Navigation />
-            </IconFontGate>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
+        <AppViewport>
+          <StatusBar style="dark" />
+          <IconFontGate>
+            <Navigation />
+          </IconFontGate>
+        </AppViewport>
       </SessionProvider>
     </SafeAreaProvider>
   );
