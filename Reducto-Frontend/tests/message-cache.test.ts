@@ -10,6 +10,7 @@ const message = (id: string): Message => ({
   text: id,
   attachment: null,
   forwardedFrom: null,
+  isEdited: false,
   createdAt: `2026-10-20T00:00:0${id.length}Z`,
 });
 function create(fetch: (path: string) => Promise<unknown>) {
@@ -320,4 +321,104 @@ test('empty previews are cached, and pending preview snapshots cannot erase live
   resolve({ messages: [], nextCursor: null });
   await pending;
   assert.equal(cache.latest('chat')?.id, 'live');
+});
+
+test('edits update history, reply-only targets, latest previews, and cached jump windows', async () => {
+  const old = { ...message('a'), attachment: { type: 'image' as const, mediaId: 'photo' } };
+  const newest = { ...message('latest'), createdAt: '2026-10-21T00:00:00Z' };
+  let aroundCalls = 0;
+  const previews: (Message | null)[] = [];
+  const published: Message[][] = [];
+  const cache = new MessageCache(
+    async <T>(path: string) => {
+      if (path.includes('/around')) {
+        aroundCalls++;
+        return {
+          message: old,
+          before: [],
+          after: [],
+          hasMoreBefore: false,
+          hasMoreAfter: true,
+        } as T;
+      }
+      return { messages: [newest], nextCursor: null } as T;
+    },
+    (_, history) => published.push(history),
+    undefined,
+    (_, latest) => previews.push(latest),
+  );
+  await cache.page('chat');
+  await cache.around('chat', 'a');
+  cache.edit({ isEdited: true, conversationId: 'chat', messageId: 'a', text: 'New caption' });
+  assert.equal(cache.peek('chat', 'a')?.text, 'New caption');
+  assert.equal(cache.peek('chat', 'a')?.isEdited, true);
+  assert.deepEqual(cache.peek('chat', 'a')?.attachment, old.attachment);
+  assert.deepEqual(
+    published.at(-1)?.map((entry) => entry.id),
+    ['latest'],
+  );
+  cache.edit({ isEdited: true, conversationId: 'chat', messageId: 'latest', text: 'New preview' });
+  assert.equal(cache.history('chat')[0].text, 'New preview');
+  assert.equal(previews.at(-1)?.text, 'New preview');
+  await cache.around('chat', 'a');
+  assert.equal(aroundCalls, 2, 'edits invalidate jump snapshots');
+  assert.equal(cache.peek('chat', 'a')?.isEdited, true);
+});
+
+test('edits beat in-flight HTTP snapshots without inserting unseen messages or losing later server changes', async () => {
+  let resolve!: (page: MessagePage) => void;
+  let response = new Promise<MessagePage>((done) => {
+    resolve = done;
+  });
+  const { cache } = create(() => response);
+  const pending = cache.page('chat');
+  cache.edit({ isEdited: true, conversationId: 'chat', messageId: 'a', text: 'Live edit' });
+  cache.edit({ isEdited: true, conversationId: 'chat', messageId: 'unloaded', text: 'Elsewhere' });
+  assert.equal(cache.history('chat').length, 0);
+  resolve({ messages: [message('a')], nextCursor: null });
+  await pending;
+  assert.equal(cache.history('chat')[0].text, 'Live edit');
+  assert.equal(cache.latest('chat')?.isEdited, true);
+  response = Promise.resolve({
+    messages: [{ ...message('a'), text: 'Changed while offline' }],
+    nextCursor: null,
+  });
+  await cache.page('chat', false, true);
+  assert.equal(cache.history('chat')[0].text, 'Changed while offline');
+  assert.equal(cache.history('chat')[0].isEdited, true);
+  cache.prune(new Set());
+  response = Promise.resolve({ messages: [message('a')], nextCursor: null });
+  await cache.page('chat');
+  assert.equal(cache.history('chat')[0].isEdited, false);
+});
+
+test('persisted isEdited flags survive fresh history, detail, and around loads', async () => {
+  const edited = { ...message('edited'), isEdited: true };
+  const original = message('original');
+  const fetch = async (path: string) => {
+    if (path.includes('/around'))
+      return {
+        message: edited,
+        before: [],
+        after: [original],
+        hasMoreBefore: false,
+        hasMoreAfter: false,
+      };
+    if (path.endsWith('/edited')) return { message: edited };
+    return { messages: [edited, original], nextCursor: null };
+  };
+  for (const load of ['page', 'message', 'around'] as const) {
+    const { cache } = create(fetch);
+    if (load === 'page') await cache.page('chat');
+    else await cache[load]('chat', 'edited');
+    assert.equal(cache.peek('chat', 'edited')?.isEdited, true);
+    if (load !== 'message') assert.equal(cache.peek('chat', 'original')?.isEdited, false);
+    cache.edit({
+      conversationId: 'chat',
+      messageId: 'edited',
+      text: 'Edited again',
+      isEdited: true,
+    });
+    assert.equal(cache.peek('chat', 'edited')?.isEdited, true);
+  }
 });

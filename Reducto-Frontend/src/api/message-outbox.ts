@@ -58,6 +58,7 @@ export class MessageOutbox {
         attachment: payload.attachment ?? null,
         replyToMessageId: payload.replyToMessageId ?? null,
         forwardedFrom: null,
+        isEdited: false,
         createdAt: new Date(this.timestamp).toISOString(),
         delivery: 'sending',
       },

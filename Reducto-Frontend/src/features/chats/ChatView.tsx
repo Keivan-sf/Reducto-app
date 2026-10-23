@@ -116,6 +116,8 @@ export default function ChatView({ id }: { id?: string }) {
     return context;
   }, [jumpWindow, latest, messageCache, id]);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [editing, setEditing] = useState<Message | null>(null);
+  const savingEdit = useRef(false);
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [jumping, setJumping] = useState(false);
@@ -448,6 +450,30 @@ export default function ChatView({ id }: { id?: string }) {
   useEffect(() => {
     loadVisibleEdges();
   }, [loadVisibleEdges]);
+  async function saveEdit(text: string) {
+    if (!id || !editing || busy || savingEdit.current || !text.trim()) return;
+    savingEdit.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const { message } = await api.request<{ message: Message }>(
+        `/api/conversations/${id}/messages/${editing.id}`,
+        { method: 'PATCH', body: JSON.stringify({ text: text.trim() }) },
+      );
+      messageCache.edit({
+        conversationId: id,
+        messageId: message.id,
+        text: message.text!,
+        isEdited: message.isEdited,
+      });
+      setEditing(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      savingEdit.current = false;
+      setBusy(false);
+    }
+  }
   function send(gifId?: string, text = ''): boolean {
     if (!id || busy || (!text.trim() && !attachment && !gifId)) return false;
     setError('');
@@ -598,10 +624,30 @@ export default function ChatView({ id }: { id?: string }) {
             label: 'Reply',
             icon: 'arrow-undo-outline',
             onPress: () => {
+              setEditing(null);
               setReplyTo(actionMessage);
               setActionsVisible(false);
             },
           },
+          ...(actionMessage &&
+          actionMessage.senderId === session?.user.id &&
+          !actionMessage.delivery &&
+          !voiceActive
+            ? [
+                {
+                  label: 'Edit',
+                  icon: 'create-outline' as const,
+                  onPress: () => {
+                    setEditing(
+                      messageCache.peek(actionMessage.conversationId, actionMessage.id) ??
+                        actionMessage,
+                    );
+                    setActionsVisible(false);
+                    setError('');
+                  },
+                },
+              ]
+            : []),
           ...(actionMessage?.text
             ? [
                 {
@@ -1016,7 +1062,10 @@ export default function ChatView({ id }: { id?: string }) {
                         onLongPress={(event) => openMessageMenu(message, event)}
                       >
                         <View style={s.meta}>
-                          <Text style={s.time}>{timeLabel(message.createdAt)}</Text>
+                          <Text style={s.time}>
+                            {message.isEdited ? 'edited ' : ''}
+                            {timeLabel(message.createdAt)}
+                          </Text>
                           {mine && (
                             <View
                               testID={`message-status-${message.id}`}
@@ -1097,15 +1146,34 @@ export default function ChatView({ id }: { id?: string }) {
             <Notice text={error} />
           </View>
         )}
-        {replyTo && (
+        {editing && (
+          <View style={s.pending} testID="edit-composer">
+            <Icon name="create-outline" color={colors.blue} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.blue, fontWeight: '600' }}>Edit message</Text>
+              <Text numberOfLines={1} style={{ color: colors.dark }}>
+                {editing.text || 'Attachment caption'}
+              </Text>
+            </View>
+            <IconButton
+              name="close"
+              label="Cancel edit"
+              disabled={busy}
+              onPress={() => setEditing(null)}
+            />
+          </View>
+        )}
+        {!editing && replyTo && (
           <View style={s.pending} testID="reply-composer">
             <View style={{ flex: 1 }}>
-              <ReplyQuote message={replyTo} />
+              <ReplyQuote
+                message={messageCache.peek(replyTo.conversationId, replyTo.id) ?? replyTo}
+              />
             </View>
             <IconButton name="close" label="Cancel reply" onPress={() => setReplyTo(null)} />
           </View>
         )}
-        {attachment && (
+        {!editing && attachment && (
           <View style={s.pending}>
             <Icon name="attach-outline" color={colors.blue} />
             <Text numberOfLines={1} style={{ flex: 1, color: colors.dark }}>
@@ -1121,19 +1189,39 @@ export default function ChatView({ id }: { id?: string }) {
             />
           </View>
         )}
-        <MessageComposer
-          busy={busy}
-          hasAttachment={!!attachment}
-          onSend={(text) => send(undefined, text)}
-          onSendVoice={sendVoice}
-          onAttach={() => void upload().catch((err) => setError(err.message))}
-          onOpenGifs={() => setGifs(true)}
-          onError={setError}
-          onVoiceActive={(active) => {
-            if (active) voicePlayback.pause();
-            setVoiceActive(active);
-          }}
-        />
+        {editing && (
+          <MessageComposer
+            key={editing.id}
+            initialText={editing.text ?? ''}
+            editing
+            busy={busy}
+            hasAttachment={false}
+            onSend={(text) => {
+              void saveEdit(text);
+              return false;
+            }}
+            onSendVoice={sendVoice}
+            onAttach={() => {}}
+            onOpenGifs={() => {}}
+            onError={setError}
+            onVoiceActive={() => {}}
+          />
+        )}
+        <View style={editing ? { display: 'none' } : undefined}>
+          <MessageComposer
+            busy={busy}
+            hasAttachment={!!attachment}
+            onSend={(text) => send(undefined, text)}
+            onSendVoice={sendVoice}
+            onAttach={() => void upload().catch((err) => setError(err.message))}
+            onOpenGifs={() => setGifs(true)}
+            onError={setError}
+            onVoiceActive={(active) => {
+              if (active) voicePlayback.pause();
+              setVoiceActive(active);
+            }}
+          />
+        </View>
       </View>
       {playingVideo && (
         <VideoViewer

@@ -18,6 +18,7 @@ const messages: Message[] = Array.from({ length: 11 }, (_, index) => ({
   text: `${index}`,
   attachment: null,
   forwardedFrom: null,
+  isEdited: false,
   createdAt: `2026-10-22T00:00:${String(index).padStart(2, '0')}Z`,
 }));
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));

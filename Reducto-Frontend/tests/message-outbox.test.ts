@@ -32,6 +32,7 @@ function setup() {
     attachment: requests[index].payload.attachment ?? null,
     replyToMessageId: requests[index].payload.replyToMessageId ?? null,
     forwardedFrom: null,
+    isEdited: false,
     createdAt: `2026-10-22T12:00:${String(index).padStart(2, '0')}Z`,
   });
   return { box, requests, accepted, confirmed, snapshot: () => outgoing.chat ?? [] };

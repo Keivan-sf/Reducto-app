@@ -11,6 +11,7 @@ function message(id: string, createdAt: string): Message {
     text: id,
     attachment: null,
     forwardedFrom: null,
+    isEdited: false,
   };
 }
 

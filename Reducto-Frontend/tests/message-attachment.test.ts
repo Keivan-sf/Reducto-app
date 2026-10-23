@@ -20,6 +20,7 @@ const message: Message = {
     durationSeconds: 12,
   },
   forwardedFrom: null,
+  isEdited: false,
   createdAt: '2026-10-18T12:00:00Z',
 };
 

@@ -412,6 +412,7 @@ const chat = {
   createdAt: '2026-10-18T12:00:00Z',
 };
 const first = {
+  isEdited: false,
   id: '33333333-3333-4333-8333-333333333333',
   conversationId: chat.id,
   senderId: 'friend',
@@ -3452,4 +3453,135 @@ test('moving away while holding keeps recording until release; leaving the chat 
     )
     .toBe(1);
   expect(uploads).toBe(0);
+});
+
+test('message editing saves text, preserves drafts, handles errors, and applies live edits', async ({
+  page,
+}) => {
+  const own = {
+    ...first,
+    id: 'own-message',
+    senderId: user.id,
+    text: 'My original text',
+    createdAt: '2026-10-18T12:02:00Z',
+  };
+  const reply = {
+    ...first,
+    id: 'reply-message',
+    text: 'A reply',
+    replyToMessageId: own.id,
+    createdAt: '2026-10-18T12:03:00Z',
+  };
+  await mockApi(page, [first, own, reply]);
+  const realtime = await mockRealtime(page);
+  let fail = true;
+  const edits: unknown[] = [];
+  await page.route(`**/api/conversations/${chat.id}/messages/${own.id}`, async (route) => {
+    expect(route.request().method()).toBe('PATCH');
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    const body = route.request().postDataJSON();
+    edits.push(body);
+    if (fail) return route.fulfill({ status: 403, json: { error: 'Editing is unavailable' } });
+    return route.fulfill({ json: { message: { ...own, text: body.text, isEdited: true } } });
+  });
+  await signIn(page);
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Keep my unsent draft');
+  await page
+    .getByTestId(`message-${first.id}`)
+    .getByRole('button', { name: 'Message actions', exact: true })
+    .click();
+  await expect(
+    page.getByTestId('message-options').getByRole('button', { name: 'Edit', exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  const openEdit = async () => {
+    await page
+      .getByTestId(`message-${own.id}`)
+      .getByRole('button', { name: 'Message actions', exact: true })
+      .click();
+    await page
+      .getByTestId('message-options')
+      .getByRole('button', { name: 'Edit', exact: true })
+      .click();
+  };
+  await openEdit();
+  const editor = page.getByRole('textbox', { name: 'Edit message text' });
+  await expect(editor).toHaveValue(own.text);
+  await editor.fill('Cancelled change');
+  await page.getByRole('button', { name: 'Cancel edit', exact: true }).click();
+  await expect(composer).toHaveValue('Keep my unsent draft');
+  await openEdit();
+  await editor.fill('   ');
+  await expect(page.getByRole('button', { name: 'Save message edit' })).toBeDisabled();
+  await editor.fill('  My corrected text  ');
+  await page.getByRole('button', { name: 'Save message edit' }).click();
+  await expect(page.getByText('Editing is unavailable', { exact: true })).toBeVisible();
+  await expect(editor).toHaveValue('  My corrected text  ');
+  fail = false;
+  await page.getByRole('button', { name: 'Save message edit' }).click();
+  await expect(editor).toHaveCount(0);
+  const bubble = page.getByTestId(`message-${own.id}`);
+  await expect(bubble.getByText('My corrected text', { exact: true })).toBeVisible();
+  await expect(bubble.getByText(/^edited /)).toBeVisible();
+  await expect(composer).toHaveValue('Keep my unsent draft');
+  expect(edits).toEqual([{ text: 'My corrected text' }, { text: 'My corrected text' }]);
+  realtime.emit('message.updated', {
+    isEdited: true,
+    conversationId: chat.id,
+    messageId: own.id,
+    text: 'Live correction',
+  });
+  await expect(bubble.getByText('Live correction', { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId('message-reply-message').getByText('Live correction', { exact: true }),
+  ).toBeVisible();
+  realtime.emit('message.updated', {
+    isEdited: true,
+    conversationId: chat.id,
+    messageId: first.id,
+    text: 'Friend corrected this',
+  });
+  await expect(
+    page.getByTestId(`message-${first.id}`).getByText('Friend corrected this', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByTestId(`message-${first.id}`).getByText(/^edited /)).toBeVisible();
+});
+
+test('persisted edited marks render on initial history and after reload', async ({ page }) => {
+  const edited = { ...first, isEdited: true };
+  const original = {
+    ...first,
+    id: 'original-message',
+    text: 'Never edited',
+    createdAt: '2026-10-18T12:02:00Z',
+  };
+  await mockApi(page, [edited, original]);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const marked = page.getByTestId(`message-${edited.id}`).getByText(/^edited /);
+  await expect(marked).toHaveCount(1);
+  await expect(page.getByTestId(`message-${original.id}`).getByText(/^edited /)).toHaveCount(0);
+  await page.reload();
+  await expect(marked).toHaveCount(1);
+});
+
+test('failed icon font downloads show a retry screen and recover without refreshing', async ({
+  page,
+}) => {
+  await mockApi(page);
+  const uncaught: string[] = [];
+  page.on('pageerror', (error) => uncaught.push(error.message));
+  const fontUrl = /Ionicons[^?]*\.ttf/;
+  await page.route(fontUrl, (route) => route.abort());
+  await page.goto('/');
+  await expect(
+    page.getByText('Could not load app icons. Check your connection and try again.'),
+  ).toBeVisible();
+  await page.unroute(fontUrl);
+  await page.getByRole('button', { name: 'Retry loading icons' }).click();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+  expect(uncaught).toEqual([]);
 });

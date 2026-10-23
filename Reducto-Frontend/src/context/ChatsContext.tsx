@@ -14,6 +14,7 @@ import type {
   Emoji,
   Member,
   Message,
+  MessageUpdatedEvent,
   ProfileUpdatedEvent,
   SeenState,
 } from '../api/types';
@@ -330,6 +331,9 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       clearTimeout(readRefreshTimer);
       readRefreshTimer = setTimeout(syncReads, 500);
       if (!knownChats.current.has(message.conversationId)) sync();
+    });
+    socket.on('message.updated', (event: MessageUpdatedEvent) => {
+      messageCache.edit(event);
     });
     socket.on(
       'conversation.seen',

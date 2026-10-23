@@ -53,6 +53,8 @@ export interface Reaction {
   messageId: string;
 }
 export interface Message {
+  /** Persisted by the server after a message text edit. */
+  isEdited: boolean;
   /** Local outbox state; never sent to the backend or used as a read watermark. */
   delivery?: 'sending' | 'failed';
   localId?: string;
@@ -67,6 +69,12 @@ export interface Message {
   forwardedFrom: { senderId: string; messageId: string; conversationId: string } | null;
   createdAt: string;
   reactions?: Reaction[];
+}
+export interface MessageUpdatedEvent {
+  isEdited: boolean;
+  conversationId: string;
+  messageId: string;
+  text: string;
 }
 export interface MessagePage {
   messages: Message[];

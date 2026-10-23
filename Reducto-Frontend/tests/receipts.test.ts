@@ -11,6 +11,7 @@ const message = (id: string, createdAt: string, conversationId = 'chat'): Messag
   text: id,
   attachment: null,
   forwardedFrom: null,
+  isEdited: false,
 });
 
 test('a peer seeing a later message marks earlier outgoing messages seen', () => {

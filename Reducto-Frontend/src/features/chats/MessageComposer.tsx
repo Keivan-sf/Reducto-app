@@ -5,6 +5,8 @@ import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { VoiceRecordButton } from './VoiceRecordButton';
 
 interface Props {
+  initialText?: string;
+  editing?: boolean;
   busy: boolean;
   hasAttachment: boolean;
   onSend: (text: string) => boolean;
@@ -17,6 +19,8 @@ interface Props {
 
 /** Keep keystrokes and the send/mic switch independent of history rendering. */
 export function MessageComposer({
+  initialText = '',
+  editing = false,
   busy,
   hasAttachment,
   onSend,
@@ -26,8 +30,8 @@ export function MessageComposer({
   onError,
   onVoiceActive,
 }: Props) {
-  const [draft, setDraft] = useState('');
-  const text = useRef('');
+  const [draft, setDraft] = useState(initialText);
+  const text = useRef(initialText);
   const input = useRef<TextInput>(null);
   const [recording, setRecording] = useState(false);
   const canSend = !!draft.trim() || hasAttachment;
@@ -67,13 +71,14 @@ export function MessageComposer({
         <IconButton
           name="attach-outline"
           label="Attach a file"
-          disabled={busy || recording}
+          disabled={busy || recording || editing}
           onPress={onAttach}
         />
         <TextInput
           ref={input}
-          accessibilityLabel="Message"
-          editable={!recording}
+          accessibilityLabel={editing ? 'Edit message text' : 'Message'}
+          autoFocus={editing}
+          editable={!recording && !(editing && busy)}
           multiline
           placeholder="Write a message…"
           placeholderTextColor="#96A3B0"
@@ -98,18 +103,18 @@ export function MessageComposer({
         <IconButton
           name="happy-outline"
           label="Open GIF library"
-          disabled={busy || recording}
+          disabled={busy || recording || editing}
           onPress={onOpenGifs}
         />
-        {canSend ? (
+        {canSend || editing ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Send message"
-            disabled={busy}
+            accessibilityLabel={editing ? 'Save message edit' : 'Send message'}
+            disabled={busy || !canSend}
             onPress={() => void submit()}
-            style={[s.send, busy && { opacity: 0.45 }]}
+            style={[s.send, (busy || !canSend) && { opacity: 0.45 }]}
           >
-            <Icon name="send" color="white" size={20} />
+            <Icon name={editing ? 'checkmark' : 'send'} color="white" size={20} />
           </Pressable>
         ) : (
           <VoiceRecordButton
@@ -126,7 +131,7 @@ export function MessageComposer({
       </View>
       <Text style={s.composerHint}>
         {Platform.OS === 'web'
-          ? 'Enter to send · Shift + Enter for a new line'
+          ? `Enter to ${editing ? 'save' : 'send'} · Shift + Enter for a new line`
           : 'A little hello goes a long way'}
       </Text>
     </>

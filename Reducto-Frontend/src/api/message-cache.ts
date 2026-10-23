@@ -1,4 +1,4 @@
-import type { AroundMessages, Emoji, Message, MessagePage } from './types';
+import type { AroundMessages, Emoji, Message, MessagePage, MessageUpdatedEvent } from './types';
 import { mergeMessages } from '../lib/messages';
 
 /** One account/server session's history, reply targets, and jump windows. */
@@ -11,12 +11,51 @@ export class MessageCache {
   private pending = new Map<string, Promise<unknown>>();
   private windows = new Map<string, { chatId: string; page: AroundMessages }>();
   private generations = new Map<string, number>();
+  private editVersion = 0;
+  private edits = new Map<string, Map<string, { text: string; version: number }>>();
   constructor(
-    private readonly get: <T>(path: string) => Promise<T>,
+    private readonly fetch: <T>(path: string) => Promise<T>,
     private readonly publish: (id: string, messages: Message[]) => void,
     private readonly rememberPeople: (messages: Message[]) => void = () => {},
     private readonly publishLatest: (id: string, message: Message | null) => void = () => {},
   ) {}
+  private async get<T>(path: string): Promise<T> {
+    const version = this.editVersion;
+    const result = await this.fetch<T>(path);
+    // An HTTP snapshot started before a socket edit must not undo that edit.
+    const resolve = (message: Message): Message => {
+      const edit = this.edits.get(message.conversationId)?.get(message.id);
+      if (edit && edit.version <= version) edit.text = message.text ?? '';
+      return edit
+        ? { ...message, isEdited: true, ...(edit.version > version ? { text: edit.text } : {}) }
+        : message;
+    };
+    const page = result as T & Partial<MessagePage & AroundMessages>;
+    return {
+      ...page,
+      ...('message' in page && { message: page.message ? resolve(page.message) : null }),
+      ...(page.messages && { messages: page.messages.map(resolve) }),
+      ...(page.before && { before: page.before.map(resolve) }),
+      ...(page.after && { after: page.after.map(resolve) }),
+    };
+  }
+  edit(event: MessageUpdatedEvent) {
+    const id = event.conversationId;
+    if (!this.generations.has(id)) this.generations.set(id, 0);
+    let edits = this.edits.get(id);
+    if (!edits) this.edits.set(id, (edits = new Map()));
+    edits.set(event.messageId, { text: event.text, version: ++this.editVersion });
+    const message = this.peek(id, event.messageId);
+    if (message) this.remember([{ ...message, text: event.text, isEdited: true }]);
+    const latest = this.latest(id);
+    if (latest?.id === event.messageId)
+      this.updateLatest(id, { ...latest, text: event.text, isEdited: true });
+    for (const [key, window] of this.windows) if (window.chatId === id) this.windows.delete(key);
+    // Publish even for reply-only targets so their previews render again.
+    const history = this.history(id).map((entry) => this.peek(id, entry.id) ?? entry);
+    this.histories.set(id, history);
+    this.publish(id, history);
+  }
   private async request<T>(id: string, key: string, action: () => Promise<T>): Promise<T> {
     if (!this.generations.has(id)) this.generations.set(id, 0);
     const pending = this.pending.get(key);
@@ -83,6 +122,8 @@ export class MessageCache {
     });
   }
   accept(message: Message) {
+    const edit = this.edits.get(message.conversationId)?.get(message.id);
+    if (edit) message = { ...message, text: edit.text, isEdited: true };
     this.remember([message]);
     this.updateLatest(message.conversationId, message);
     // A live message must not create a hole after an older, contiguous window.
@@ -243,6 +284,7 @@ export class MessageCache {
       this.histories.delete(id);
       this.latestMessages.delete(id);
       this.entities.delete(id);
+      this.edits.delete(id);
       this.cursors.delete(id);
       this.bounds.delete(id);
     }
