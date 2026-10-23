@@ -8,11 +8,13 @@ import {
   type PropsWithChildren,
 } from 'react';
 import { VideoCache } from '../api/video-cache';
+import { ThumbnailCache } from '../api/thumbnail-cache';
 import { loadVideoFile } from '../lib/video-download';
 import { api } from './SessionContext';
 import { useGifs } from './GifsContext';
 
 const Context = createContext<VideoCache>(null!);
+const ThumbnailContext = createContext<ThumbnailCache>(null!);
 export function VideosProvider({ children }: PropsWithChildren) {
   const gifs = useGifs();
   const [cache] = useState(() => {
@@ -76,10 +78,29 @@ export function VideosProvider({ children }: PropsWithChildren) {
       return file;
     });
   });
+  const [thumbnails] = useState(
+    () =>
+      new ThumbnailCache((url, signal) =>
+        loadVideoFile({
+          url,
+          mimeType: 'image/jpeg',
+          headers: {},
+          signal,
+          progress: () => {},
+          refresh: async () => ({}),
+        }),
+      ),
+  );
   useEffect(() => () => cache.dispose(), [cache]);
-  return <Context.Provider value={cache}>{children}</Context.Provider>;
+  useEffect(() => () => thumbnails.dispose(), [thumbnails]);
+  return (
+    <Context.Provider value={cache}>
+      <ThumbnailContext.Provider value={thumbnails}>{children}</ThumbnailContext.Provider>
+    </Context.Provider>
+  );
 }
 export const useVideos = () => useContext(Context);
+export const useThumbnails = () => useContext(ThumbnailContext);
 export const videoKey = (conversationId: string, mediaId: string) =>
   `/api/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(mediaId)}`;
 export const voiceFileKey = (conversationId: string, mediaId: string) =>

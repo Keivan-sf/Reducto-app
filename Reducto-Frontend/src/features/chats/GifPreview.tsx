@@ -79,7 +79,11 @@ export function GifPreview({
             onError={() => files.forget(gifFileKey(gifId), 'GIF unavailable')}
           />
         ) : (
-          <ServerThumbnail uri={metadata?.thumbnailUrl} label="GIF thumbnail" />
+          <ServerThumbnail
+            uri={metadata?.thumbnailUrl}
+            cacheKey={`gif:${gifId}`}
+            label="GIF thumbnail"
+          />
         )}
       </MediaPreview>
     );
@@ -89,12 +93,17 @@ export function GifPreview({
       active={active}
       size={mediaDimensions(metadata)}
       thumbnailUrl={metadata?.thumbnailUrl}
+      thumbnailCacheKey={`gif:${gifId}`}
       cached
       onError={() => files.forget(gifFileKey(gifId), 'GIF unavailable')}
     />
   ) : (
     <MediaPreview size={mediaDimensions(metadata)} label="GIF preview">
-      <ServerThumbnail uri={metadata?.thumbnailUrl} label="GIF thumbnail" />
+      <ServerThumbnail
+        uri={metadata?.thumbnailUrl}
+        cacheKey={`gif:${gifId}`}
+        label="GIF thumbnail"
+      />
       {failed || localState.status === 'error' ? (
         <Text style={{ color: colors.muted }}>GIF unavailable</Text>
       ) : (

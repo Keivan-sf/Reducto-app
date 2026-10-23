@@ -14,6 +14,7 @@ export interface GifPlayerProps {
   active?: boolean;
   size?: MediaSize;
   thumbnailUrl?: string | null;
+  thumbnailCacheKey: string;
   onError?: () => void;
   cached?: boolean;
 }
@@ -24,6 +25,7 @@ export function GifPlayer({
   active = true,
   size: metadataSize,
   thumbnailUrl,
+  thumbnailCacheKey,
   onError,
   cached = false,
 }: GifPlayerProps) {
@@ -71,7 +73,7 @@ export function GifPlayer({
         surfaceType="textureView"
       />
       {(!active || frameUri !== uri) && (
-        <ServerThumbnail uri={thumbnailUrl} label="GIF thumbnail" />
+        <ServerThumbnail uri={thumbnailUrl} cacheKey={thumbnailCacheKey} label="GIF thumbnail" />
       )}
       {!cached && (status === 'loading' || status === 'idle') && (
         <ActivityIndicator color={colors.blue} />

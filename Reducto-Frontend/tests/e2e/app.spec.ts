@@ -2702,10 +2702,12 @@ for (const kind of ['image', 'video', 'gif'] as const) {
     });
     const mediaId = 'sized-media';
     let originalDownloads = 0;
+    let thumbnailDownloads = 0;
     const attachment = kind === 'gif' ? { type: kind, gifId: mediaId } : { type: kind, mediaId };
     await mockApi(page, [{ ...first, text: null, attachment }]);
     const thumbnailUrl = 'https://media.example/server-thumbnail.jpg';
     await page.route('https://media.example/server-thumbnail.jpg', async (route) => {
+      thumbnailDownloads++;
       expect(route.request().headers().authorization).toBeUndefined();
       await mediaGate;
       await route.fulfill({
@@ -2769,18 +2771,17 @@ for (const kind of ['image', 'video', 'gif'] as const) {
         })
         .toBeCloseTo(0.6, 2);
       if (kind !== 'image') {
-        await expect(
-          page.getByRole('img', {
-            name: kind === 'gif' ? 'GIF thumbnail' : 'Video thumbnail',
-            exact: true,
-          }),
-        ).toHaveAttribute('src', thumbnailUrl);
+        await expect.poll(() => thumbnailDownloads).toBe(1);
       }
       if (kind === 'video') {
         expect(originalDownloads).toBe(0);
         await expect(frame.locator('video')).toHaveCount(0);
       }
       releaseMedia();
+      if (kind === 'video')
+        await expect(
+          page.getByRole('img', { name: 'Video thumbnail', exact: true }),
+        ).toHaveAttribute('src', /^blob:/);
       if (kind === 'gif') {
         await expect
           .poll(() =>
@@ -2806,10 +2807,11 @@ for (const kind of ['image', 'video', 'gif'] as const) {
 
 test('video thumbnail URLs renew from cached metadata without downloading the video', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.clock.install();
   let lookups = 0;
   let downloads = 0;
+  let thumbnailDownloads = 0;
   const mediaId = 'renewing-video';
   await mockApi(page, [{ ...first, text: null, attachment: { type: 'video', mediaId } }]);
   await page.route(`**/api/conversations/*/attachments/${mediaId}/metadata`, (route) =>
@@ -2826,12 +2828,13 @@ test('video thumbnail URLs renew from cached metadata without downloading the vi
       },
     }),
   );
-  await page.route('https://media.example/renewing-thumb.jpg*', (route) =>
-    route.fulfill({
+  await page.route('https://media.example/renewing-thumb.jpg*', (route) => {
+    thumbnailDownloads++;
+    return route.fulfill({
       path: path.join(__dirname, '../fixtures/portrait.png'),
       contentType: 'image/jpeg',
-    }),
-  );
+    });
+  });
   await page.route(`**/api/conversations/*/attachments/${mediaId}`, (route) => {
     downloads++;
     return route.fulfill({ status: 500 });
@@ -2839,11 +2842,72 @@ test('video thumbnail URLs renew from cached metadata without downloading the vi
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const thumbnail = page.getByRole('img', { name: 'Video thumbnail', exact: true });
-  await expect(thumbnail).toHaveAttribute('src', 'https://media.example/renewing-thumb.jpg?v=1');
+  await expect(thumbnail).toHaveAttribute('src', /^blob:/);
+  const cachedSource = await thumbnail.getAttribute('src');
   await page.clock.fastForward(10 * 60 * 1000 + 1000);
-  await expect(thumbnail).toHaveAttribute('src', 'https://media.example/renewing-thumb.jpg?v=2');
+  await expect.poll(() => lookups).toBe(2);
+  await expect(thumbnail).toHaveAttribute('src', cachedSource!);
   expect(lookups).toBe(2);
+  expect(thumbnailDownloads).toBe(1);
   expect(downloads).toBe(0);
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByRole('img', { name: 'Video thumbnail', exact: true })).toHaveAttribute(
+    'src',
+    cachedSource!,
+  );
+  expect(thumbnailDownloads).toBe(1);
+});
+
+test('GIF thumbnails reuse cached bytes after returning to the chat', async ({
+  page,
+}, testInfo) => {
+  const gifId = 'cached-gif-thumbnail';
+  const thumbnailUrl = 'https://media.example/cached-gif-thumbnail.jpg';
+  let thumbnailDownloads = 0;
+  await mockApi(page, [
+    {
+      ...first,
+      text: null,
+      attachment: { type: 'gif', gifId },
+      attachmentMetadata: {
+        id: gifId,
+        objectKey: 'gifs/cached.mp4',
+        fileSize: 100,
+        width: 120,
+        height: 200,
+        createdAt: first.createdAt,
+        playbackUrl: 'https://media.example/unavailable-gif.mp4',
+        thumbnailUrl,
+      },
+    },
+  ]);
+  await page.route(thumbnailUrl, (route) => {
+    thumbnailDownloads++;
+    return route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.png'),
+      contentType: 'image/jpeg',
+    });
+  });
+  await page.route('https://media.example/unavailable-gif.mp4', (route) => route.abort());
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const thumbnail = page.getByRole('img', { name: 'GIF thumbnail', exact: true });
+  await expect(thumbnail).toHaveAttribute('src', /^blob:/);
+  const cachedSource = await thumbnail.getAttribute('src');
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByRole('img', { name: 'GIF thumbnail', exact: true })).toHaveAttribute(
+    'src',
+    cachedSource!,
+  );
+  expect(thumbnailDownloads).toBe(1);
 });
 
 test('historical video metadata without dimensions or thumbnails keeps a square usable preview', async ({

@@ -13,6 +13,7 @@ export function GifPlayer({
   active = true,
   size,
   thumbnailUrl,
+  thumbnailCacheKey,
   onError,
   cached = false,
 }: GifPlayerProps) {
@@ -48,7 +49,6 @@ export function GifPlayer({
       <video
         ref={video}
         src={uri}
-        poster={thumbnailUrl ?? undefined}
         muted
         loop
         playsInline
@@ -81,7 +81,7 @@ export function GifPlayer({
         }}
       />
       {(!active || readyUri !== uri) && (
-        <ServerThumbnail uri={thumbnailUrl} label="GIF thumbnail" />
+        <ServerThumbnail uri={thumbnailUrl} cacheKey={thumbnailCacheKey} label="GIF thumbnail" />
       )}
       {!cached && status === 'loading' && <ActivityIndicator color={colors.blue} />}
       {status === 'error' && <Text style={{ color: colors.muted }}>GIF unavailable</Text>}

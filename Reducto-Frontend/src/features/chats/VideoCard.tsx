@@ -66,7 +66,11 @@ export function VideoCard({
           pointerEvents="none"
           style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}
         >
-          <ServerThumbnail uri={metadata?.thumbnailUrl} label="Video thumbnail" />
+          <ServerThumbnail
+            uri={metadata?.thumbnailUrl}
+            cacheKey={`video:${conversationId}:${mediaId}`}
+            label="Video thumbnail"
+          />
           <View style={s.play}>
             <Icon name="play" size={30} color="white" />
           </View>
