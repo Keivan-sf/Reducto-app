@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { View } from 'react-native';
 import { Redirect, Slot, usePathname } from 'expo-router';
 import { useSession } from '../../context/SessionContext';
 import { ChatsProvider } from '../../context/ChatsContext';
@@ -7,6 +8,24 @@ import { MediaMetadataProvider } from '../../context/MediaMetadataContext';
 import { VideosProvider } from '../../context/VideosContext';
 import { GifsProvider } from '../../context/GifsContext';
 import { inviteTokenFromPath } from '../../lib/links';
+import ChatShell from '../../features/chats/ChatShell';
+import { RetainedLayer } from '../../components/RetainedLayer';
+
+function PrivateScreens() {
+  const pathname = usePathname();
+  const id = /^\/chat\/([^/]+)\/?$/.exec(pathname)?.[1];
+  const chatting = pathname === '/' || !!id;
+  return (
+    <View style={{ flex: 1 }}>
+      <RetainedLayer active={chatting}>
+        <ChatShell id={id} active={chatting} />
+      </RetainedLayer>
+      <View style={chatting ? { display: 'none' } : { flex: 1 }}>
+        <Slot />
+      </View>
+    </View>
+  );
+}
 function SignInRedirect({ token }: { token: string | null }) {
   // Keep the destination stable while navigation updates the current pathname.
   const [invite] = useState(token);
@@ -21,7 +40,7 @@ export default function PrivateLayout() {
         <MediaMetadataProvider>
           <VideosProvider>
             <ChatsProvider>
-              <Slot />
+              <PrivateScreens />
             </ChatsProvider>
           </VideosProvider>
         </MediaMetadataProvider>

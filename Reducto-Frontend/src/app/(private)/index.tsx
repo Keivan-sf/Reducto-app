@@ -1,4 +1,4 @@
-import ChatShell from '../../features/chats/ChatShell';
 export default function ChatsRoute() {
-  return <ChatShell />;
+  // The shared layout retains conversation views across route changes.
+  return null;
 }

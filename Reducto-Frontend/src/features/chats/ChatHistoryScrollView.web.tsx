@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useRef } from 'react';
 import { ScrollView, View } from 'react-native';
 
 import type { ChatHistoryScrollProps } from './ChatHistoryScrollView.types';
@@ -14,6 +14,7 @@ interface ThumbDrag {
  * animation frame so scrolling never waits for a React render. */
 export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollProps>(
   function ChatHistoryScrollView({ onUserScroll, ...props }, ref) {
+    const scrollId = useId();
     const scroll = useRef<ScrollView>(null);
     const thumb = useRef<HTMLDivElement>(null);
     const drag = useRef<ThumbDrag | undefined>(undefined);
@@ -99,7 +100,7 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
       <View style={{ flex: 1, minHeight: 0 }}>
         <ScrollView
           {...props}
-          nativeID="chat-history-scroll"
+          nativeID={scrollId}
           ref={scroll}
           showsVerticalScrollIndicator={false}
           onLayout={(event) => {
@@ -115,7 +116,7 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
           ref={thumb}
           role="scrollbar"
           aria-label="Chat scrollbar"
-          aria-controls="chat-history-scroll"
+          aria-controls={scrollId}
           aria-orientation="vertical"
           aria-valuemin={0}
           aria-disabled={!enabled}

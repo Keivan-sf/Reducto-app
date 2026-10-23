@@ -16,12 +16,14 @@ import { videoTime } from '../../lib/video-download.types';
 import type { RecordedVoice, RecordingPhase } from '../../lib/voice-recording.types';
 
 export function VoiceRecordButton({
+  active = true,
   disabled,
   onSend,
   onError,
   onActive,
   onBeforeRecord,
 }: {
+  active?: boolean;
   disabled: boolean;
   onBeforeRecord?: () => boolean;
   onSend: (voice: RecordedVoice, signal: AbortSignal) => Promise<void>;
@@ -30,7 +32,8 @@ export function VoiceRecordButton({
 }) {
   const [phase, setPhase] = useState<RecordingPhase>('idle');
   const [elapsed, setElapsed] = useState(0);
-  const focused = useIsFocused();
+  const routeFocused = useIsFocused();
+  const focused = active && routeFocused;
   const callbacks = {
     begin: beginVoiceRecording,
     send: onSend,

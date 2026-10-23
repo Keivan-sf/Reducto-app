@@ -255,9 +255,13 @@ export function ChatsProvider({ children }: PropsWithChildren) {
                   void resolveReceipt(id, member.userId, member.lastSeenMessageId).catch(() => {});
             } else failed = true;
           }
-          const active = activeRef.current;
-          if (active && allowed.has(active) && messageCache.isOpen(active))
-            await messageCache.refresh(active);
+          // Retained chats also need to recover events missed while disconnected.
+          const histories = await Promise.allSettled(
+            chats
+              .filter((chat) => messageCache.isOpen(chat.id))
+              .map((chat) => messageCache.refresh(chat.id)),
+          );
+          if (histories.some((outcome) => outcome.status === 'rejected')) failed = true;
           lastRefreshAt.current = Date.now();
           setError(failed ? 'Some conversations could not be synced. Refresh to try again.' : '');
         } while (refreshQueued.current);

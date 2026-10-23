@@ -2390,7 +2390,11 @@ test('profile notifications update names, usernames and avatars everywhere witho
     changedFields: ['name', 'username', 'avatar'],
   });
   await expect(page.getByText('Grace Live', { exact: true }).last()).toBeVisible();
-  await expect(page.getByText('Forwarded from Grace Live', { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByTestId(`conversation-${chat.id}`)
+      .getByText('Forwarded from Grace Live', { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole('img', { name: 'Grace Live profile photo' }).last()).toHaveAttribute(
     'src',
     current.avatarUrl!,
@@ -3584,4 +3588,129 @@ test('failed icon font downloads show a retry screen and recover without refresh
   await page.getByRole('button', { name: 'Retry loading icons' }).click();
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
   expect(uncaught).toEqual([]);
+});
+
+test('switching conversations retains the mounted history, exact reading position, drafts and background edits', async ({
+  page,
+}, testInfo) => {
+  const history = Array.from({ length: 101 }, (_, index) => ({
+    ...first,
+    id: `retained-${index}`,
+    text: `Retained message ${index}`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  const other = { ...chat, id: 'other-conversation', name: 'Other conversation' };
+  await mockApi(page, history);
+  const realtime = await mockRealtime(page);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [{ ...chat, lastSeenMessageId: 'retained-50', unreadCount: 50 }, other],
+      },
+    }),
+  );
+  await page.route(`**/api/conversations/${other.id}/**`, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    return route.fulfill({
+      json: path.endsWith('/members')
+        ? { members: [{ userId: user.id, conversationId: other.id, role: 'owner' }] }
+        : path.endsWith('/first')
+          ? { message: null }
+          : path.endsWith('/seen')
+            ? { lastSeenMessageId: null, unreadCount: 0 }
+            : { messages: [], nextCursor: null },
+    });
+  });
+  let historyRequests = 0;
+  await page.route(`**/api/conversations/${chat.id}/messages/**`, (route) => {
+    if (route.request().method() === 'GET') historyRequests++;
+    return route.fallback();
+  });
+  await signIn(page);
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const screen = page.getByTestId(`conversation-${chat.id}`);
+  const list = screen.getByTestId('chat-history');
+  await expect(screen.getByTestId('chat-history-loading')).toHaveCount(0);
+  await expect(screen.getByTestId('message-retained-50')).toBeInViewport();
+  // Move away from last seen and save the actual DOM node, not just its data.
+  await list.dispatchEvent('wheel', { deltaY: 280, bubbles: true });
+  await list.evaluate((element) => {
+    element.scrollTop += 280;
+  });
+  const draft = screen.getByRole('textbox', { name: 'Message', exact: true });
+  await draft.fill('Retain my draft');
+  const position = await list.evaluate((element) => {
+    const viewport = element.getBoundingClientRect();
+    const row = [...element.querySelectorAll<HTMLElement>('[data-testid^="message-row-"]')].find(
+      (row) => {
+        const box = row.getBoundingClientRect();
+        return box.top >= viewport.top && box.bottom <= viewport.bottom;
+      },
+    )!;
+    (window as any).__retainedList = element;
+    return {
+      offset: element.scrollTop,
+      row: row.getAttribute('data-testid')!,
+      top: row.getBoundingClientRect().top,
+    };
+  });
+  const initialRequests = historyRequests;
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Other conversation' }).click();
+  await expect(
+    page
+      .getByRole('button', { name: 'View conversation details' })
+      .getByText('Other conversation', { exact: true }),
+  ).toBeVisible();
+  realtime.emit('message.updated', {
+    conversationId: chat.id,
+    messageId: 'retained-50',
+    text: 'Edited while away',
+    isEdited: true,
+  });
+  await expect(
+    screen.getByTestId('message-retained-50').getByText('Edited while away', { exact: true }),
+  ).toHaveCount(1);
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(screen).toHaveCSS('opacity', '1');
+  expect(await list.evaluate((element) => element === (window as any).__retainedList)).toBe(true);
+  await expect(screen.getByTestId('chat-history-loading')).toHaveCount(0);
+  await expect(draft).toHaveValue('Retain my draft');
+  expect(await list.evaluate((element) => element.scrollTop)).toBeCloseTo(position.offset, 0);
+  expect((await screen.getByTestId(position.row).boundingBox())!.y).toBeCloseTo(position.top, 0);
+  expect(historyRequests).toBe(initialRequests);
+  // Settings also lives outside the retained chat layer.
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  expect(await list.evaluate((element) => element === (window as any).__retainedList)).toBe(true);
+  expect(await list.evaluate((element) => element.scrollTop)).toBeCloseTo(position.offset, 0);
+  await expect(draft).toHaveValue('Retain my draft');
+  // New messages must not move the reading position in a hidden chat either.
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Other conversation' }).click();
+  realtime.emit('message.created', {
+    message: {
+      ...first,
+      id: 'background-arrival',
+      text: 'Arrived while away',
+      createdAt: '2026-10-19T12:00:00Z',
+    },
+  });
+  await expect(page.getByText('Arrived while away', { exact: true }).first()).toBeAttached();
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  expect((await screen.getByTestId(position.row).boundingBox())!.y).toBeCloseTo(position.top, 0);
+  // A new app session starts from the saved seen position again.
+  await page.reload();
+  await expect(screen.getByTestId('message-retained-50')).toBeInViewport();
+  await expect(draft).toHaveValue('');
 });

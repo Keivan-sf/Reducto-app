@@ -5,6 +5,7 @@ import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { VoiceRecordButton } from './VoiceRecordButton';
 
 interface Props {
+  active?: boolean;
   initialText?: string;
   editing?: boolean;
   busy: boolean;
@@ -19,6 +20,7 @@ interface Props {
 
 /** Keep keystrokes and the send/mic switch independent of history rendering. */
 export function MessageComposer({
+  active = true,
   initialText = '',
   editing = false,
   busy,
@@ -118,6 +120,7 @@ export function MessageComposer({
           </Pressable>
         ) : (
           <VoiceRecordButton
+            active={active}
             disabled={busy}
             onBeforeRecord={beforeRecord}
             onSend={onSendVoice}

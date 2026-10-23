@@ -1,6 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
-import ChatShell from '../../../features/chats/ChatShell';
 export default function ConversationRoute() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  return <ChatShell id={id} />;
+  // The shared layout selects the retained conversation using this route.
+  return null;
 }

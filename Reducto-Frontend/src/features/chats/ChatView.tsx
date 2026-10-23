@@ -72,7 +72,7 @@ import { ChatTailFollow } from '../../lib/chat-tail-follow';
 
 const readViewabilityConfig = { minimumViewTime: 350, viewAreaCoveragePercentThreshold: 60 };
 
-export default function ChatView({ id }: { id?: string }) {
+export default function ChatView({ id, active }: { id?: string; active: boolean }) {
   const { session } = useSession();
   const { profiles } = useProfiles();
   const {
@@ -92,7 +92,8 @@ export default function ChatView({ id }: { id?: string }) {
     readVisible,
     getReadState,
   } = useChats();
-  const focused = useIsFocused();
+  const routeFocused = useIsFocused();
+  const focused = active && routeFocused;
   const chat = conversations.find((entry) => entry.id === id);
   const [jumpWindow, setJumpWindow] = useState<{
     messages: Message[];
@@ -202,6 +203,9 @@ export default function ChatView({ id }: { id?: string }) {
   );
   const list = useRef<FlatList<Message>>(null);
   const [tailFollow] = useState(() => new ChatTailFollow());
+  useEffect(() => {
+    if (!focused) tailFollow.stop();
+  }, [focused, tailFollow]);
   useLayoutEffect(() => {
     tailFollow.setScroll(() => list.current?.scrollToOffset({ offset: 0, animated: false }));
   }, [tailFollow]);
@@ -246,8 +250,15 @@ export default function ChatView({ id }: { id?: string }) {
   const peer = chat?.type === 'private' && peerId ? profiles[peerId] : undefined;
   const title = chat ? conversationName(chat, peer) : '';
   useEffect(() => {
+    if (!focused || !id) return;
+    activate(id);
+    return () => {
+      Keyboard.dismiss();
+      activate(null);
+    };
+  }, [id, focused, activate]);
+  useEffect(() => {
     let alive = true;
-    activate(id ?? null);
     if (id)
       void (async () => {
         await loadMessages(id);
@@ -271,9 +282,8 @@ export default function ChatView({ id }: { id?: string }) {
       });
     return () => {
       alive = false;
-      activate(null);
     };
-  }, [id, activate, loadMessages, getReadState, messageCache]);
+  }, [id, loadMessages, getReadState, messageCache]);
   const shown = useMemo(
     () =>
       mergeMessages(history, outgoing[id ?? ''] ?? [])
@@ -980,6 +990,7 @@ export default function ChatView({ id }: { id?: string }) {
                           mediaId={message.attachment.mediaId}
                           metadata={mediaMetadata}
                           active={
+                            focused &&
                             !voiceActive &&
                             !playingVideo &&
                             !gifs &&
@@ -993,7 +1004,7 @@ export default function ChatView({ id }: { id?: string }) {
                           conversationId={id}
                           mediaId={message.attachment.mediaId}
                           initialMetadata={mediaMetadata}
-                          active={!playingVideo && visibleMessages.has(message.id)}
+                          active={focused && !playingVideo && visibleMessages.has(message.id)}
                           onPlay={() =>
                             setPlayingVideo(
                               message.attachment!.type === 'video'
@@ -1023,7 +1034,9 @@ export default function ChatView({ id }: { id?: string }) {
                             <GifPreview
                               gifId={message.attachment.gifId}
                               initialMetadata={gifMetadata}
-                              active={!gifs && !playingVideo && visibleMessages.has(message.id)}
+                              active={
+                                focused && !gifs && !playingVideo && visibleMessages.has(message.id)
+                              }
                             />
                           )}
                           {!['image', 'gif'].includes(message.attachment.type) && (
@@ -1194,6 +1207,7 @@ export default function ChatView({ id }: { id?: string }) {
             key={editing.id}
             initialText={editing.text ?? ''}
             editing
+            active={focused}
             busy={busy}
             hasAttachment={false}
             onSend={(text) => {
@@ -1209,6 +1223,7 @@ export default function ChatView({ id }: { id?: string }) {
         )}
         <View style={editing ? { display: 'none' } : undefined}>
           <MessageComposer
+            active={focused}
             busy={busy}
             hasAttachment={!!attachment}
             onSend={(text) => send(undefined, text)}
@@ -1223,7 +1238,7 @@ export default function ChatView({ id }: { id?: string }) {
           />
         </View>
       </View>
-      {playingVideo && (
+      {focused && playingVideo && (
         <VideoViewer
           conversationId={id}
           mediaId={playingVideo}
@@ -1231,15 +1246,15 @@ export default function ChatView({ id }: { id?: string }) {
           onClose={() => setPlayingVideo(null)}
         />
       )}
-      <GroupDialog chat={chat} visible={details} onClose={() => setDetails(false)} />
+      <GroupDialog chat={chat} visible={focused && details} onClose={() => setDetails(false)} />
       <GifDialog
-        visible={gifs}
+        visible={focused && gifs}
         onClose={() => setGifs(false)}
         onSend={async (gifId) => {
           await send(gifId);
         }}
       />
-      <Dialog visible={forward} title="Forward to…" onClose={() => setForward(false)}>
+      <Dialog visible={focused && forward} title="Forward to…" onClose={() => setForward(false)}>
         {conversations.map((destination) => (
           <Button
             key={destination.id}
@@ -1273,7 +1288,7 @@ export default function ChatView({ id }: { id?: string }) {
         ))}
       </Dialog>
       <MessageMenu
-        anchor={actionsVisible ? actionAnchor : null}
+        anchor={focused && actionsVisible ? actionAnchor : null}
         actions={messageActions}
         selected={EMOJIS.filter((emoji) =>
           actionMessage?.reactions?.some(

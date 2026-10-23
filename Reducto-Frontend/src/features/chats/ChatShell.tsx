@@ -1,27 +1,39 @@
+import { useState } from 'react';
 import { useWindowDimensions, View } from 'react-native';
 import ChatList from './ChatList';
 import ChatView from './ChatView';
-import { colors } from '../../components/ui';
-export default function ChatShell({ id }: { id?: string }) {
+import { RetainedLayer } from '../../components/RetainedLayer';
+import { useChats } from '../../context/ChatsContext';
+
+export default function ChatShell({ id, active }: { id?: string; active: boolean }) {
   const wide = useWindowDimensions().width >= 850;
+  const { conversations } = useChats();
+  const [visited, setVisited] = useState<string[]>([]);
+  if (id && !visited.includes(id)) setVisited([...visited, id]);
   return (
     <View style={{ flex: 1, flexDirection: 'row', backgroundColor: 'white' }}>
-      {(wide || !id) && (
-        <View
-          style={{
-            width: wide ? 360 : '100%',
-            borderRightWidth: wide ? 1 : 0,
-            borderColor: colors.border,
-          }}
-        >
-          <ChatList />
-        </View>
-      )}
-      {(wide || id) && (
-        <View style={{ flex: 1 }}>
-          <ChatView key={id ?? 'welcome'} id={id} />
-        </View>
-      )}
+      <RetainedLayer
+        active={active && (wide || !id)}
+        style={wide ? { width: 360, right: undefined } : undefined}
+      >
+        <ChatList />
+      </RetainedLayer>
+      <View style={{ flex: 1, marginLeft: wide ? 360 : 0 }}>
+        <RetainedLayer active={active && wide && !id}>
+          <ChatView active={false} />
+        </RetainedLayer>
+        {visited
+          .filter((chatId) => chatId === id || conversations.some((chat) => chat.id === chatId))
+          .map((chatId) => (
+            <RetainedLayer
+              key={chatId}
+              testID={`conversation-${chatId}`}
+              active={active && id === chatId}
+            >
+              <ChatView id={chatId} active={active && id === chatId} />
+            </RetainedLayer>
+          ))}
+      </View>
     </View>
   );
 }
