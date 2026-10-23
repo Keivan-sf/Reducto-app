@@ -17,7 +17,7 @@ import {
   type ScrollViewProps,
 } from 'react-native';
 import { router, useIsFocused } from 'expo-router';
-import * as DocumentPicker from 'expo-document-picker';
+import { pickUpload } from '../../lib/pick-upload';
 import * as Clipboard from 'expo-clipboard';
 import { api, useSession } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
@@ -502,7 +502,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   }
   async function upload() {
     if (!id || busy) return;
-    const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    const picked = await pickUpload();
     if (picked.canceled) return;
     const file = picked.assets[0];
     if ((file.size ?? 0) > 50 * 1024 * 1024) return setError('Choose a file smaller than 50 MB.');

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
-import * as DocumentPicker from 'expo-document-picker';
+import { pickUpload } from '../../lib/pick-upload';
 import { api } from '../../context/SessionContext';
 import type { Gif } from '../../api/types';
 import { Button, Dialog, Field, Notice, styles } from '../../components/ui';
@@ -58,10 +58,7 @@ export function GifDialog({
     }
   }
   async function upload() {
-    const picked = await DocumentPicker.getDocumentAsync({
-      type: ['image/gif', 'video/*'],
-      copyToCacheDirectory: true,
-    });
+    const picked = await pickUpload(['image/gif', 'video/*']);
     if (picked.canceled) return;
     await run(async () => {
       const file = picked.assets[0];
