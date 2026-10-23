@@ -1,3 +1,4 @@
+import { AppViewport } from '../components/AppViewport';
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useSession } from '../context/SessionContext';
 import AuthScreen from '../features/auth/AuthScreen';
@@ -9,6 +10,8 @@ export default function LoginRoute() {
   return session ? (
     <Redirect href={token ? groupJoinPath(token) : '/'} />
   ) : (
-    <AuthScreen inviteToken={token} />
+    <AppViewport>
+      <AuthScreen inviteToken={token} />
+    </AppViewport>
   );
 }

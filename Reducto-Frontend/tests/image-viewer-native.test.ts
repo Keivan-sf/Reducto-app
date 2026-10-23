@@ -140,11 +140,10 @@ test('Android taps, small drags, horizontal drags, cancellation and multi-touch 
   }
 });
 
-test('Android hardware Back, header Back, Forward and message options use their intended actions', () => {
+test('Android header Back, Forward and message options use their intended actions', () => {
   const t = viewer();
-  t.tree.props.onRequestClose();
   t.find((node) => node.props.label === 'Back to conversation')!.props.onPress();
   t.find((node) => node.props.label === 'Forward image')!.props.onPress();
   t.find((node) => node.props.accessibilityLabel === 'Image message options')!.props.onPress({});
-  assert.deepEqual(t.counts(), { closes: 2, forwards: 1, menus: 1 });
+  assert.deepEqual(t.counts(), { closes: 1, forwards: 1, menus: 1 });
 });

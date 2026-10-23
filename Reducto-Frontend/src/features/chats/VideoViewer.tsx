@@ -1,29 +1,36 @@
-import { useEffect } from 'react';
-import { ActivityIndicator, Modal, Platform, StyleSheet, Text, View } from 'react-native';
+import { useEffect, type RefObject } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { Button, IconButton } from '../../components/ui';
 import { useVideoFile } from '../../context/VideosContext';
 import { videoBytes } from '../../lib/video-download.types';
 import { VideoPlayback } from './VideoPlayback';
 
 export function VideoViewer({
+  visible = true,
+  pauseRef,
+  canPlay,
+  onCancelDownload,
   conversationId,
   mediaId,
   title,
   onClose,
 }: {
+  visible?: boolean;
+  canPlay?: () => boolean;
+  onCancelDownload?: (cancel: () => void) => void;
+  pauseRef?: RefObject<(() => void) | null>;
   conversationId: string;
   mediaId: string;
   title: string;
   onClose: () => void;
 }) {
-  const { state, download, cancel } = useVideoFile(conversationId, mediaId);
+  const { state, download, cancel } = useVideoFile(conversationId, mediaId, visible);
   useEffect(() => {
-    void download().catch(() => {});
-  }, [download]);
+    if (visible) void download().catch(() => {});
+  }, [download, visible]);
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
+    if (!visible || Platform.OS !== 'web') return;
     const close = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -33,33 +40,36 @@ export function VideoViewer({
     };
     document.addEventListener('keydown', close, true);
     return () => document.removeEventListener('keydown', close, true);
-  }, [onClose]);
+  }, [onClose, visible]);
   return (
-    <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <SafeAreaView style={s.screen} testID="video-viewer">
-        <StatusBar style="light" />
-        <View style={s.header}>
-          <IconButton
-            name="arrow-back"
-            label="Back to conversation"
-            color="white"
-            onPress={onClose}
-          />
-          <Text numberOfLines={1} style={s.title}>
-            {title}
-          </Text>
-        </View>
-        {state.status === 'ready' ? (
-          <VideoPlayback uri={state.file.uri} />
-        ) : (
+    <SafeAreaView style={s.screen} testID="video-viewer">
+      <View style={s.header}>
+        <IconButton
+          name="arrow-back"
+          label="Back to conversation"
+          color="white"
+          onPress={onClose}
+        />
+        <Text numberOfLines={1} style={s.title}>
+          {title}
+        </Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <VideoPlayback
+          uri={state.status === 'ready' ? state.file.uri : undefined}
+          pauseRef={pauseRef}
+          canPlay={canPlay}
+          active={visible && state.status === 'ready'}
+        />
+        {state.status !== 'ready' && (
           <View style={s.loading}>
-            {state.status === 'loading' ? (
+            {state.status === 'loading' || state.status === 'idle' ? (
               <>
-                <ActivityIndicator color="white" />
+                {visible && <ActivityIndicator color="white" />}
                 <Text style={s.message}>Downloading video</Text>
                 <Text style={s.message}>
-                  {videoBytes(state.progress.received)}
-                  {state.progress.total
+                  {videoBytes(state.status === 'loading' ? state.progress.received : 0)}
+                  {state.status === 'loading' && state.progress.total
                     ? ` / ${videoBytes(state.progress.total)} · ${Math.floor((state.progress.received * 100) / state.progress.total)}%`
                     : ''}
                 </Text>
@@ -67,8 +77,11 @@ export function VideoViewer({
                   title="Cancel download"
                   secondary
                   onPress={() => {
-                    cancel();
-                    onClose();
+                    if (onCancelDownload) onCancelDownload(cancel);
+                    else {
+                      cancel();
+                      onClose();
+                    }
                   }}
                 />
               </>
@@ -86,8 +99,8 @@ export function VideoViewer({
             )}
           </View>
         )}
-      </SafeAreaView>
-    </Modal>
+      </View>
+    </SafeAreaView>
   );
 }
 const s = StyleSheet.create({
@@ -100,6 +113,12 @@ const s = StyleSheet.create({
     gap: 8,
   },
   title: { color: 'white', fontSize: 16, flex: 1, fontWeight: '600' },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 },
+  loading: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    padding: 24,
+  },
   message: { color: 'white', fontSize: 14, textAlign: 'center' },
 });

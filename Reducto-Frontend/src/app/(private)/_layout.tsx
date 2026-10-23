@@ -9,6 +9,7 @@ import { VideosProvider } from '../../context/VideosContext';
 import { GifsProvider } from '../../context/GifsContext';
 import { inviteTokenFromPath } from '../../lib/links';
 import ChatShell from '../../features/chats/ChatShell';
+import { MediaViewersProvider } from '../../features/chats/MediaViewers';
 import { RetainedLayer } from '../../components/RetainedLayer';
 
 function PrivateScreens() {
@@ -40,7 +41,9 @@ export default function PrivateLayout() {
         <MediaMetadataProvider>
           <VideosProvider>
             <ChatsProvider>
-              <PrivateScreens />
+              <MediaViewersProvider>
+                <PrivateScreens />
+              </MediaViewersProvider>
             </ChatsProvider>
           </VideosProvider>
         </MediaMetadataProvider>

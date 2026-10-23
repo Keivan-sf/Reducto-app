@@ -5,6 +5,7 @@ import { colors } from '../../components/ui';
 import type { MediaSize } from '../../lib/media-preview';
 import { MediaPreview } from './MediaPreview';
 import type { GifPlayerProps } from './GifPlayer';
+import { useMediaViewers } from './MediaViewers';
 import { ServerThumbnail } from './ServerThumbnail';
 
 /** Size the browser's replaced video element explicitly; intrinsic sizing can overflow. */
@@ -17,6 +18,7 @@ export function GifPlayer({
   onError,
   cached = false,
 }: GifPlayerProps) {
+  const viewers = useMediaViewers();
   const [readyUri, setReadyUri] = useState<string>();
   const video = useRef<HTMLVideoElement>(null);
   const [metadata, setMetadata] = useState<{ uri: string; size: MediaSize }>();
@@ -26,7 +28,7 @@ export function GifPlayer({
       const update = () => {
         const element = video.current;
         if (!element || element.getAttribute('src') !== uri) return;
-        if (active && AppState.currentState === 'active') {
+        if (active && !viewers.isOpen() && AppState.currentState === 'active') {
           void element.play().catch(() => {
             /* Playback errors are reported by onError. */
           });
@@ -34,11 +36,13 @@ export function GifPlayer({
       };
       update();
       const subscription = AppState.addEventListener('change', update);
+      const stopWatchingViewer = viewers.subscribe(update);
       return () => {
+        stopWatchingViewer();
         subscription.remove();
         video.current?.pause();
       };
-    }, [active, uri]),
+    }, [active, uri, viewers]),
   );
 
   return (

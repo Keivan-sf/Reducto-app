@@ -57,8 +57,7 @@ import { MessageComposer } from './MessageComposer';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { voicePlayback } from '../../lib/voice-playback';
 import { VideoCard } from './VideoCard';
-import { VideoViewer } from './VideoViewer';
-import { ImageViewer } from './ImageViewer';
+import { useMediaViewers } from './MediaViewers';
 import { useVideos, videoKey, gifFileKey, voiceFileKey } from '../../context/VideosContext';
 import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
@@ -143,9 +142,8 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const [search, setSearch] = useState<string | null>(null);
   const gifCache = useGifs();
   const videoCache = useVideos();
+  const viewers = useMediaViewers();
   const mediaMetadata = useMediaMetadata();
-  const [playingVideo, setPlayingVideo] = useState<string | null>(null);
-  const [viewingImage, setViewingImage] = useState<Message | null>(null);
   const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
   const [openingHistory, setOpeningHistory] = useState(true);
   const initialReadTarget = useRef<string | null>(null);
@@ -157,8 +155,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         !focused ||
         details ||
         gifs ||
-        playingVideo ||
-        viewingImage ||
+        viewers.isOpen() ||
         actionsVisible
       )
         return;
@@ -174,15 +171,18 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') report();
     });
-    return () => subscription.remove();
+    const stopWatchingViewer = viewers.subscribe(report);
+    return () => {
+      subscription.remove();
+      stopWatchingViewer();
+    };
   }, [
     id,
     openingHistory,
     focused,
     details,
     gifs,
-    playingVideo,
-    viewingImage,
+    viewers,
     actionsVisible,
     readVisible,
     history,
@@ -1002,12 +1002,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                           mediaId={message.attachment.mediaId}
                           metadata={mediaMetadata}
                           active={
-                            focused &&
-                            !voiceActive &&
-                            !playingVideo &&
-                            !viewingImage &&
-                            !gifs &&
-                            visibleMessages.has(message.id)
+                            focused && !voiceActive && !gifs && visibleMessages.has(message.id)
                           }
                           onOptions={(event) => openMessageMenu(message, event)}
                           onError={setError}
@@ -1017,19 +1012,16 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                           conversationId={id}
                           mediaId={message.attachment.mediaId}
                           initialMetadata={mediaMetadata}
-                          active={
-                            focused &&
-                            !playingVideo &&
-                            !viewingImage &&
-                            visibleMessages.has(message.id)
-                          }
-                          onPlay={() =>
-                            setPlayingVideo(
-                              message.attachment!.type === 'video'
-                                ? message.attachment!.mediaId
-                                : null,
-                            )
-                          }
+                          active={focused && visibleMessages.has(message.id)}
+                          onPlay={() => {
+                            if (message.attachment?.type !== 'video') return;
+                            voicePlayback.pause();
+                            viewers.openVideo({
+                              conversationId: id,
+                              mediaId: message.attachment.mediaId,
+                              title,
+                            });
+                          }}
                           onOptions={(event) => openMessageMenu(message, event)}
                           onError={setError}
                         />
@@ -1041,7 +1033,20 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                             if (message.attachment?.type === 'image') {
                               event.stopPropagation();
                               voicePlayback.pause();
-                              setViewingImage(message);
+                              viewers.openImage({
+                                conversationId: id,
+                                mediaId: message.attachment.mediaId,
+                                title: profileName(profiles[message.senderId]),
+                                createdAt: message.createdAt,
+                                caption: message.text,
+                                onOptions: (event) => {
+                                  openMessageMenu(message, event);
+                                },
+                                onForward: () => {
+                                  setActionMessage(message);
+                                  setForward(true);
+                                },
+                              });
                             } else openMessageMenu(message, event);
                           }}
                           onLongPress={(event) => openMessageMenu(message, event)}
@@ -1058,13 +1063,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                             <GifPreview
                               gifId={message.attachment.gifId}
                               initialMetadata={gifMetadata}
-                              active={
-                                focused &&
-                                !gifs &&
-                                !playingVideo &&
-                                !viewingImage &&
-                                visibleMessages.has(message.id)
-                              }
+                              active={focused && !gifs && visibleMessages.has(message.id)}
                             />
                           )}
                           {!['image', 'gif'].includes(message.attachment.type) && (
@@ -1266,33 +1265,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           />
         </View>
       </View>
-      {focused && viewingImage?.attachment?.type === 'image' && (
-        <ImageViewer
-          conversationId={id}
-          mediaId={viewingImage.attachment.mediaId}
-          title={profileName(profiles[viewingImage.senderId])}
-          createdAt={viewingImage.createdAt}
-          caption={viewingImage.text}
-          onClose={() => setViewingImage(null)}
-          onOptions={(event) => {
-            setViewingImage(null);
-            openMessageMenu(viewingImage, event);
-          }}
-          onForward={() => {
-            setActionMessage(viewingImage);
-            setViewingImage(null);
-            setForward(true);
-          }}
-        />
-      )}
-      {focused && playingVideo && (
-        <VideoViewer
-          conversationId={id}
-          mediaId={playingVideo}
-          title={title}
-          onClose={() => setPlayingVideo(null)}
-        />
-      )}
       <GroupDialog chat={chat} visible={focused && details} onClose={() => setDetails(false)} />
       <GifDialog
         visible={focused && gifs}

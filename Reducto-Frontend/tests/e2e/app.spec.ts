@@ -3908,3 +3908,65 @@ test('image viewer recovers from a failed download using Retry image', async ({ 
   await viewer.getByRole('button', { name: 'Retry image' }).click();
   await expect(viewer.getByRole('img', { name: 'Full screen image' })).toBeVisible();
 });
+
+test('image viewer fades in and out while keeping the underlying chat mounted', async ({
+  page,
+}) => {
+  await mockApi(page, [{ ...first, attachment: { type: 'image', mediaId: 'fade-photo' } }]);
+  await page.route('**/api/conversations/*/attachments/fade-photo', (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.png'),
+      contentType: 'image/png',
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const row = await page.getByTestId(`message-row-${first.id}`).elementHandle();
+  const opening = page.evaluate(
+    () =>
+      new Promise<number[]>((resolve) => {
+        const samples: number[] = [];
+        const sample = () => {
+          const layer = document.querySelector('[data-testid="media-viewer-layer"]');
+          if (layer) {
+            const opacity = Number(getComputedStyle(layer).opacity);
+            samples.push(opacity);
+            if (opacity === 1) {
+              resolve(samples);
+              return;
+            }
+          }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }),
+  );
+  await page.getByRole('button', { name: 'Open image attachment', exact: true }).click();
+  const openingSamples = await opening;
+  expect(openingSamples.some((value) => value > 0 && value < 1)).toBe(true);
+  const layer = page.getByTestId('media-viewer-layer');
+  const closing = layer.evaluate(
+    (element) =>
+      new Promise<number[]>((resolve) => {
+        const samples: number[] = [];
+        const sample = () => {
+          if (!element.isConnected) {
+            resolve(samples);
+            return;
+          }
+          samples.push(Number(getComputedStyle(element).opacity));
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }),
+  );
+  await page.getByRole('button', { name: 'Back to conversation' }).click();
+  const closingSamples = await closing;
+  expect(closingSamples.some((value) => value > 0 && value < 1)).toBe(true);
+  await expect(page.getByTestId('image-viewer')).toHaveCount(0);
+  expect(await row!.evaluate((element) => element.isConnected)).toBe(true);
+  await page.getByRole('button', { name: 'Open image attachment', exact: true }).click();
+  await expect(layer).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('image-viewer')).toHaveCount(0);
+});

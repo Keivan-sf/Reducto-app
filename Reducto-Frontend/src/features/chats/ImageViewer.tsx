@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Image,
-  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,11 +11,11 @@ import {
   type GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { Button, Icon, IconButton } from '../../components/ui';
 import { useCachedFile, useVideos, videoKey } from '../../context/VideosContext';
 
 export function ImageViewer({
+  visible = true,
   conversationId,
   mediaId,
   title,
@@ -26,6 +25,7 @@ export function ImageViewer({
   onOptions,
   onForward,
 }: {
+  visible?: boolean;
   conversationId: string;
   mediaId: string;
   title: string;
@@ -37,15 +37,24 @@ export function ImageViewer({
 }) {
   const files = useVideos();
   const key = videoKey(conversationId, mediaId);
-  const { state, download } = useCachedFile(key, true, 'image/jpeg');
-  const [imageFailed, setImageFailed] = useState(false);
+  const { state, download } = useCachedFile(key, visible, 'image/jpeg');
+  const [failure, setFailure] = useState({ key, visible, failed: false });
+  if (failure.key !== key || failure.visible !== visible) {
+    setFailure({ key, visible, failed: false });
+  }
+  const imageFailed = failure.key === key && failure.visible === visible && failure.failed;
   const [offset] = useState(() => new Animated.Value(0));
   const drag = useRef<{ x: number; y: number; dx: number; dy: number } | null>(null);
   useEffect(() => {
-    void download().catch(() => {});
-  }, [download]);
+    if (visible) void download().catch(() => {});
+  }, [download, visible]);
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
+    offset.stopAnimation();
+    offset.setValue(0);
+    drag.current = null;
+  }, [key, visible, offset]);
+  useEffect(() => {
+    if (!visible || Platform.OS !== 'web') return;
     const close = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -54,7 +63,7 @@ export function ImageViewer({
     };
     document.addEventListener('keydown', close, true);
     return () => document.removeEventListener('keydown', close, true);
-  }, [onClose]);
+  }, [onClose, visible]);
   function start(x: number, y: number) {
     offset.stopAnimation();
     drag.current = { x, y, dx: 0, dy: 0 };
@@ -86,132 +95,123 @@ export function ImageViewer({
     }
   }
   return (
-    <Modal
-      visible
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent
-      navigationBarTranslucent
-    >
-      <SafeAreaView style={s.screen} testID="image-viewer">
-        <StatusBar style="light" />
-        <View style={s.header}>
-          <IconButton
-            name="arrow-back"
-            label="Back to conversation"
-            color="white"
-            onPress={onClose}
-          />
-          <View style={s.heading}>
-            <Text numberOfLines={1} style={s.title}>
-              {title}
-            </Text>
-            <Text style={s.date}>
-              {new Date(createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
-            </Text>
-          </View>
-          <IconButton name="arrow-redo" label="Forward image" color="white" onPress={onForward} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Image message options"
-            onPress={onOptions}
-            style={s.optionsIcon}
-          >
-            <Icon name="ellipsis-vertical" color="white" />
-          </Pressable>
+    <SafeAreaView style={s.screen} testID="image-viewer">
+      <View style={s.header}>
+        <IconButton
+          name="arrow-back"
+          label="Back to conversation"
+          color="white"
+          onPress={onClose}
+        />
+        <View style={s.heading}>
+          <Text numberOfLines={1} style={s.title}>
+            {title}
+          </Text>
+          <Text style={s.date}>
+            {new Date(createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+          </Text>
         </View>
-        <View
-          testID="image-viewer-surface"
-          style={[s.surface, Platform.OS === 'web' && webGestureStyle]}
-          {...(Platform.OS === 'web'
-            ? {
-                onPointerDown: (raw: unknown) => {
-                  const event = raw as {
-                    isPrimary: boolean;
-                    button: number;
-                    pageX: number;
-                    pageY: number;
-                    pointerId: number;
-                    currentTarget: HTMLElement;
-                    target: HTMLElement;
-                  };
-                  // Let Retry and other controls receive their own pointer-up.
-                  if (event.target.closest('button, [role="button"]')) return;
-                  if (!event.isPrimary || event.button !== 0) {
-                    finish(true);
-                    return;
-                  }
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  start(event.pageX, event.pageY);
-                },
-                onPointerMove: (raw: unknown) => {
-                  const event = raw as { pageX: number; pageY: number; isPrimary: boolean };
-                  if (event.isPrimary) move(event.pageX, event.pageY);
-                },
-                onPointerUp: () => finish(),
-                onPointerCancel: () => finish(true),
-                onLostPointerCapture: () => {
-                  if (drag.current) finish(true);
-                },
-              }
-            : {
-                onStartShouldSetResponder: () => true,
-                onResponderGrant: (event: GestureResponderEvent) => {
-                  start(event.nativeEvent.pageX, event.nativeEvent.pageY);
-                  return true;
-                },
-                onResponderMove: (event: GestureResponderEvent) => {
-                  const touches = event.nativeEvent.touches;
-                  if (touches.length !== 1) {
-                    finish(true);
-                    return;
-                  }
-                  move(touches[0].pageX, touches[0].pageY);
-                },
-                onResponderRelease: () => finish(),
-                onResponderTerminationRequest: () => false,
-                onResponderTerminate: () => finish(true),
-              })}
+        <IconButton name="arrow-redo" label="Forward image" color="white" onPress={onForward} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Image message options"
+          onPress={onOptions}
+          style={s.optionsIcon}
         >
-          {state.status === 'ready' && !imageFailed ? (
-            <Animated.View
-              pointerEvents="none"
-              style={[StyleSheet.absoluteFill, { transform: [{ translateY: offset }] }]}
-            >
-              <Image
-                accessibilityLabel="Full screen image"
-                source={{ uri: state.file.uri }}
-                resizeMode="contain"
-                style={StyleSheet.absoluteFill}
-                onError={() => setImageFailed(true)}
-              />
-            </Animated.View>
-          ) : (
-            <View style={s.loading}>
-              {state.status === 'loading' || state.status === 'idle' ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <>
-                  <Text accessibilityRole="alert" style={s.message}>
-                    {state.status === 'error' ? state.error : 'Image unavailable'}
-                  </Text>
-                  <Button
-                    title="Retry image"
-                    secondary
-                    onPress={() => {
-                      setImageFailed(false);
-                      files.forget(key);
-                      void download().catch(() => {});
-                    }}
-                  />
-                </>
-              )}
-            </View>
-          )}
-        </View>
-        {!!caption && <Text style={s.caption}>{caption}</Text>}
-      </SafeAreaView>
-    </Modal>
+          <Icon name="ellipsis-vertical" color="white" />
+        </Pressable>
+      </View>
+      <View
+        testID="image-viewer-surface"
+        style={[s.surface, Platform.OS === 'web' && webGestureStyle]}
+        {...(Platform.OS === 'web'
+          ? {
+              onPointerDown: (raw: unknown) => {
+                const event = raw as {
+                  isPrimary: boolean;
+                  button: number;
+                  pageX: number;
+                  pageY: number;
+                  pointerId: number;
+                  currentTarget: HTMLElement;
+                  target: HTMLElement;
+                };
+                // Let Retry and other controls receive their own pointer-up.
+                if (event.target.closest('button, [role="button"]')) return;
+                if (!event.isPrimary || event.button !== 0) {
+                  finish(true);
+                  return;
+                }
+                event.currentTarget.setPointerCapture(event.pointerId);
+                start(event.pageX, event.pageY);
+              },
+              onPointerMove: (raw: unknown) => {
+                const event = raw as { pageX: number; pageY: number; isPrimary: boolean };
+                if (event.isPrimary) move(event.pageX, event.pageY);
+              },
+              onPointerUp: () => finish(),
+              onPointerCancel: () => finish(true),
+              onLostPointerCapture: () => {
+                if (drag.current) finish(true);
+              },
+            }
+          : {
+              onStartShouldSetResponder: () => true,
+              onResponderGrant: (event: GestureResponderEvent) => {
+                start(event.nativeEvent.pageX, event.nativeEvent.pageY);
+                return true;
+              },
+              onResponderMove: (event: GestureResponderEvent) => {
+                const touches = event.nativeEvent.touches;
+                if (touches.length !== 1) {
+                  finish(true);
+                  return;
+                }
+                move(touches[0].pageX, touches[0].pageY);
+              },
+              onResponderRelease: () => finish(),
+              onResponderTerminationRequest: () => false,
+              onResponderTerminate: () => finish(true),
+            })}
+      >
+        {state.status === 'ready' && !imageFailed ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { transform: [{ translateY: offset }] }]}
+          >
+            <Image
+              accessibilityLabel="Full screen image"
+              source={{ uri: state.file.uri }}
+              resizeMode="contain"
+              style={StyleSheet.absoluteFill}
+              onError={() => setFailure({ key, visible, failed: true })}
+            />
+          </Animated.View>
+        ) : (
+          <View style={s.loading}>
+            {state.status === 'loading' || state.status === 'idle' ? (
+              visible && <ActivityIndicator color="white" />
+            ) : (
+              <>
+                <Text accessibilityRole="alert" style={s.message}>
+                  {state.status === 'error' ? state.error : 'Image unavailable'}
+                </Text>
+                <Button
+                  title="Retry image"
+                  secondary
+                  onPress={() => {
+                    setFailure({ key, visible, failed: false });
+                    files.forget(key);
+                    void download().catch(() => {});
+                  }}
+                />
+              </>
+            )}
+          </View>
+        )}
+      </View>
+      {!!caption && <Text style={s.caption}>{caption}</Text>}
+    </SafeAreaView>
   );
 }
 const webGestureStyle = { touchAction: 'none', userSelect: 'none', cursor: 'auto' } as const;

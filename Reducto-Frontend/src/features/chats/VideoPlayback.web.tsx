@@ -1,16 +1,45 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Text, View } from 'react-native';
-export function VideoPlayback({ uri }: { uri: string }) {
+const allowPlayback = () => true;
+export function VideoPlayback({
+  uri,
+  active = true,
+  pauseRef,
+  canPlay = allowPlayback,
+}: {
+  uri?: string;
+  active?: boolean;
+  pauseRef?: RefObject<(() => void) | null>;
+  canPlay?: () => boolean;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (!active || !canPlay()) video.current?.pause();
+    else void video.current?.play().catch(() => {});
+  }, [active, uri, canPlay]);
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!pauseRef) return;
+    const pause = () => video.current?.pause();
+    pauseRef.current = pause;
+    return () => {
+      if (pauseRef.current === pause) pauseRef.current = null;
+    };
+  }, [pauseRef]);
   return (
     <View style={{ flex: 1 }}>
       <video
         aria-label="Video player"
+        ref={video}
         src={uri}
-        autoPlay
+        autoPlay={active}
         controls
         playsInline
         preload="auto"
+        onPlay={({ currentTarget }) => {
+          if (!canPlay()) currentTarget.pause();
+        }}
+        onLoadStart={() => setFailed(false)}
         onError={() => setFailed(true)}
         style={{
           position: 'absolute',

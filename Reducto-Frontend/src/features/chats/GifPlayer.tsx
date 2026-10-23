@@ -7,6 +7,7 @@ import { colors } from '../../components/ui';
 import { MediaPreview } from './MediaPreview';
 import type { MediaSize } from '../../lib/media-preview';
 import { ServerThumbnail } from './ServerThumbnail';
+import { useMediaViewers } from './MediaViewers';
 import { watchGifPlayback } from '../../lib/gif-playback';
 
 export interface GifPlayerProps {
@@ -30,6 +31,7 @@ export function GifPlayer({
   cached = false,
 }: GifPlayerProps) {
   const [frameUri, setFrameUri] = useState<string>();
+  const viewers = useMediaViewers();
   const focused = useIsFocused();
   const player = useVideoPlayer({ uri, contentType: 'progressive' }, (video) => {
     video.muted = true;
@@ -50,13 +52,17 @@ export function GifPlayer({
     () =>
       watchGifPlayback(
         player,
-        () => focused && active && AppState.currentState === 'active',
+        () => focused && active && !viewers.isOpen() && AppState.currentState === 'active',
         (update) => {
           const subscription = AppState.addEventListener('change', update);
-          return () => subscription.remove();
+          const stopWatchingViewer = viewers.subscribe(update);
+          return () => {
+            subscription.remove();
+            stopWatchingViewer();
+          };
         },
       ),
-    [player, active, focused],
+    [player, active, focused, viewers],
   );
 
   return (
