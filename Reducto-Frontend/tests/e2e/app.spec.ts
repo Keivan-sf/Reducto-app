@@ -1944,6 +1944,40 @@ test('chat scrollbar remains visible but disabled during voice seeking', async (
   await expect(thumb).toHaveCSS('opacity', '1');
 });
 
+test('uncached voice messages show loading immediately and reuse the cached download on return', async ({
+  page,
+}, testInfo) => {
+  const mediaId = 'delayed-voice';
+  let downloads = 0;
+  let finishDownload!: () => void;
+  const held = new Promise<void>((resolve) => {
+    finishDownload = resolve;
+  });
+  await mockApi(page, [{ ...first, text: null, attachment: { type: 'voice', mediaId } }]);
+  await page.route(`**/api/conversations/*/attachments/${mediaId}`, async (route) => {
+    downloads++;
+    await held;
+    return route.fulfill({
+      path: path.join(__dirname, '../fixtures/voice.ogg'),
+      contentType: 'audio/ogg',
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByRole('button', { name: 'Loading voice message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play voice message' })).toHaveCount(0);
+  await expect.poll(() => downloads).toBe(1);
+  finishDownload();
+  await expect(page.getByRole('button', { name: 'Play voice message' })).toBeVisible();
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByRole('button', { name: 'Play voice message' })).toBeVisible();
+  expect(downloads).toBe(1);
+});
+
 for (const kind of ['gif', 'voice', 'image', 'video'] as const) {
   test(`cached ${kind} media and metadata survive repeated chat remounts`, async ({
     page,

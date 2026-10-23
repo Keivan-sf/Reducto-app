@@ -53,7 +53,10 @@ export function VoiceMessage({
     <View style={s.row}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Play voice message"
+        accessibilityLabel={
+          state.status === 'error' ? 'Retry voice message' : 'Loading voice message'
+        }
+        disabled={state.status !== 'error'}
         onLongPress={onOptions}
         onPress={(event) => {
           event.stopPropagation();
@@ -62,10 +65,10 @@ export function VoiceMessage({
         }}
         style={s.play}
       >
-        {state.status === 'loading' ? (
-          <ActivityIndicator color="white" />
-        ) : (
+        {state.status === 'error' ? (
           <Icon name="play" color="white" size={24} />
+        ) : (
+          <ActivityIndicator color="white" accessibilityLabel="Loading voice message" />
         )}
       </Pressable>
       <View style={{ flex: 1, gap: 8 }}>
@@ -145,7 +148,14 @@ function VoicePlayer({
     <View testID="voice-player" style={s.row}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={status.playing ? 'Pause voice message' : 'Play voice message'}
+        accessibilityLabel={
+          !status.isLoaded
+            ? 'Loading voice message'
+            : status.playing
+              ? 'Pause voice message'
+              : 'Play voice message'
+        }
+        disabled={!status.isLoaded}
         onLongPress={onOptions}
         onPress={(event) => {
           event.stopPropagation();
@@ -163,7 +173,11 @@ function VoicePlayer({
         }}
         style={s.play}
       >
-        <Icon name={status.playing ? 'pause' : 'play'} color="white" size={24} />
+        {status.isLoaded ? (
+          <Icon name={status.playing ? 'pause' : 'play'} color="white" size={24} />
+        ) : (
+          <ActivityIndicator color="white" accessibilityLabel="Loading voice message" />
+        )}
       </Pressable>
       <View style={{ flex: 1, gap: 5 }}>
         <VoiceSeekBar
