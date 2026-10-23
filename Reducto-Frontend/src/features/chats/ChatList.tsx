@@ -14,9 +14,10 @@ import { useSession } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
 import { conversationName, preview, timeLabel } from '../../lib/messages';
 import { NewChatDialog } from './NewChatDialog';
+import { VoiceMiniPlayer } from './VoiceMiniPlayer';
 import { useProfiles } from '../../context/ProfilesContext';
 
-export default function ChatList() {
+export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?: boolean }) {
   const { session } = useSession();
   const { profiles, directory } = useProfiles();
   const {
@@ -120,6 +121,7 @@ export default function ChatList() {
           </Pressable>
         ))}
       </View>
+      {showVoicePlayer && <VoiceMiniPlayer />}
       {!!error && (
         <View style={{ padding: 12, gap: 6 }}>
           <Notice text={error} />

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { Redirect, Slot, usePathname } from 'expo-router';
 import { useSession } from '../../context/SessionContext';
+import { VoicePlaybackProvider } from '../../context/VoicePlaybackContext';
 import { ChatsProvider } from '../../context/ChatsContext';
 import { ProfilesProvider } from '../../context/ProfilesContext';
 import { MediaMetadataProvider } from '../../context/MediaMetadataContext';
@@ -40,11 +41,13 @@ export default function PrivateLayout() {
       <GifsProvider>
         <MediaMetadataProvider>
           <VideosProvider>
-            <ChatsProvider>
-              <MediaViewersProvider>
-                <PrivateScreens />
-              </MediaViewersProvider>
-            </ChatsProvider>
+            <VoicePlaybackProvider>
+              <ChatsProvider>
+                <MediaViewersProvider>
+                  <PrivateScreens />
+                </MediaViewersProvider>
+              </ChatsProvider>
+            </VoicePlaybackProvider>
           </VideosProvider>
         </MediaMetadataProvider>
       </GifsProvider>

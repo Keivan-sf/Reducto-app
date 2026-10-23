@@ -4048,3 +4048,109 @@ test('image viewer fades in and out while keeping the underlying chat mounted', 
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('image-viewer')).toHaveCount(0);
 });
+
+test('persistent voice mini player follows navigation, survives scrolling, and closes playback', async ({
+  page,
+}, testInfo) => {
+  const voice = {
+    ...first,
+    text: null,
+    attachment: { type: 'voice', mediaId: 'persistent-voice' },
+    attachmentMetadata: { id: 'persistent-voice', type: 'voice', durationSeconds: 120 },
+  };
+  const later = Array.from({ length: 35 }, (_, index) => ({
+    ...first,
+    id: `after-voice-${index}`,
+    text: `Later message ${index}`,
+    createdAt: new Date(Date.parse(first.createdAt) + (index + 1) * 1000).toISOString(),
+  }));
+  const other = { ...chat, id: 'other-voice-chat', name: 'Other conversation' };
+  await mockApi(page, [voice, ...later]);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [chat, other] } }),
+  );
+  await page.route(`**/api/conversations/${other.id}/**`, (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    return route.fulfill({
+      json: pathname.endsWith('/members')
+        ? { members: [{ userId: user.id, conversationId: other.id, role: 'owner' }] }
+        : pathname.endsWith('/first')
+          ? { message: null }
+          : { messages: [], nextCursor: null },
+    });
+  });
+  // A long, valid PCM WAV keeps playback running throughout navigation checks.
+  const samples = 8000 * 120;
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(wav.length - 8, 4);
+  wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24);
+  wav.writeUInt32LE(16000, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(samples * 2, 40);
+  let downloads = 0;
+  await page.route('**/api/conversations/*/attachments/persistent-voice', (route) => {
+    downloads++;
+    return route.fulfill({ body: wav, contentType: 'audio/wav' });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const screen = page.getByTestId(`conversation-${chat.id}`);
+  await screen.getByRole('button', { name: 'Play voice message', exact: true }).click();
+  const mini = page.getByTestId('voice-mini-player');
+  await expect(mini).toHaveCount(1);
+  await expect(mini.getByText('Grace Hopper', { exact: true })).toBeVisible();
+  await expect(mini.getByRole('button')).toHaveCount(2);
+  const pause = () =>
+    mini.getByRole('button', { name: 'Pause current voice message', exact: true });
+  await expect(pause()).toBeVisible();
+  await expect(mini).toHaveCSS('height', '36px');
+  await expect(mini).toHaveCSS('background-color', 'rgb(244, 247, 250)');
+  const header = screen.getByRole('button', { name: 'View conversation details' });
+  expect((await mini.boundingBox())!.y).toBeGreaterThan((await header.boundingBox())!.y);
+  await screen.getByTestId('chat-history').evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(screen.getByTestId(`message-${first.id}`)).not.toBeInViewport();
+  await expect(pause()).toBeVisible();
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Other conversation' }).click();
+  await expect(mini).toHaveCount(1);
+  await expect(
+    page.getByTestId(`conversation-${other.id}`).getByTestId('voice-mini-player'),
+  ).toBeVisible();
+  await expect(pause()).toBeVisible();
+  // Back to the list: the bar moves beneath its tabs, including on wide screens.
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  else
+    await page.evaluate(() => {
+      history.pushState({}, '', '/');
+      dispatchEvent(new PopStateEvent('popstate'));
+    });
+  await expect(mini).toHaveCount(1);
+  const tabs = page.getByRole('tab', { name: 'All chats' });
+  const tabBox = (await tabs.boundingBox())!;
+  expect((await mini.boundingBox())!.y).toBeGreaterThanOrEqual(tabBox.y + tabBox.height - 1);
+  await expect(pause()).toBeVisible();
+  await pause().click();
+  await expect(
+    mini.getByRole('button', { name: 'Play current voice message', exact: true }),
+  ).toBeVisible();
+  await mini.getByRole('button', { name: 'Play current voice message', exact: true }).click();
+  await expect(pause()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('voice-mini-player-list.png') });
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(mini).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath('voice-mini-player-conversation.png') });
+  await mini.getByRole('button', { name: 'Close voice player', exact: true }).click();
+  await expect(mini).toHaveCount(0);
+  expect(downloads).toBe(1);
+});

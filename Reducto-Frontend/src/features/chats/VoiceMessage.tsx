@@ -1,24 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  AppState,
   Pressable,
   StyleSheet,
   Text,
   View,
   type GestureResponderEvent,
 } from 'react-native';
-import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
-import { useIsFocused } from 'expo-router';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Icon, colors } from '../../components/ui';
 import { useCachedFile, voiceFileKey } from '../../context/VideosContext';
 import { videoTime } from '../../lib/video-download.types';
-import { voicePlayback } from '../../lib/voice-playback';
+import { useVoicePlayback, useVoicePlaybackState } from '../../context/VoicePlaybackContext';
 import { VoiceSeekBar } from './VoiceSeekBar';
 import type { AttachmentMetadata } from '../../api/types';
 
 export function VoiceMessage({
   conversationId,
+  senderId,
   mediaId,
   metadata,
   active,
@@ -27,6 +26,7 @@ export function VoiceMessage({
   onSeekingChange,
 }: {
   conversationId: string;
+  senderId: string;
   mediaId: string;
   metadata?: AttachmentMetadata;
   active: boolean;
@@ -42,6 +42,8 @@ export function VoiceMessage({
   return state.status === 'ready' ? (
     <VoicePlayer
       uri={state.file.uri}
+      fileKey={voiceFileKey(conversationId, mediaId)}
+      senderId={senderId}
       durationHint={metadata?.durationSeconds ?? state.file.duration}
       autoplay={autoplay}
       active={active}
@@ -86,6 +88,8 @@ export function VoiceMessage({
 }
 function VoicePlayer({
   uri,
+  fileKey,
+  senderId,
   durationHint,
   autoplay,
   active,
@@ -94,6 +98,8 @@ function VoicePlayer({
   onSeekingChange,
 }: {
   uri: string;
+  fileKey: string;
+  senderId: string;
   durationHint?: number;
   autoplay: boolean;
   active: boolean;
@@ -101,99 +107,84 @@ function VoicePlayer({
   onError: (message: string) => void;
   onSeekingChange?: (seeking: boolean) => void;
 }) {
-  const player = useAudioPlayer(uri, { updateInterval: 150 });
-  const status = useAudioPlayerStatus(player);
-  const focused = useIsFocused();
-  const mounted = useRef(true);
+  const playback = useVoicePlayback();
+  const state = useVoicePlaybackState();
   const autoplayed = useRef(false);
-  const duration =
-    Number.isFinite(status.duration) && status.duration > 0 ? status.duration : (durationHint ?? 0);
+  const [probedDuration, setProbedDuration] = useState(0);
+  const knownDuration = durationHint || probedDuration;
+  const selected = state.track?.key === fileKey;
+  const playing = selected && state.playing;
+  const position = selected ? state.currentTime : 0;
+  const duration = selected && state.duration > 0 ? state.duration : knownDuration;
   useEffect(() => {
-    // useAudioPlayer releases its native object before this effect cleans up.
-    // Even reading player.id after that release calls into the native bridge.
-    const playerId = player.id;
-    let alive = true;
-    mounted.current = true;
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (alive && state !== 'active') player.pause();
-    });
-    return () => {
-      alive = false;
-      mounted.current = false;
-      subscription.remove();
-      voicePlayback.release(playerId);
-    };
-  }, [player]);
-  useEffect(() => {
-    if (!active || !focused) player.pause();
-  }, [active, focused, player]);
-  useEffect(() => {
-    if (!autoplay || autoplayed.current || !active || !focused || !status.isLoaded) return;
+    if (!autoplay || autoplayed.current) return;
     autoplayed.current = true;
-    voicePlayback.claim(player.id, () => player.pause());
-    player.play();
-  }, [autoplay, active, focused, status.isLoaded, player]);
-  useEffect(() => {
-    if (status.error) onError('This voice message could not be played.');
-  }, [status.error, onError]);
+    void playback
+      .play({ key: fileKey, uri, senderId, duration: knownDuration })
+      .catch(() => onError('Could not play this voice message.'));
+    // Playback belongs to the session; scrolling/navigation never cleans it up.
+  }, [autoplay, playback, fileKey, uri, senderId, knownDuration, onError]);
   const seek = async (seconds: number) => {
     try {
-      await player.seekTo(Math.min(duration, Math.max(0, seconds)));
+      playback.select({ key: fileKey, uri, senderId, duration: knownDuration });
+      await playback.seek(seconds);
     } catch (error) {
-      if (mounted.current) onError('Could not seek this voice message.');
+      onError('Could not seek this voice message.');
       throw error;
     }
   };
   return (
     <View testID="voice-player" style={s.row}>
+      {!knownDuration && !selected && (
+        <VoiceDurationProbe uri={uri} onDuration={setProbedDuration} />
+      )}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={
-          !status.isLoaded
-            ? 'Loading voice message'
-            : status.playing
-              ? 'Pause voice message'
-              : 'Play voice message'
-        }
-        disabled={!status.isLoaded}
+        accessibilityLabel={playing ? 'Pause voice message' : 'Play voice message'}
         onLongPress={onOptions}
         onPress={(event) => {
           event.stopPropagation();
-          if (status.playing) player.pause();
-          else {
-            voicePlayback.claim(player.id, () => player.pause());
-            void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true })
-              .then(async () => {
-                if (!mounted.current || !active || !focused) return;
-                if (duration && status.currentTime >= duration - 0.05) await player.seekTo(0);
-                if (mounted.current) player.play();
-              })
+          if (playing) playback.pause();
+          else
+            void playback
+              .play({ key: fileKey, uri, senderId, duration: knownDuration })
               .catch(() => onError('Could not play this voice message.'));
-          }
         }}
         style={s.play}
       >
-        {status.isLoaded ? (
-          <Icon name={status.playing ? 'pause' : 'play'} color="white" size={24} />
-        ) : (
-          <ActivityIndicator color="white" accessibilityLabel="Loading voice message" />
-        )}
+        <Icon name={playing ? 'pause' : 'play'} color="white" size={24} />
       </Pressable>
       <View style={{ flex: 1, gap: 5 }}>
         <VoiceSeekBar
-          value={status.currentTime}
+          value={position}
           duration={duration}
-          enabled={active && focused}
+          enabled={active}
           onDraggingChange={onSeekingChange}
           onSeek={seek}
         />
         <Text style={s.time}>
-          {videoTime(status.playing || status.currentTime > 0 ? status.currentTime : duration)}
-          {status.playing ? ` / ${videoTime(duration)}` : ''}
+          {videoTime(playing || position > 0 ? position : duration)}
+          {playing ? ` / ${videoTime(duration)}` : ''}
         </Text>
       </View>
     </View>
   );
+}
+// Older messages may lack server duration metadata. This silent probe is
+// released after reading the duration; it never owns message playback.
+function VoiceDurationProbe({
+  uri,
+  onDuration,
+}: {
+  uri: string;
+  onDuration: (value: number) => void;
+}) {
+  const player = useAudioPlayer(uri);
+  const status = useAudioPlayerStatus(player);
+  useEffect(() => {
+    if (Number.isFinite(status.duration) && status.duration > 0) onDuration(status.duration);
+  }, [status.duration, onDuration]);
+  return null;
 }
 const s = StyleSheet.create({
   row: {

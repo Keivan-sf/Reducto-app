@@ -1,118 +1,158 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
-import { voicePlayback } from '../src/lib/voice-playback';
+import { VoicePlayback, type VoiceAudioPlayer, type VoiceStatus } from '../src/lib/voice-playback';
 
-type Element = { type: unknown; props: Record<string, unknown> };
-
-/** Model Expo's native disposal before the component's own effect cleanup.
- * Unlike the web player, every property access on a released native player throws. */
-function nativeVoicePlayer() {
-  let released = false;
-  let pauses = 0;
-  const effects: (() => void | (() => void))[] = [];
-  const check = () => assert.equal(released, false, 'Shared object was already released');
-  const player = {
-    get id() {
-      check();
-      return 'native-voice-player';
-    },
-    pause() {
-      check();
-      pauses++;
-    },
-    play: check,
-    seekTo: async () => check(),
-  };
-  const jsx = (type: unknown, props: Record<string, unknown>) => ({ type, props });
-  const module = { exports: {} as typeof import('../src/features/chats/VoiceMessage') };
-  const source = readFileSync(
-    new URL('../src/features/chats/VoiceMessage.tsx', import.meta.url),
-    'utf8',
-  );
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-      jsx: ts.JsxEmit.ReactJSX,
-    },
-  });
-  runInNewContext(outputText, {
-    module,
-    exports: module.exports,
-    require: (name: string) => {
-      if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
-      if (name === 'react')
+const track = (key: string) => ({
+  key,
+  uri: `file:///${key}.ogg`,
+  senderId: 'sender',
+  duration: 30,
+});
+function harness(prepare = async () => {}) {
+  const players: ReturnType<typeof makePlayer>[] = [];
+  const pins = new Set<string>();
+  function makePlayer() {
+    let released = false;
+    let listener: ((status: VoiceStatus) => void) | undefined;
+    let plays = 0;
+    let pauses = 0;
+    let releases = 0;
+    const check = () => assert.equal(released, false, 'Native player was already released');
+    const status: VoiceStatus = { playing: false, currentTime: 0, duration: 30, isLoaded: true };
+    const emit = (value: Partial<VoiceStatus>) => {
+      Object.assign(status, value);
+      listener?.({ ...status });
+    };
+    const player: VoiceAudioPlayer = {
+      get currentStatus() {
+        check();
+        return { ...status };
+      },
+      play() {
+        check();
+        plays++;
+        emit({ playing: true, didJustFinish: false, error: null });
+      },
+      pause() {
+        check();
+        pauses++;
+        emit({ playing: false });
+      },
+      async seekTo(currentTime) {
+        check();
+        emit({ currentTime, didJustFinish: false });
+      },
+      release() {
+        check();
+        released = true;
+        releases++;
+      },
+      addListener(_event, callback) {
+        listener = callback;
         return {
-          useEffect: (effect: () => void | (() => void)) => effects.push(effect),
-          useRef: (current: unknown) => ({ current }),
-          useState: (value: unknown) => [value, () => {}],
-        };
-      if (name === 'react-native')
-        return {
-          View: 'View',
-          Text: 'Text',
-          Pressable: 'Pressable',
-          Platform: { OS: 'android' },
-          StyleSheet: { create: (styles: unknown) => styles },
-          AppState: { addEventListener: () => ({ remove() {} }) },
-        };
-      if (name === 'expo-audio')
-        return {
-          useAudioPlayer: () => {
-            effects.push(() => () => {
-              released = true;
-            });
-            return player;
+          remove() {
+            listener = undefined;
           },
-          useAudioPlayerStatus: () => ({ duration: 3, currentTime: 0, isLoaded: true }),
         };
-      if (name === 'expo-router') return { useIsFocused: () => true };
-      if (name.endsWith('/ui')) return { Icon: 'Icon', colors: { blue: '#3390EC' } };
-      if (name.endsWith('/VideosContext'))
-        return {
-          voiceFileKey: () => 'voice',
-          useCachedFile: () => ({
-            state: { status: 'ready', file: { uri: 'file:///voice.ogg' } },
-            download: () => Promise.resolve(),
-          }),
-        };
-      if (name.endsWith('/video-download.types')) return { videoTime: () => '0:03' };
-      if (name.endsWith('/voice-playback')) return { voicePlayback };
-      if (name === './VoiceSeekBar') return { VoiceSeekBar: 'VoiceSeekBar' };
-      throw new Error(`Unexpected import ${name}`);
+      },
+    };
+    return { player, emit, counts: () => ({ plays, pauses, releases }) };
+  }
+  const playback = new VoicePlayback(
+    () => {
+      const next = makePlayer();
+      players.push(next);
+      return next.player;
     },
-  });
-  const element = module.exports.VoiceMessage({
-    conversationId: 'chat',
-    mediaId: 'voice',
-    active: true,
-    onOptions() {},
-    onError(message) {
-      assert.fail(message);
+    prepare,
+    (key) => {
+      pins.add(key);
+      return () => {
+        pins.delete(key);
+      };
     },
-  }) as Element;
-  const render = element.type as (props: Record<string, unknown>) => Element;
-  render({ ...element.props, autoplay: true });
-  const cleanups = effects.map((effect) => effect());
-  return {
-    pauses: () => pauses,
-    unmount: () => cleanups.forEach((cleanup) => cleanup?.()),
-  };
+  );
+  return { playback, players, pins };
 }
 
-test('native voice cleanup unregisters playback without reading an already released player', () => {
-  const native = nativeVoicePlayer();
-  voicePlayback.pause();
-  assert.equal(native.pauses(), 1, 'autoplay registered the native player');
-  assert.doesNotThrow(native.unmount);
+test('bubble subscribers can unmount while session playback and its cached file remain active', async () => {
+  const { playback, players, pins } = harness();
+  const unmountBubble = playback.subscribe(() => {});
+  await playback.play(track('one'));
+  unmountBubble();
+  players[0].emit({ currentTime: 7 });
+  assert.equal(playback.read().playing, true);
+  assert.equal(playback.read().currentTime, 7);
+  assert.deepEqual([...pins], ['one']);
+  assert.deepEqual(players[0].counts(), { plays: 1, pauses: 0, releases: 0 });
+  playback.close();
 });
 
-test('recording after a voice player unmounts cannot pause its released native object', () => {
-  const native = nativeVoicePlayer();
-  assert.doesNotThrow(native.unmount);
-  assert.doesNotThrow(() => voicePlayback.pause());
-  assert.equal(native.pauses(), 0);
+test('mini player pause/resume preserves position and shares the existing player', async () => {
+  const { playback, players } = harness();
+  await playback.play(track('one'));
+  players[0].emit({ currentTime: 8 });
+  playback.pause();
+  assert.equal(playback.read().playing, false);
+  await playback.resume();
+  assert.equal(playback.read().playing, true);
+  assert.equal(playback.read().currentTime, 8);
+  assert.equal(players.length, 1);
+  playback.close();
+});
+
+test('switching messages stops/releases the old player and transfers the cache pin', async () => {
+  const { playback, players, pins } = harness();
+  await playback.play(track('one'));
+  await playback.play(track('two'));
+  assert.deepEqual(players[0].counts(), { plays: 1, pauses: 1, releases: 1 });
+  assert.deepEqual([...pins], ['two']);
+  players[0].emit({ currentTime: 99 });
+  assert.equal(playback.read().track?.key, 'two');
+  assert.equal(playback.read().currentTime, 0);
+  playback.close();
+});
+
+test('close/sign-out releases once, clears the bar, and never touches a released native object', async () => {
+  const { playback, players, pins } = harness();
+  await playback.play(track('one'));
+  playback.close();
+  playback.close();
+  playback.pause();
+  await playback.resume();
+  assert.equal(playback.read().track, undefined);
+  assert.equal(pins.size, 0);
+  assert.equal(players[0].counts().releases, 1);
+});
+
+test('close or pause during audio setup prevents late playback', async () => {
+  for (const action of ['close', 'pause'] as const) {
+    let ready!: () => void;
+    const { playback, players } = harness(
+      () =>
+        new Promise<void>((resolve) => {
+          ready = resolve;
+        }),
+    );
+    const starting = playback.play(track('one'));
+    playback[action]();
+    ready();
+    await starting;
+    assert.equal(players[0].counts().plays, 0);
+    playback.close();
+  }
+});
+
+test('seeking a paused voice preserves pause and completion can be replayed from the beginning', async () => {
+  const { playback, players } = harness();
+  await playback.play(track('one'));
+  playback.pause();
+  await playback.seek(12);
+  assert.equal(playback.read().currentTime, 12);
+  assert.equal(playback.read().playing, false);
+  players[0].emit({ currentTime: 30, didJustFinish: true, playing: false });
+  await playback.resume();
+  assert.equal(playback.read().currentTime, 0);
+  assert.equal(playback.read().playing, true);
+  playback.close();
 });

@@ -55,7 +55,8 @@ import { ReplyPreview, ReplyQuote } from './ReplyPreview';
 import { VoiceMessage } from './VoiceMessage';
 import { MessageComposer } from './MessageComposer';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
-import { voicePlayback } from '../../lib/voice-playback';
+import { useVoicePlayback } from '../../context/VoicePlaybackContext';
+import { VoiceMiniPlayer } from './VoiceMiniPlayer';
 import { VideoCard } from './VideoCard';
 import { useMediaViewers } from './MediaViewers';
 import { useVideos, videoKey, gifFileKey, voiceFileKey } from '../../context/VideosContext';
@@ -94,6 +95,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     readVisible,
     getReadState,
   } = useChats();
+  const voicePlayback = useVoicePlayback();
   const routeFocused = useIsFocused();
   const focused = active && routeFocused;
   const chat = conversations.find((entry) => entry.id === id);
@@ -821,6 +823,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           onPress={() => setDetails(true)}
         />
       </View>
+      {active && <VoiceMiniPlayer />}
       {search !== null && (
         <View style={s.search}>
           <TextInput
@@ -1015,6 +1018,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                         <VoiceMessage
                           onSeekingChange={onVoiceSeekingChange}
                           conversationId={id}
+                          senderId={message.senderId}
                           mediaId={message.attachment.mediaId}
                           metadata={mediaMetadata}
                           active={
@@ -1048,7 +1052,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                           onPress={(event) => {
                             if (message.attachment?.type === 'image') {
                               event.stopPropagation();
-                              voicePlayback.pause();
                               viewers.openImage({
                                 conversationId: id,
                                 mediaId: message.attachment.mediaId,
