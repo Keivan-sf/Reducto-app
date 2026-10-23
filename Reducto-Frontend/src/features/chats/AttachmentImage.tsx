@@ -5,15 +5,18 @@ import { MediaPreview } from './MediaPreview';
 import { mediaDimensions, type MediaSize } from '../../lib/media-preview';
 import { useCachedFile, useVideos, videoKey } from '../../context/VideosContext';
 import { useAttachmentMetadata } from '../../context/MediaMetadataContext';
+import type { AttachmentMetadata } from '../../api/types';
 
 export function AttachmentImage({
   conversationId,
   mediaId,
+  initialMetadata,
 }: {
   conversationId: string;
   mediaId: string;
+  initialMetadata?: AttachmentMetadata;
 }) {
-  const metadata = useAttachmentMetadata(conversationId, mediaId);
+  const metadata = useAttachmentMetadata(conversationId, mediaId, true, initialMetadata);
   const files = useVideos();
   const key = videoKey(conversationId, mediaId);
   const { state, download } = useCachedFile(key, true, metadata?.contentType ?? 'image/jpeg');

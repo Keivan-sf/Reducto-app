@@ -63,6 +63,7 @@ export interface Message {
   senderId: string;
   text: string | null;
   attachment: Attachment | null;
+  attachmentMetadata?: AttachmentMetadata | Gif | null;
   forwardedFrom: { senderId: string; messageId: string; conversationId: string } | null;
   createdAt: string;
   reactions?: Reaction[];
@@ -90,6 +91,7 @@ export interface AttachmentMetadata extends VisualMediaMetadata {
   fileName: string;
   contentType: string;
   fileSize: number;
+  durationSeconds?: number | null;
 }
 export interface Gif extends VisualMediaMetadata {
   playbackUrl: string;

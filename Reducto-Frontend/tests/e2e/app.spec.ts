@@ -5,6 +5,111 @@ import { readFileSync } from 'node:fs';
 const inviteToken = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
 const inviteUri = `reducto:///api/groups/join/${inviteToken}`;
 
+test('message metadata sizes unloaded media and shows durations without detail requests', async ({
+  page,
+}) => {
+  const media = [
+    {
+      id: 'inline-image',
+      type: 'image',
+      width: 90,
+      height: 180,
+      fileSize: 100,
+      fileName: 'photo.png',
+      contentType: 'image/png',
+    },
+    {
+      id: 'inline-video',
+      type: 'video',
+      width: 320,
+      height: 180,
+      fileSize: 100,
+      fileName: 'clip.mp4',
+      contentType: 'video/mp4',
+      durationSeconds: 73,
+      thumbnailUrl: null,
+    },
+    {
+      id: 'inline-voice',
+      type: 'voice',
+      fileSize: 100,
+      fileName: 'voice.ogg',
+      contentType: 'audio/ogg',
+      durationSeconds: 64,
+    },
+    {
+      id: 'inline-music',
+      type: 'music',
+      fileSize: 100,
+      fileName: 'song.mp3',
+      contentType: 'audio/mpeg',
+      durationSeconds: 122,
+    },
+  ] as const;
+  const gifId = 'inline-gif';
+  const messages = [
+    ...media.map((item, index) => ({
+      ...first,
+      id: `inline-message-${index}`,
+      text: null,
+      createdAt: `2026-10-18T12:0${index}:00Z`,
+      attachment: { type: item.type, mediaId: item.id },
+      attachmentMetadata: item,
+    })),
+    {
+      ...first,
+      id: 'inline-message-gif',
+      text: null,
+      createdAt: '2026-10-18T12:04:00Z',
+      attachment: { type: 'gif', gifId },
+      attachmentMetadata: {
+        id: gifId,
+        objectKey: 'gifs/inline.mp4',
+        fileSize: 100,
+        createdAt: first.createdAt,
+        playbackUrl: 'https://media.example/inline.mp4',
+        thumbnailUrl: null,
+        width: 80,
+        height: 200,
+      },
+    },
+  ];
+  await mockApi(page, messages);
+  let details = 0;
+  await page.route('**/api/conversations/*/attachments/*/metadata', (route) => {
+    details++;
+    return route.fulfill({ status: 500 });
+  });
+  await page.route(`**/api/gifs/${gifId}`, (route) => {
+    details++;
+    return route.fulfill({ status: 500 });
+  });
+  await page.route('https://media.example/inline.mp4', (route) => route.abort());
+  await page.route('**/api/conversations/*/attachments/inline-image', (route) => route.abort());
+  await page.route('**/api/conversations/*/attachments/inline-voice', (route) => route.abort());
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const image = page.getByLabel('Image preview', { exact: true });
+  const video = page.getByTestId('video-card-inline-video');
+  const gif = page.getByLabel('GIF preview', { exact: true });
+  for (const [frame, expected] of [
+    [image, 0.6],
+    [video, 320 / 180],
+    [gif, 0.6],
+  ] as const) {
+    await expect
+      .poll(async () => {
+        const box = await frame.boundingBox();
+        return box ? box.width / box.height : 0;
+      })
+      .toBeCloseTo(expected, 1);
+  }
+  await expect(video.getByText('Video · 1:13')).toBeVisible();
+  await expect(page.getByText('1:04', { exact: true })).toBeVisible();
+  await expect(page.getByText('music · 2:02', { exact: true })).toBeVisible();
+  expect(details).toBe(0);
+});
+
 test('GIF previews autoplay muted, loop, and never expose video controls', async ({ page }) => {
   const mediaBase = 'https://media.example';
   let lookups = 0;

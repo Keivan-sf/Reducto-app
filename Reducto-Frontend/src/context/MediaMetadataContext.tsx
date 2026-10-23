@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type PropsWithChildren 
 import { AppState } from 'react-native';
 import { AttachmentCache } from '../api/attachment-cache';
 import { api } from './SessionContext';
+import type { AttachmentMetadata } from '../api/types';
 
 const Context = createContext<AttachmentCache>(null!);
 export function MediaMetadataProvider({ children }: PropsWithChildren) {
@@ -9,11 +10,18 @@ export function MediaMetadataProvider({ children }: PropsWithChildren) {
   return <Context.Provider value={cache}>{children}</Context.Provider>;
 }
 export const useMediaMetadata = () => useContext(Context);
-export function useAttachmentMetadata(conversationId: string, mediaId: string, active = true) {
+export function useAttachmentMetadata(
+  conversationId: string,
+  mediaId: string,
+  active = true,
+  initial?: AttachmentMetadata,
+) {
   const cache = useMediaMetadata();
   const [entry, setEntry] = useState(() => cache.peek(conversationId, mediaId));
   useEffect(() => {
     if (!active) return;
+    if (initial?.id === mediaId && !cache.peek(conversationId, mediaId))
+      cache.remember(conversationId, initial);
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
@@ -38,8 +46,9 @@ export function useAttachmentMetadata(conversationId: string, mediaId: string, a
       clearTimeout(timer);
       subscription.remove();
     };
-  }, [cache, conversationId, mediaId, active]);
+  }, [cache, conversationId, mediaId, active, initial]);
   return entry?.conversationId === conversationId && entry.attachment.id === mediaId
     ? entry.attachment
-    : cache.peek(conversationId, mediaId)?.attachment;
+    : (cache.peek(conversationId, mediaId)?.attachment ??
+        (initial?.id === mediaId ? initial : undefined));
 }

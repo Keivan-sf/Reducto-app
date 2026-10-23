@@ -10,13 +10,15 @@ import { Icon } from '../../components/ui';
 import { useAttachmentMetadata } from '../../context/MediaMetadataContext';
 import { useVideoFile } from '../../context/VideosContext';
 import { mediaDimensions, mediaPreviewSize } from '../../lib/media-preview';
-import { videoBytes } from '../../lib/video-download.types';
+import { videoBytes, videoTime } from '../../lib/video-download.types';
 import { saveVideoFile } from '../../lib/video-download';
 import { ServerThumbnail } from './ServerThumbnail';
+import type { AttachmentMetadata } from '../../api/types';
 
 export function VideoCard({
   conversationId,
   mediaId,
+  initialMetadata,
   active,
   onPlay,
   onOptions,
@@ -24,13 +26,14 @@ export function VideoCard({
 }: {
   conversationId: string;
   mediaId: string;
+  initialMetadata?: AttachmentMetadata;
   active: boolean;
   onPlay: () => void;
   onOptions: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
 }) {
   const { state, download, cancel } = useVideoFile(conversationId, mediaId, active);
-  const metadata = useAttachmentMetadata(conversationId, mediaId, active);
+  const metadata = useAttachmentMetadata(conversationId, mediaId, active, initialMetadata);
   const progress = state.status === 'loading' ? state.progress : undefined;
   const percent = progress?.total
     ? Math.min(100, Math.floor((progress.received * 100) / progress.total))
@@ -113,7 +116,7 @@ export function VideoCard({
         )}
         <View style={{ gap: 2 }}>
           <Text style={s.info}>
-            Video
+            Video{metadata?.durationSeconds ? ` · ${videoTime(metadata.durationSeconds)}` : ''}
             {percent !== undefined ? ` · ${percent}%` : ''}
           </Text>
           <Text style={s.size}>{sizeText}</Text>

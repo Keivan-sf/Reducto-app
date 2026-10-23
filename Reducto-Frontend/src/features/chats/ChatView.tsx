@@ -61,9 +61,11 @@ import { VideoViewer } from './VideoViewer';
 import { useVideos, videoKey, gifFileKey, voiceFileKey } from '../../context/VideosContext';
 import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
+import { videoTime } from '../../lib/video-download.types';
 import { MessageMenu, type MessageMenuAction } from './MessageMenu';
 import { ChatHistoryScrollView } from './ChatHistoryScrollView';
 import { comparePosition } from '../../api/read-state';
+import { messageGif, messageMedia } from '../../lib/message-attachment';
 import { seenByAnotherMember } from '../../api/receipts';
 import { captureHistoryAnchor } from '../../lib/history-anchor';
 import { ChatTailFollow } from '../../lib/chat-tail-follow';
@@ -853,6 +855,8 @@ export default function ChatView({ id }: { id?: string }) {
             }
             renderItem={({ item: message, index }) => {
               const mine = message.senderId === session!.user.id;
+              const mediaMetadata = messageMedia(message);
+              const gifMetadata = messageGif(message);
               const older = shown[index + 1];
               const dateStart =
                 !older ||
@@ -928,6 +932,7 @@ export default function ChatView({ id }: { id?: string }) {
                           onSeekingChange={onVoiceSeekingChange}
                           conversationId={id}
                           mediaId={message.attachment.mediaId}
+                          metadata={mediaMetadata}
                           active={
                             !voiceActive &&
                             !playingVideo &&
@@ -941,6 +946,7 @@ export default function ChatView({ id }: { id?: string }) {
                         <VideoCard
                           conversationId={id}
                           mediaId={message.attachment.mediaId}
+                          initialMetadata={mediaMetadata}
                           active={!playingVideo && visibleMessages.has(message.id)}
                           onPlay={() =>
                             setPlayingVideo(
@@ -964,11 +970,13 @@ export default function ChatView({ id }: { id?: string }) {
                             <AttachmentImage
                               conversationId={id}
                               mediaId={message.attachment.mediaId}
+                              initialMetadata={mediaMetadata}
                             />
                           )}
                           {message.attachment.type === 'gif' && (
                             <GifPreview
                               gifId={message.attachment.gifId}
+                              initialMetadata={gifMetadata}
                               active={!gifs && !playingVideo && visibleMessages.has(message.id)}
                             />
                           )}
@@ -984,6 +992,10 @@ export default function ChatView({ id }: { id?: string }) {
                               />
                               <Text style={{ color: '#3974A8', fontSize: 13 }}>
                                 {message.attachment.type}
+                                {message.attachment.type === 'music' &&
+                                mediaMetadata?.durationSeconds
+                                  ? ` · ${videoTime(mediaMetadata.durationSeconds)}`
+                                  : ''}
                               </Text>
                             </View>
                           )}

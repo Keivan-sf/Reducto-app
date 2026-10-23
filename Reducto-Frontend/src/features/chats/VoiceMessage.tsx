@@ -15,10 +15,12 @@ import { useCachedFile, voiceFileKey } from '../../context/VideosContext';
 import { videoTime } from '../../lib/video-download.types';
 import { voicePlayback } from '../../lib/voice-playback';
 import { VoiceSeekBar } from './VoiceSeekBar';
+import type { AttachmentMetadata } from '../../api/types';
 
 export function VoiceMessage({
   conversationId,
   mediaId,
+  metadata,
   active,
   onOptions,
   onError,
@@ -26,6 +28,7 @@ export function VoiceMessage({
 }: {
   conversationId: string;
   mediaId: string;
+  metadata?: AttachmentMetadata;
   active: boolean;
   onOptions: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
@@ -39,7 +42,7 @@ export function VoiceMessage({
   return state.status === 'ready' ? (
     <VoicePlayer
       uri={state.file.uri}
-      durationHint={state.file.duration}
+      durationHint={metadata?.durationSeconds ?? state.file.duration}
       autoplay={autoplay}
       active={active}
       onOptions={onOptions}
@@ -67,7 +70,13 @@ export function VoiceMessage({
       </Pressable>
       <View style={{ flex: 1, gap: 8 }}>
         <View style={s.track} />
-        <Text style={s.time}>{state.status === 'error' ? 'Tap to retry' : 'Voice message'}</Text>
+        <Text style={s.time}>
+          {state.status === 'error'
+            ? `Tap to retry${metadata?.durationSeconds ? ` · ${videoTime(metadata.durationSeconds)}` : ''}`
+            : metadata?.durationSeconds
+              ? videoTime(metadata.durationSeconds)
+              : 'Voice message'}
+        </Text>
       </View>
     </View>
   );

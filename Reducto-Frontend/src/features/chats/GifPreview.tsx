@@ -7,8 +7,17 @@ import { GifPlayer } from './GifPlayer';
 import { ServerThumbnail } from './ServerThumbnail';
 import { MediaPreview } from './MediaPreview';
 import { mediaDimensions } from '../../lib/media-preview';
+import type { Gif } from '../../api/types';
 
-export function GifPreview({ gifId, active = true }: { gifId: string; active?: boolean }) {
+export function GifPreview({
+  gifId,
+  active = true,
+  initialMetadata,
+}: {
+  gifId: string;
+  active?: boolean;
+  initialMetadata?: Gif;
+}) {
   const cache = useGifs();
   const files = useVideos();
   const { state: localState, download } = useCachedFile(gifFileKey(gifId), active);
@@ -16,8 +25,11 @@ export function GifPreview({ gifId, active = true }: { gifId: string; active?: b
   useEffect(() => {
     if (local?.exists && !local.exists()) files.forget(gifFileKey(gifId));
   }, [local, files, gifId]);
-  const [source, setSource] = useState(() => cache.peek(gifId)?.gif);
+  const [source, setSource] = useState(() => initialMetadata ?? cache.peek(gifId)?.gif);
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (initialMetadata?.id === gifId && !cache.peek(gifId)) cache.remember(initialMetadata);
+  }, [cache, gifId, initialMetadata]);
   useEffect(() => {
     if (active) void download().catch(() => {});
   }, [active, download]);
@@ -53,7 +65,8 @@ export function GifPreview({ gifId, active = true }: { gifId: string; active?: b
     };
   }, [cache, gifId, active, local]);
 
-  const metadata = source?.id === gifId ? source : undefined;
+  const metadata =
+    source?.id === gifId ? source : initialMetadata?.id === gifId ? initialMetadata : undefined;
   if (local?.mimeType === 'image/gif')
     return (
       <MediaPreview size={mediaDimensions(metadata)} label="Animated GIF">
