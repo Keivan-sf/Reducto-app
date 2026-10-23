@@ -32,7 +32,7 @@
         {
           "photosPermission": "Choose a profile photo for Reducto.",
           "cameraPermission": false,
-          "microphonePermission": false
+          "microphonePermission": "Allow Reducto to record voice messages."
         }
       ],
       "expo-video",
@@ -44,7 +44,8 @@
           "enableBackgroundPlayback": false
         }
       ],
-      "expo-font"
+      "expo-font",
+      "./scripts/with-android-network.js"
     ]
   }
 }

@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Local Android build cache and persistent sideload signing key
+/.gradle-apk/
+/.apk-signing/

@@ -26,6 +26,48 @@ pnpm proxy http://YOUR_BACKEND_HOST:3000
 
 Then enter the proxy’s address (port 3001 by default) as the **Server URL** on the web login screen. The proxy target is supplied as a command argument; it is never taken from `API_TARGET`. `PROXY_PORT` controls only the local listening port. This proxy is a local development tool, not required for servers that support CORS.
 
+## Build an Android APK on NixOS
+
+From this directory, run:
+
+```sh
+./build-apk.sh
+```
+
+The APK is written to `dist/reducto.apk`, with a SHA-256 checksum alongside it.
+It includes the application bundle and runs without Expo Go, Metro, Android
+Studio, or an Expo account. Install it on your phone by opening the APK and
+allowing installation from that source, or use `adb install -r dist/reducto.apk`.
+Choose your reachable backend address on the sign-in screen as usual.
+
+The script uses `android-build.nix` to supply Java 21, Node, pnpm, Android SDK 36,
+build tools, NDK and CMake in a Linux FHS environment. Nix and a configured
+`<nixpkgs>` are required, along with enabled Linux user namespaces. The Nix
+expression accepts the Android SDK license. The first build needs network access
+and several GB of downloads/cache space; subsequent builds reuse Nix packages,
+`.gradle-apk/`, and generated native build outputs. Native directories are
+generated with Expo prebuild; keep native configuration in app config/plugins.
+
+By default the APK supports ARM64 and ARMv7 phones. For an ARM64-only build:
+
+```sh
+APK_ARCHITECTURES=arm64-v8a ./build-apk.sh
+```
+
+Set `APK_BUILD_JOBS` to adjust the Gradle worker count (default 2), or
+`APK_BUILD_VERBOSE=1` for detailed Gradle output. Gradle logs are saved to
+`.gradle-apk/build.log`. Use
+`./build-apk.sh --help` for available options. The build toolchain versions match
+the current Expo/React Native dependencies; review `android-build.nix` when
+upgrading those dependencies.
+
+This is a release-mode **sideload APK**, signed with a persistent local key in
+`.apk-signing/local.keystore` using the standard Android debug credentials. Keep
+that directory to install future builds as updates. It and the build caches are
+ignored by Git. This signing setup is for local use; Play Store publishing needs
+private production signing credentials. The APK permits HTTP connections because
+the application supports user-selected HTTP/LAN servers.
+
 ## Features
 
 - Email/password sign-in and sign-up with an optional username, validation, show/hide password, session restore, sign-out, and coordinated refresh-token rotation.
