@@ -866,7 +866,20 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
             scrollEventThrottle={16}
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={readViewabilityConfig}
-            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            maintainVisibleContentPosition={{
+              minIndexForVisible: 0,
+              // Inverted history has its live bottom at offset zero. Let Android
+              // check the offset before anchoring the old bubble after insertion.
+              ...(Platform.OS === 'android' &&
+              focused &&
+              !openingHistory &&
+              !jumpTarget &&
+              !seekingVoice &&
+              search === null &&
+              !(jumpWindow?.hasMoreAfter ?? hasNewer(id ?? ''))
+                ? { autoscrollToTopThreshold: 1 }
+                : {}),
+            }}
             onEndReached={() => void expandWindow(true)}
             onEndReachedThreshold={0.5}
             onStartReached={() => void expandWindow(false)}
