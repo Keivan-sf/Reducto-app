@@ -1,6 +1,7 @@
 import {
   AudioModule,
   RecordingPresets,
+  getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
@@ -9,7 +10,13 @@ import { Platform } from 'react-native';
 import type { RecordingSession } from './voice-recording.types';
 
 export async function beginVoiceRecording(signal: AbortSignal): Promise<RecordingSession> {
-  const permission = await requestRecordingPermissionsAsync();
+  // Re-requesting an already granted permission can briefly background the
+  // Android activity, which correctly cancels the held recording gesture.
+  const currentPermission = await getRecordingPermissionsAsync();
+  if (signal.aborted) throw new Error('Recording cancelled');
+  const permission = currentPermission.granted
+    ? currentPermission
+    : await requestRecordingPermissionsAsync();
   if (!permission.granted) throw new Error('Allow microphone access to record voice messages.');
   if (signal.aborted) throw new Error('Recording cancelled');
   await setAudioModeAsync({

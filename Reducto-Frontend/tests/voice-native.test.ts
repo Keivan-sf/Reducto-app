@@ -6,7 +6,18 @@ import ts from 'typescript';
 
 /** Load the native adapter against a recorder double that rejects all calls
  * after release, so asynchronous permission/stop races are exercised in Node. */
-function nativeRecorder({ allowed = true, prepare = Promise.resolve() } = {}) {
+function nativeRecorder({
+  allowed = true,
+  granted = allowed,
+  prepare = Promise.resolve(),
+  permission = Promise.resolve(),
+}: {
+  allowed?: boolean;
+  granted?: boolean;
+  prepare?: Promise<void>;
+  permission?: Promise<void>;
+} = {}) {
+  let permissionRequests = 0;
   const calls: string[] = [];
   let options: Record<string, unknown> = {};
   let exists = true;
@@ -65,7 +76,19 @@ function nativeRecorder({ allowed = true, prepare = Promise.resolve() } = {}) {
       if (name === 'expo-audio')
         return {
           AudioModule: { AudioRecorder: Recorder },
-          requestRecordingPermissionsAsync: async () => ({ granted: allowed }),
+          getRecordingPermissionsAsync: async () => {
+            await permission;
+            return { granted };
+          },
+          requestRecordingPermissionsAsync: async () => {
+            permissionRequests++;
+            assert.equal(
+              granted,
+              false,
+              'Never re-request granted permission: Android may background',
+            );
+            return { granted: allowed };
+          },
           setAudioModeAsync: async (mode: { allowsRecording: boolean }) => {
             calls.push(mode.allowsRecording ? 'microphone' : 'speaker');
           },
@@ -82,7 +105,12 @@ function nativeRecorder({ allowed = true, prepare = Promise.resolve() } = {}) {
       throw new Error(`Unexpected import ${name}`);
     },
   });
-  return { begin: module.exports.beginVoiceRecording, calls, options: () => options };
+  return {
+    begin: module.exports.beginVoiceRecording,
+    calls,
+    options: () => options,
+    permissionRequests: () => permissionRequests,
+  };
 }
 
 test('native recording prepares mono AAC and releases the recorder after obtaining a usable clip', async () => {
@@ -125,4 +153,37 @@ test('cancelling a held native recording releases it and removes the discarded f
   recording.cancel();
   assert.equal(native.calls.filter((call) => call === 'release').length, 1);
   assert.equal(native.calls.at(-1), 'delete');
+});
+
+test('existing microphone permission starts recording without reopening Android permission activity', async () => {
+  const native = nativeRecorder();
+  const recording = await native.begin(new AbortController().signal);
+  assert.equal(native.permissionRequests(), 0);
+  assert.ok(native.calls.includes('record'));
+  recording.cancel();
+});
+
+test('missing microphone permission is requested before preparing the recorder', async () => {
+  const native = nativeRecorder({ granted: false });
+  const recording = await native.begin(new AbortController().signal);
+  assert.equal(native.permissionRequests(), 1);
+  assert.ok(native.calls.includes('record'));
+  recording.cancel();
+});
+
+test('release during permission lookup never opens a permission prompt or recorder', async () => {
+  let resolve!: () => void;
+  const native = nativeRecorder({
+    granted: false,
+    permission: new Promise<void>((ready) => {
+      resolve = ready;
+    }),
+  });
+  const controller = new AbortController();
+  const starting = native.begin(controller.signal);
+  controller.abort();
+  resolve();
+  await assert.rejects(starting, /cancelled/);
+  assert.equal(native.permissionRequests(), 0);
+  assert.deepEqual(native.calls, []);
 });
