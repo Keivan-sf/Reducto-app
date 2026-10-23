@@ -64,6 +64,7 @@ import { saveVideoFile } from '../../lib/video-download';
 import { MessageMenu, type MessageMenuAction } from './MessageMenu';
 import { ChatHistoryScrollView } from './ChatHistoryScrollView';
 import { comparePosition } from '../../api/read-state';
+import { seenByAnotherMember } from '../../api/receipts';
 import { captureHistoryAnchor } from '../../lib/history-anchor';
 import { ChatTailFollow } from '../../lib/chat-tail-follow';
 
@@ -78,6 +79,7 @@ export default function ChatView({ id }: { id?: string }) {
     outgoing,
     outbox,
     members,
+    receiptPositions,
     loading,
     activate,
     acceptMessage,
@@ -1012,7 +1014,13 @@ export default function ChatView({ id }: { id?: string }) {
                                   ? 'Sending message'
                                   : message.delivery === 'failed'
                                     ? 'Message failed to send'
-                                    : 'Message sent'
+                                    : seenByAnotherMember(
+                                          message,
+                                          session!.user.id,
+                                          receiptPositions,
+                                        )
+                                      ? 'Message seen'
+                                      : 'Message sent'
                               }
                             >
                               {message.delivery === 'failed' ? (
@@ -1022,7 +1030,15 @@ export default function ChatView({ id }: { id?: string }) {
                               ) : (
                                 <Icon
                                   name={
-                                    message.delivery === 'sending' ? 'time-outline' : 'checkmark'
+                                    message.delivery === 'sending'
+                                      ? 'time-outline'
+                                      : seenByAnotherMember(
+                                            message,
+                                            session!.user.id,
+                                            receiptPositions,
+                                          )
+                                        ? 'checkmark-done'
+                                        : 'checkmark'
                                   }
                                   size={15}
                                   color={message.delivery === 'sending' ? colors.muted : '#6D9D62'}

@@ -597,6 +597,66 @@ async function mockRealtime(page: Page, accessToken = 'access-token') {
   };
 }
 
+test('outgoing ticks update when a group member sees a message and recover after reload', async ({
+  page,
+}, testInfo) => {
+  const firstSent = {
+    ...first,
+    id: 'outgoing-first',
+    senderId: user.id,
+    text: 'First outgoing message',
+  };
+  const secondSent = {
+    ...firstSent,
+    id: 'outgoing-second',
+    text: 'Second outgoing message',
+    createdAt: '2026-10-18T12:02:00Z',
+  };
+  let peerSeen: string | null = null;
+  await mockApi(page, [secondSent, firstSent]);
+  await page.route(`http://localhost:3001/api/conversations/${chat.id}/members`, (route) =>
+    route.fulfill({
+      json: {
+        members: [
+          { userId: user.id, conversationId: chat.id, role: 'owner' },
+          {
+            userId: 'friend',
+            conversationId: chat.id,
+            role: 'member',
+            lastSeenMessageId: peerSeen,
+          },
+        ],
+      },
+    }),
+  );
+  const realtime = await mockRealtime(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const firstStatus = page.getByTestId(`message-status-${firstSent.id}`);
+  const secondStatus = page.getByTestId(`message-status-${secondSent.id}`);
+  await expect(firstStatus).toHaveAttribute('aria-label', 'Message sent');
+  await expect(secondStatus).toHaveAttribute('aria-label', 'Message sent');
+
+  peerSeen = secondSent.id;
+  realtime.emit('conversation.seen', {
+    conversationId: chat.id,
+    userId: 'friend',
+    lastSeenMessageId: secondSent.id,
+  });
+  await expect(firstStatus).toHaveAttribute('aria-label', 'Message seen');
+  await expect(secondStatus).toHaveAttribute('aria-label', 'Message seen');
+
+  await page.reload();
+  if (testInfo.project.name === 'desktop') {
+    await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  }
+  await expect(page.getByTestId(`message-status-${firstSent.id}`)).toHaveAttribute(
+    'aria-label',
+    'Message seen',
+  );
+});
+
 test('sign in, send a message, edit profile, and sign out', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));

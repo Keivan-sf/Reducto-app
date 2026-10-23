@@ -22,6 +22,7 @@ import { MessageCache } from '../api/message-cache';
 import { useProfiles } from './ProfilesContext';
 import { ReadState } from '../api/read-state';
 import { MessageOutbox } from '../api/message-outbox';
+import { advanceReceipt, type ReceiptPositions } from '../api/receipts';
 
 interface ChatsState {
   conversations: Conversation[];
@@ -30,6 +31,7 @@ interface ChatsState {
   outbox: MessageOutbox;
   latestMessages: Record<string, Message | null>;
   members: Record<string, Member[]>;
+  receiptPositions: ReceiptPositions;
   unread: Record<string, number>;
   loading: boolean;
   connection: string;
@@ -63,6 +65,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
   const [outgoing, setOutgoing] = useState<Record<string, Message[]>>({});
   const [latestMessages, setLatestMessages] = useState<Record<string, Message | null>>({});
   const [members, setMembers] = useState<Record<string, Member[]>>({});
+  const [receiptPositions, setReceiptPositions] = useState<ReceiptPositions>({});
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [connection, setConnection] = useState('Connecting');
@@ -98,6 +101,25 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       ),
   );
   const lastRefreshAt = useRef(0);
+  const memberIds = useRef(new Map<string, Set<string>>());
+  const resolveReceipt = useCallback(
+    async (id: string, memberId: string, messageId: string) => {
+      const marker =
+        messageCache.peek(id, messageId) ??
+        (
+          await api.get<{ message: Message }>(
+            `/api/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`,
+          )
+        ).message;
+      if (marker?.id === messageId)
+        setReceiptPositions((current) =>
+          memberIds.current.get(id)?.has(memberId) === false
+            ? current
+            : advanceReceipt(current, id, memberId, marker),
+        );
+    },
+    [messageCache],
+  );
   const refreshSequence = useRef(0);
   const refreshFlight = useRef<Promise<void> | null>(null);
   const refreshQueued = useRef(false);
@@ -186,12 +208,17 @@ export function ChatsProvider({ children }: PropsWithChildren) {
           if (sequence !== refreshSequence.current) return;
           const allowed = new Set(chats.map((chat) => chat.id));
           knownChats.current = allowed;
+          for (const id of memberIds.current.keys())
+            if (!allowed.has(id)) memberIds.current.set(id, new Set());
           messageCache.prune(allowed);
           outbox.prune(allowed);
           setMessages((current) =>
             Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))),
           );
           setLatestMessages((current) =>
+            Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))),
+          );
+          setReceiptPositions((current) =>
             Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))),
           );
           if (activeRef.current && !allowed.has(activeRef.current)) activate(null);
@@ -211,8 +238,20 @@ export function ChatsProvider({ children }: PropsWithChildren) {
           for (const outcome of outcomes) {
             if (outcome.status === 'fulfilled') {
               const { id, people } = outcome.value;
+              memberIds.current.set(id, new Set(people.members.map((member) => member.userId)));
               void directory.getMany(people.members.map((member) => member.userId));
               setMembers((current) => ({ ...current, [id]: people.members }));
+              setReceiptPositions((current) => ({
+                ...current,
+                [id]: Object.fromEntries(
+                  Object.entries(current[id] ?? {}).filter(([memberId]) =>
+                    people.members.some((member) => member.userId === memberId),
+                  ),
+                ),
+              }));
+              for (const member of people.members)
+                if (member.userId !== userId && member.lastSeenMessageId)
+                  void resolveReceipt(id, member.userId, member.lastSeenMessageId).catch(() => {});
             } else failed = true;
           }
           const active = activeRef.current;
@@ -227,7 +266,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       refreshFlight.current = task;
       return task;
     },
-    [activate, directory, messageCache, fetchConversations, outbox],
+    [activate, directory, messageCache, fetchConversations, outbox, resolveReceipt, userId],
   );
   useEffect(() => {
     if (!token || !userId) return;
@@ -293,6 +332,15 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       if (!knownChats.current.has(message.conversationId)) sync();
     });
     socket.on(
+      'conversation.seen',
+      (event: { conversationId: string; userId: string; lastSeenMessageId: string }) => {
+        if (event.userId !== userId)
+          void resolveReceipt(event.conversationId, event.userId, event.lastSeenMessageId).catch(
+            () => {},
+          );
+      },
+    );
+    socket.on(
       'message.reaction_changed',
       (event: {
         conversationId: string;
@@ -323,7 +371,17 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       clearTimeout(readRefreshTimer);
       clearInterval(readPoll);
     };
-  }, [token, userId, acceptMessage, refresh, directory, messageCache, fetchConversations, outbox]);
+  }, [
+    token,
+    userId,
+    acceptMessage,
+    refresh,
+    directory,
+    messageCache,
+    fetchConversations,
+    outbox,
+    resolveReceipt,
+  ]);
   return (
     <Context.Provider
       value={{
@@ -333,6 +391,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
         outbox,
         latestMessages,
         members,
+        receiptPositions,
         unread,
         loading,
         connection,
