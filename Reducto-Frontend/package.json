@@ -52,6 +52,7 @@
     "test:e2e": "playwright test",
     "start": "expo start",
     "android": "expo start --android",
+    "android:dev": "node scripts/android-dev.mjs",
     "ios": "expo start --ios",
     "web": "expo start --web"
   },

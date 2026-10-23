@@ -10,6 +10,15 @@ import {
 import { redirectSystemPath } from '../src/app/+native-intent';
 
 const token = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
+test('native app launches route root URIs to the normal app entry', () => {
+  for (const path of ['reducto://', 'reducto:///', 'REDUCTO:///', 'reducto:///?source=launcher']) {
+    assert.equal(internalLinkPath(path), '/');
+    for (const initial of [true, false]) {
+      assert.equal(redirectSystemPath({ path, initial }), '/');
+    }
+  }
+  assert.equal(redirectSystemPath({ path: '/', initial: true }), '/');
+});
 test('group invites use a triple-slash app URI and support legacy pasted invites', () => {
   assert.equal(groupInviteUri(token), `reducto:///api/groups/join/${token}`);
   for (const input of [

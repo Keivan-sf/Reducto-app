@@ -2,7 +2,9 @@ import { useState, type ComponentProps, type PropsWithChildren } from 'react';
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -168,7 +170,12 @@ export function Dialog({
 }: PropsWithChildren<{ visible: boolean; title: string; onClose: () => void }>) {
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      {/* Modals have their own window, outside the root keyboard-avoiding view. */}
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        enabled={Platform.OS !== 'web'}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         <View style={styles.dialog}>
           <View style={styles.dialogHeader}>
             <Text style={styles.title}>{title}</Text>
@@ -181,7 +188,7 @@ export function Dialog({
             {children}
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

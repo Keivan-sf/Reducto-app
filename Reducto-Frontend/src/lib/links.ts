@@ -33,6 +33,8 @@ export function inviteTokenFromPath(path: string) {
   return path.match(/^\/api\/groups\/join\/([a-f0-9]{64})\/?$/)?.[1] ?? null;
 }
 export function internalLinkPath(value: string) {
+  // Expo Router supplies the app's root URI when launched from the home screen.
+  if (/^reducto:\/\/\/?(?:[?#].*)?$/i.test(value)) return '/';
   const token = /^reducto:\/\//i.test(value) ? groupInviteToken(value) : null;
   return token ? groupJoinPath(token) : '/unsupported-link';
 }

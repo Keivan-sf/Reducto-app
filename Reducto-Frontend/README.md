@@ -26,6 +26,40 @@ pnpm proxy http://YOUR_BACKEND_HOST:3000
 
 Then enter the proxy’s address (port 3001 by default) as the **Server URL** on the web login screen. The proxy target is supplied as a command argument; it is never taken from `API_TARGET`. `PROXY_PORT` controls only the local listening port. This proxy is a local development tool, not required for servers that support CORS.
 
+## Live Android debugging over ADB
+
+Connect your phone with USB or pair it using Android's Wireless debugging. Once
+`adb devices` lists it as `device`, run:
+
+```sh
+pnpm android:dev
+```
+
+This builds the native debug APK on the first run, installs it, forwards Metro
+(8081) and the local backend (3000) through ADB, and opens Reducto. It starts Metro
+if needed or reuses an existing server on 8081. Keep Metro running while testing.
+Save JavaScript/TypeScript changes for Fast Refresh on the phone. Shake the phone
+to open the development menu; use React Native DevTools from Metro to debug JS.
+The debug APK uses Reducto's own native configuration, including its Android
+keyboard/window behavior. It installs as an update to a locally signed release
+APK when the signing key matches, preserving app data.
+
+Enter `http://localhost:3000` as the server URL to use the forwarded local backend,
+or keep using your existing reachable server. Media URLs still need to be
+reachable from the phone. If a local media server advertises `localhost:9000`,
+also run `adb reverse tcp:9000 tcp:9000`.
+
+After changing native dependencies, app configuration, or config plugins, rebuild:
+
+```sh
+pnpm android:dev --build
+```
+
+Run `pnpm android:dev` again after reconnecting wireless debugging to restore the
+forwarding and reopen the app. If multiple devices are connected, select one with
+`ANDROID_SERIAL=<serial> pnpm android:dev`. Android builds use the existing Nix
+toolchain described below and select the connected phone's CPU architecture.
+
 ## Build an Android APK on NixOS
 
 From this directory, run:
