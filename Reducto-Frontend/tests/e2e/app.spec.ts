@@ -3964,6 +3964,93 @@ test('image viewer opens full screen, reuses cached bytes, closes with Back, Esc
   await expect(page.getByText('Forward to…', { exact: true })).toBeVisible();
 });
 
+test('image viewer zooms, pans, and only swipes closed at base zoom', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page, [{ ...first, attachment: { type: 'image', mediaId: 'zoom-photo' } }]);
+  await page.route('**/api/conversations/*/attachments/zoom-photo', (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.png'),
+      contentType: 'image/png',
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const open = page.getByRole('button', { name: 'Open image attachment', exact: true });
+  await open.click();
+  const viewer = page.getByTestId('image-viewer');
+  await expect(viewer.getByRole('img', { name: 'Full screen image' })).toBeVisible();
+  const surface = (await page.getByTestId('image-viewer-surface').boundingBox())!;
+  const x = surface.x + surface.width / 2;
+  const y = surface.y + surface.height / 2;
+  const transform = () =>
+    page.getByTestId('image-viewer-transform').evaluate((element) => {
+      const matrix = new DOMMatrix(getComputedStyle(element).transform);
+      return { scale: matrix.a, x: matrix.e, y: matrix.f };
+    });
+  const mobile = testInfo.project.name === 'mobile';
+  const cdp = mobile ? await page.context().newCDPSession(page) : undefined;
+  const doubleTap = async () => {
+    if (mobile) {
+      await page.touchscreen.tap(x, y);
+      await page.touchscreen.tap(x, y);
+    } else await page.mouse.dblclick(x, y);
+  };
+  const drag = async (dx: number, dy: number) => {
+    if (cdp) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: x + dx, y: y + dy }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } else {
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + dx, y + dy, { steps: 5 });
+      await page.mouse.up();
+    }
+  };
+  await doubleTap();
+  await expect.poll(async () => (await transform()).scale).toBe(2.5);
+  await drag(0, 140);
+  await expect(viewer).toBeVisible();
+  await expect.poll(async () => (await transform()).y).toBe(140);
+  await drag(0, -220);
+  await expect(viewer).toBeVisible();
+  await expect.poll(async () => (await transform()).y).toBe(-80);
+  await doubleTap();
+  await expect.poll(transform).toEqual({ scale: 1, x: 0, y: 0 });
+
+  if (cdp) {
+    const points = (span: number) => [
+      { x: x - span / 2, y, id: 1 },
+      { x: x + span / 2, y, id: 2 },
+    ];
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(80) });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(160) });
+    await expect.poll(async () => (await transform()).scale).toBeCloseTo(2);
+    // Pinch back to fit and keep dragging with the finger that remains down.
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(40) });
+    await expect.poll(async () => (await transform()).scale).toBe(1);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [{ x: x - 20, y, id: 1 }],
+    });
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: x - 20, y: y + 150, id: 1 }],
+    });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect(viewer).toBeVisible();
+  }
+  await drag(0, 140);
+  await expect(viewer).toHaveCount(0);
+  await open.click();
+  await expect.poll(transform).toEqual({ scale: 1, x: 0, y: 0 });
+  await cdp?.detach();
+});
+
 test('image viewer recovers from a failed download using Retry image', async ({ page }) => {
   await mockApi(page, [
     { ...first, text: null, attachment: { type: 'image', mediaId: 'retry-photo' } },

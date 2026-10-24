@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, IconButton } from '../../components/ui';
 import { saveLocalFile } from '../../lib/local-attachments';
 import { useCachedFile, useVideos, videoKey } from '../../context/VideosContext';
+import { ImageViewerGestures, type ImagePoint } from './image-viewer-gestures';
 
 export function ImageViewer({
   visible = true,
@@ -62,15 +63,42 @@ export function ImageViewer({
   }
   const imageFailed = failure.key === key && failure.visible === visible && failure.failed;
   const [offset] = useState(() => new Animated.Value(0));
-  const drag = useRef<{ x: number; y: number; dx: number; dy: number } | null>(null);
+  const [zoom] = useState(() => new Animated.Value(1));
+  const [panX] = useState(() => new Animated.Value(0));
+  const [panY] = useState(() => new Animated.Value(0));
+  const [gestures] = useState(
+    () =>
+      new ImageViewerGestures((transform) => {
+        offset.stopAnimation();
+        offset.setValue(transform.dismiss);
+        zoom.setValue(transform.scale);
+        panX.setValue(transform.x);
+        panY.setValue(transform.y);
+      }),
+  );
+  const pointers = useRef(new Map<number, ImagePoint>());
   useEffect(() => {
     if (visible) void download().catch(() => {});
   }, [download, visible]);
   useEffect(() => {
-    offset.stopAnimation();
-    offset.setValue(0);
-    drag.current = null;
-  }, [key, visible, offset]);
+    gestures.reset();
+    pointers.current.clear();
+  }, [key, visible, gestures]);
+  const imageUri = state.status === 'ready' ? state.file.uri : undefined;
+  useEffect(() => {
+    if (!imageUri) return;
+    let disposed = false;
+    Image.getSize(
+      imageUri,
+      (width, height) => {
+        if (!disposed) gestures.imageSize(width, height);
+      },
+      () => {},
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [imageUri, gestures]);
   useEffect(() => {
     if (!visible || Platform.OS !== 'web') return;
     const close = (event: KeyboardEvent) => {
@@ -82,28 +110,17 @@ export function ImageViewer({
     document.addEventListener('keydown', close, true);
     return () => document.removeEventListener('keydown', close, true);
   }, [onClose, visible]);
-  function start(x: number, y: number) {
-    offset.stopAnimation();
-    drag.current = { x, y, dx: 0, dy: 0 };
-  }
-  function move(x: number, y: number) {
-    const current = drag.current;
-    if (!current) return;
-    current.dx = x - current.x;
-    current.dy = y - current.y;
-    offset.setValue(Math.abs(current.dy) > Math.abs(current.dx) ? current.dy : 0);
+  function nativePoints(event: GestureResponderEvent) {
+    return event.nativeEvent.touches.map((touch) => ({
+      x: touch.locationX ?? touch.pageX,
+      y: touch.locationY ?? touch.pageY,
+    }));
   }
   function finish(cancelled = false) {
-    const current = drag.current;
-    drag.current = null;
-    if (
-      !cancelled &&
-      current &&
-      Math.abs(current.dy) >= 90 &&
-      Math.abs(current.dy) > Math.abs(current.dx)
-    ) {
-      onClose();
-    } else {
+    const dismiss = gestures.transform.dismiss;
+    if (gestures.finish(cancelled)) onClose();
+    else if (dismiss) {
+      offset.setValue(dismiss);
       Animated.spring(offset, {
         toValue: 0,
         useNativeDriver: true,
@@ -146,50 +163,62 @@ export function ImageViewer({
       <View
         testID="image-viewer-surface"
         style={[s.surface, Platform.OS === 'web' && webGestureStyle]}
+        onLayout={(event) => {
+          const { width, height } = event.nativeEvent.layout;
+          gestures.layout(width, height);
+          pointers.current.clear();
+        }}
         {...(Platform.OS === 'web'
           ? {
               onPointerDown: (raw: unknown) => {
-                const event = raw as {
-                  isPrimary: boolean;
-                  button: number;
-                  pageX: number;
-                  pageY: number;
-                  pointerId: number;
-                  currentTarget: HTMLElement;
-                  target: HTMLElement;
-                };
+                const event = raw as ViewerPointerEvent;
                 // Let Retry and other controls receive their own pointer-up.
                 if (event.target.closest('button, [role="button"]')) return;
-                if (!event.isPrimary || event.button !== 0) {
-                  finish(true);
-                  return;
-                }
+                if (event.button !== 0) return;
                 event.currentTarget.setPointerCapture(event.pointerId);
-                start(event.pageX, event.pageY);
+                pointers.current.set(event.pointerId, pointerPoint(event));
+                gestures.update([...pointers.current.values()]);
               },
               onPointerMove: (raw: unknown) => {
-                const event = raw as { pageX: number; pageY: number; isPrimary: boolean };
-                if (event.isPrimary) move(event.pageX, event.pageY);
+                const event = raw as ViewerPointerEvent;
+                if (!pointers.current.has(event.pointerId)) return;
+                pointers.current.set(event.pointerId, pointerPoint(event));
+                gestures.update([...pointers.current.values()]);
               },
-              onPointerUp: () => finish(),
-              onPointerCancel: () => finish(true),
-              onLostPointerCapture: () => {
-                if (drag.current) finish(true);
+              onPointerUp: (raw: unknown) => {
+                const event = raw as ViewerPointerEvent;
+                if (!pointers.current.has(event.pointerId)) return;
+                pointers.current.set(event.pointerId, pointerPoint(event));
+                gestures.update([...pointers.current.values()]);
+                pointers.current.delete(event.pointerId);
+                if (pointers.current.size) gestures.update([...pointers.current.values()]);
+                else finish();
+              },
+              onPointerCancel: () => {
+                pointers.current.clear();
+                finish(true);
+              },
+              onLostPointerCapture: (raw: unknown) => {
+                const event = raw as ViewerPointerEvent;
+                if (pointers.current.has(event.pointerId)) {
+                  pointers.current.clear();
+                  finish(true);
+                }
               },
             }
           : {
               onStartShouldSetResponder: () => true,
               onResponderGrant: (event: GestureResponderEvent) => {
-                start(event.nativeEvent.pageX, event.nativeEvent.pageY);
+                gestures.update(nativePoints(event));
                 return true;
               },
-              onResponderMove: (event: GestureResponderEvent) => {
-                const touches = event.nativeEvent.touches;
-                if (touches.length !== 1) {
-                  finish(true);
-                  return;
-                }
-                move(touches[0].pageX, touches[0].pageY);
+              onResponderStart: (event: GestureResponderEvent) =>
+                gestures.update(nativePoints(event)),
+              onResponderMove: (event: GestureResponderEvent) =>
+                gestures.update(nativePoints(event)),
+              onResponderEnd: (event: GestureResponderEvent) => {
+                const points = nativePoints(event);
+                if (points.length) gestures.update(points);
               },
               onResponderRelease: () => finish(),
               onResponderTerminationRequest: () => false,
@@ -201,13 +230,23 @@ export function ImageViewer({
             pointerEvents="none"
             style={[StyleSheet.absoluteFill, { transform: [{ translateY: offset }] }]}
           >
-            <Image
-              accessibilityLabel="Full screen image"
-              source={{ uri: state.file.uri }}
-              resizeMode="contain"
-              style={StyleSheet.absoluteFill}
-              onError={() => setFailure({ key, visible, failed: true })}
-            />
+            <Animated.View
+              testID="image-viewer-transform"
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  transform: [{ translateX: panX }, { translateY: panY }, { scale: zoom }],
+                },
+              ]}
+            >
+              <Image
+                accessibilityLabel="Full screen image"
+                source={{ uri: state.file.uri }}
+                resizeMode="contain"
+                style={StyleSheet.absoluteFill}
+                onError={() => setFailure({ key, visible, failed: true })}
+              />
+            </Animated.View>
           </Animated.View>
         ) : (
           <View style={s.loading}>
@@ -235,6 +274,18 @@ export function ImageViewer({
       {!!caption && <Text style={s.caption}>{caption}</Text>}
     </SafeAreaView>
   );
+}
+type ViewerPointerEvent = {
+  button: number;
+  clientX: number;
+  clientY: number;
+  pointerId: number;
+  currentTarget: HTMLElement;
+  target: HTMLElement;
+};
+function pointerPoint(event: ViewerPointerEvent): ImagePoint {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
 }
 const webGestureStyle = { touchAction: 'none', userSelect: 'none', cursor: 'auto' } as const;
 const s = StyleSheet.create({
