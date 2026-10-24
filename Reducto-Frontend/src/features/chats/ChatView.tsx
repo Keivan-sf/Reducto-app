@@ -49,6 +49,7 @@ import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
 import { GifDialog } from './GifDialog';
 import { MessageText } from './MessageText';
+import { MessageBubbleContent } from './MessageBubbleContent';
 import { GifPreview } from './GifPreview';
 import { useGifs } from '../../context/GifsContext';
 import { ReplyPreview, ReplyQuote } from './ReplyPreview';
@@ -944,6 +945,12 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
               const mine = message.senderId === session!.user.id;
               const mediaMetadata = messageMedia(message);
               const gifMetadata = messageGif(message);
+              const visualMedia =
+                !!message.attachment && ['image', 'gif', 'video'].includes(message.attachment.type);
+              const hasMediaHeader =
+                (!mine && chat.type === 'group') ||
+                !!message.forwardedFrom ||
+                !!message.replyToMessageId;
               const older = shown[index + 1];
               const dateStart =
                 !older ||
@@ -954,6 +961,62 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                 count:
                   message.reactions?.filter((reaction) => reaction.emoji === emoji).length ?? 0,
               })).filter((entry) => entry.count);
+              const messageMeta = (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Message actions"
+                  testID={`message-meta-${message.id}`}
+                  onPress={(event) => openMessageMenu(message, event)}
+                  onLongPress={(event) => openMessageMenu(message, event)}
+                  style={visualMedia && s.mediaMeta}
+                >
+                  <View style={[s.meta, visualMedia && { marginTop: 0 }]}>
+                    <Text style={[s.time, visualMedia && s.mediaTime]}>
+                      {message.isEdited ? 'edited ' : ''}
+                      {timeLabel(message.createdAt)}
+                    </Text>
+                    {mine && (
+                      <View
+                        testID={`message-status-${message.id}`}
+                        accessible
+                        accessibilityLabel={
+                          message.delivery === 'sending'
+                            ? 'Sending message'
+                            : message.delivery === 'failed'
+                              ? 'Message failed to send'
+                              : seenByAnotherMember(message, session!.user.id, receiptPositions)
+                                ? 'Message seen'
+                                : 'Message sent'
+                        }
+                      >
+                        {message.delivery === 'failed' ? (
+                          <Text style={{ color: '#E53935', fontWeight: '800', fontSize: 15 }}>
+                            !
+                          </Text>
+                        ) : (
+                          <Icon
+                            name={
+                              message.delivery === 'sending'
+                                ? 'time-outline'
+                                : seenByAnotherMember(message, session!.user.id, receiptPositions)
+                                  ? 'checkmark-done'
+                                  : 'checkmark'
+                            }
+                            size={15}
+                            color={
+                              visualMedia
+                                ? 'white'
+                                : message.delivery === 'sending'
+                                  ? colors.muted
+                                  : '#6D9D62'
+                            }
+                          />
+                        )}
+                      </View>
+                    )}
+                  </View>
+                </Pressable>
+              );
               return (
                 <View>
                   {dateStart && (
@@ -996,196 +1059,168 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                       style={[
                         s.bubble,
                         mine ? s.outgoing : s.incoming,
+                        visualMedia && s.mediaBubble,
                         highlighted === message.id && { backgroundColor: '#FFF0B3' },
                       ]}
                     >
-                      {!mine && chat.type === 'group' && (
-                        <Text style={s.sender}>{profileName(profiles[message.senderId])}</Text>
-                      )}
-                      {!!message.forwardedFrom && (
-                        <Text style={s.forwarded}>
-                          Forwarded from {profileName(profiles[message.forwardedFrom.senderId])}
-                        </Text>
-                      )}
-                      {!!message.replyToMessageId && (
-                        <ReplyPreview
-                          conversationId={id}
-                          messageId={message.replyToMessageId}
-                          onJump={(target) => void jumpToMessage(target)}
-                        />
-                      )}
-                      {message.attachment?.type === 'voice' ? (
-                        <VoiceMessage
-                          onSeekingChange={onVoiceSeekingChange}
-                          conversationId={id}
-                          senderId={message.senderId}
-                          mediaId={message.attachment.mediaId}
-                          metadata={mediaMetadata}
-                          active={
-                            focused && !voiceActive && !gifs && visibleMessages.has(message.id)
-                          }
-                          onOptions={(event) => openMessageMenu(message, event)}
-                          onError={setError}
-                        />
-                      ) : message.attachment?.type === 'video' ? (
-                        <VideoCard
-                          conversationId={id}
-                          mediaId={message.attachment.mediaId}
-                          initialMetadata={mediaMetadata}
-                          active={focused && visibleMessages.has(message.id)}
-                          onPlay={() => {
-                            if (message.attachment?.type !== 'video') return;
-                            voicePlayback.pause();
-                            viewers.openVideo({
-                              conversationId: id,
-                              mediaId: message.attachment.mediaId,
-                              title,
-                            });
-                          }}
-                          onOptions={(event) => openMessageMenu(message, event)}
-                          onError={setError}
-                        />
-                      ) : message.attachment ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Open ${message.attachment.type} attachment`}
-                          onPress={(event) => {
-                            if (message.attachment?.type === 'image') {
-                              event.stopPropagation();
-                              viewers.openImage({
-                                conversationId: id,
-                                mediaId: message.attachment.mediaId,
-                                title: profileName(profiles[message.senderId]),
-                                createdAt: message.createdAt,
-                                caption: message.text,
-                                onForward: () => {
-                                  setActionMessage(message);
-                                  setForward(true);
-                                },
-                              });
-                            } else if (message.attachment?.type === 'gif') {
-                              event.stopPropagation();
-                              viewers.openGif({
-                                gifId: message.attachment.gifId,
-                                title: profileName(profiles[message.senderId]),
-                                createdAt: message.createdAt,
-                                caption: message.text,
-                                onForward: () => {
-                                  setActionMessage(message);
-                                  setForward(true);
-                                },
-                              });
-                            } else openMessageMenu(message, event);
-                          }}
-                          onLongPress={(event) => openMessageMenu(message, event)}
-                          style={s.attachment}
-                        >
-                          {message.attachment.type === 'image' && (
-                            <AttachmentImage
-                              conversationId={id}
-                              mediaId={message.attachment.mediaId}
-                              initialMetadata={mediaMetadata}
-                            />
-                          )}
-                          {message.attachment.type === 'gif' && (
-                            <GifPreview
-                              gifId={message.attachment.gifId}
-                              initialMetadata={gifMetadata}
-                              active={focused && !gifs && visibleMessages.has(message.id)}
-                            />
-                          )}
-                          {!['image', 'gif'].includes(message.attachment.type) && (
-                            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-                              <Icon
-                                name={
-                                  ['audio', 'music'].includes(message.attachment.type)
-                                    ? 'musical-notes-outline'
-                                    : 'document-outline'
-                                }
-                                color={colors.blue}
-                              />
-                              <Text style={{ color: '#3974A8', fontSize: 13 }}>
-                                {message.attachment.type}
-                                {message.attachment.type === 'music' &&
-                                mediaMetadata?.durationSeconds
-                                  ? ` · ${videoTime(mediaMetadata.durationSeconds)}`
-                                  : ''}
-                              </Text>
-                            </View>
-                          )}
-                        </Pressable>
-                      ) : null}
-                      {!!message.text && (
-                        <MessageText
-                          text={message.text}
-                          style={s.messageText}
-                          onError={setError}
-                          onMessagePress={(event) => openMessageMenu(message, event)}
-                        />
-                      )}
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Message actions"
-                        onPress={(event) => openMessageMenu(message, event)}
-                        onLongPress={(event) => openMessageMenu(message, event)}
-                      >
-                        <View style={s.meta}>
-                          <Text style={s.time}>
-                            {message.isEdited ? 'edited ' : ''}
-                            {timeLabel(message.createdAt)}
-                          </Text>
-                          {mine && (
-                            <View
-                              testID={`message-status-${message.id}`}
-                              accessible
-                              accessibilityLabel={
-                                message.delivery === 'sending'
-                                  ? 'Sending message'
-                                  : message.delivery === 'failed'
-                                    ? 'Message failed to send'
-                                    : seenByAnotherMember(
-                                          message,
-                                          session!.user.id,
-                                          receiptPositions,
-                                        )
-                                      ? 'Message seen'
-                                      : 'Message sent'
-                              }
-                            >
-                              {message.delivery === 'failed' ? (
-                                <Text style={{ color: '#E53935', fontWeight: '800', fontSize: 15 }}>
-                                  !
+                      <MessageBubbleContent
+                        visualMedia={visualMedia}
+                        meta={messageMeta}
+                        header={
+                          hasMediaHeader && (
+                            <>
+                              {!mine && chat.type === 'group' && (
+                                <Text style={s.sender}>
+                                  {profileName(profiles[message.senderId])}
                                 </Text>
-                              ) : (
-                                <Icon
-                                  name={
-                                    message.delivery === 'sending'
-                                      ? 'time-outline'
-                                      : seenByAnotherMember(
-                                            message,
-                                            session!.user.id,
-                                            receiptPositions,
-                                          )
-                                        ? 'checkmark-done'
-                                        : 'checkmark'
-                                  }
-                                  size={15}
-                                  color={message.delivery === 'sending' ? colors.muted : '#6D9D62'}
+                              )}
+                              {!!message.forwardedFrom && (
+                                <Text style={s.forwarded}>
+                                  Forwarded from{' '}
+                                  {profileName(profiles[message.forwardedFrom.senderId])}
+                                </Text>
+                              )}
+                              {!!message.replyToMessageId && (
+                                <ReplyPreview
+                                  conversationId={id}
+                                  messageId={message.replyToMessageId}
+                                  onJump={(target) => void jumpToMessage(target)}
                                 />
                               )}
-                            </View>
-                          )}
-                        </View>
-                        {!!reactions.length && (
-                          <View style={s.reactions}>
-                            {reactions.map((reaction) => (
-                              <Text key={reaction.emoji} style={s.reaction}>
-                                {reaction.emoji} {reaction.count}
-                              </Text>
-                            ))}
-                          </View>
-                        )}
-                      </Pressable>
+                            </>
+                          )
+                        }
+                        caption={
+                          !!message.text && (
+                            <MessageText
+                              text={message.text}
+                              style={s.messageText}
+                              onError={setError}
+                              onMessagePress={(event) => openMessageMenu(message, event)}
+                            />
+                          )
+                        }
+                        reactions={
+                          !!reactions.length && (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel="Message actions"
+                              onPress={(event) => openMessageMenu(message, event)}
+                              onLongPress={(event) => openMessageMenu(message, event)}
+                            >
+                              <View style={s.reactions}>
+                                {reactions.map((reaction) => (
+                                  <Text key={reaction.emoji} style={s.reaction}>
+                                    {reaction.emoji} {reaction.count}
+                                  </Text>
+                                ))}
+                              </View>
+                            </Pressable>
+                          )
+                        }
+                      >
+                        {message.attachment?.type === 'voice' ? (
+                          <VoiceMessage
+                            onSeekingChange={onVoiceSeekingChange}
+                            conversationId={id}
+                            senderId={message.senderId}
+                            mediaId={message.attachment.mediaId}
+                            metadata={mediaMetadata}
+                            active={
+                              focused && !voiceActive && !gifs && visibleMessages.has(message.id)
+                            }
+                            onOptions={(event) => openMessageMenu(message, event)}
+                            onError={setError}
+                          />
+                        ) : message.attachment?.type === 'video' ? (
+                          <VideoCard
+                            conversationId={id}
+                            mediaId={message.attachment.mediaId}
+                            initialMetadata={mediaMetadata}
+                            active={focused && visibleMessages.has(message.id)}
+                            onPlay={() => {
+                              if (message.attachment?.type !== 'video') return;
+                              voicePlayback.pause();
+                              viewers.openVideo({
+                                conversationId: id,
+                                mediaId: message.attachment.mediaId,
+                                title,
+                              });
+                            }}
+                            onOptions={(event) => openMessageMenu(message, event)}
+                            onError={setError}
+                          />
+                        ) : message.attachment ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open ${message.attachment.type} attachment`}
+                            onPress={(event) => {
+                              if (message.attachment?.type === 'image') {
+                                event.stopPropagation();
+                                viewers.openImage({
+                                  conversationId: id,
+                                  mediaId: message.attachment.mediaId,
+                                  title: profileName(profiles[message.senderId]),
+                                  createdAt: message.createdAt,
+                                  caption: message.text,
+                                  onForward: () => {
+                                    setActionMessage(message);
+                                    setForward(true);
+                                  },
+                                });
+                              } else if (message.attachment?.type === 'gif') {
+                                event.stopPropagation();
+                                viewers.openGif({
+                                  gifId: message.attachment.gifId,
+                                  title: profileName(profiles[message.senderId]),
+                                  createdAt: message.createdAt,
+                                  caption: message.text,
+                                  onForward: () => {
+                                    setActionMessage(message);
+                                    setForward(true);
+                                  },
+                                });
+                              } else openMessageMenu(message, event);
+                            }}
+                            onLongPress={(event) => openMessageMenu(message, event)}
+                            style={s.attachment}
+                          >
+                            {message.attachment.type === 'image' && (
+                              <AttachmentImage
+                                conversationId={id}
+                                mediaId={message.attachment.mediaId}
+                                initialMetadata={mediaMetadata}
+                              />
+                            )}
+                            {message.attachment.type === 'gif' && (
+                              <GifPreview
+                                gifId={message.attachment.gifId}
+                                initialMetadata={gifMetadata}
+                                active={focused && !gifs && visibleMessages.has(message.id)}
+                              />
+                            )}
+                            {!['image', 'gif'].includes(message.attachment.type) && (
+                              <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                                <Icon
+                                  name={
+                                    ['audio', 'music'].includes(message.attachment.type)
+                                      ? 'musical-notes-outline'
+                                      : 'document-outline'
+                                  }
+                                  color={colors.blue}
+                                />
+                                <Text style={{ color: '#3974A8', fontSize: 13 }}>
+                                  {message.attachment.type}
+                                  {message.attachment.type === 'music' &&
+                                  mediaMetadata?.durationSeconds
+                                    ? ` · ${videoTime(mediaMetadata.durationSeconds)}`
+                                    : ''}
+                                </Text>
+                              </View>
+                            )}
+                          </Pressable>
+                        ) : null}
+                      </MessageBubbleContent>
                     </View>
                   </Pressable>
                 </View>
@@ -1418,6 +1453,17 @@ const s = StyleSheet.create({
     borderRadius: 15,
     boxShadow: '0 1px 2px #17212B0A',
   },
+  mediaBubble: { padding: 2 },
+  mediaMeta: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    backgroundColor: '#00000066',
+    borderRadius: 12,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  mediaTime: { color: 'white', fontSize: 11 },
   outgoing: { backgroundColor: colors.green, borderBottomRightRadius: 4 },
   incoming: { backgroundColor: 'white', borderBottomLeftRadius: 4 },
   messageText: { color: '#243444', fontSize: 15, lineHeight: 22 },

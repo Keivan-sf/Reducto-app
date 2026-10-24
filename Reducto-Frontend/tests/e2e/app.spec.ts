@@ -1,9 +1,88 @@
-import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
+import { expect, test, type Locator, type Page, type WebSocketRoute } from '@playwright/test';
 import path from 'node:path';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 const inviteToken = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
 const inviteUri = `reducto:///api/groups/join/${inviteToken}`;
+
+async function expectMediaBubble(page: Page, frame: Locator) {
+  const bubble = page.getByTestId(`message-${first.id}`);
+  const meta = page.getByTestId(`message-meta-${first.id}`);
+  await expect(meta).toHaveCSS('position', 'absolute');
+  await expect(meta).toHaveCSS('background-color', 'rgba(0, 0, 0, 0.4)');
+  await expect
+    .poll(async () => {
+      const [outer, media, badge] = await Promise.all([
+        bubble.boundingBox(),
+        frame.boundingBox(),
+        meta.boundingBox(),
+      ]);
+      return (
+        !!outer &&
+        !!media &&
+        !!badge &&
+        Math.abs(media.x - outer.x - 2) < 1 &&
+        Math.abs(outer.width - media.width - 4) < 1 &&
+        Math.abs(media.x + media.width - badge.x - badge.width - 6) < 1 &&
+        Math.abs(media.y + media.height - badge.y - badge.height - 6) < 1 &&
+        badge.x >= media.x &&
+        badge.y >= media.y
+      );
+    })
+    .toBe(true);
+}
+
+for (const type of ['image', 'gif', 'video'] as const) {
+  test(`forwarded ${type} bubbles keep headers and captions within the media width`, async ({
+    page,
+  }) => {
+    const mediaId = 'forwarded-media';
+    const caption =
+      'A long forwarded media caption that should wrap inside the narrow portrait bubble.';
+    await mockApi(page, [
+      {
+        ...first,
+        senderId: user.id,
+        text: caption,
+        forwardedFrom: { senderId: friend.id, messageId: first.id, conversationId: chat.id },
+        attachment: type === 'gif' ? { type, gifId: mediaId } : { type, mediaId },
+        attachmentMetadata: {
+          id: mediaId,
+          type,
+          width: 120,
+          height: 240,
+          fileSize: 100,
+          contentType: type === 'image' ? 'image/png' : 'video/mp4',
+          playbackUrl: 'https://media.example/forwarded.mp4',
+          thumbnailUrl: null,
+        },
+        reactions: [{ userId: friend.id, emoji: '👍' }],
+      },
+    ]);
+    await page.route(`**/api/conversations/*/attachments/${mediaId}`, (route) => route.abort());
+    await page.route('https://media.example/forwarded.mp4', (route) => route.abort());
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const frame =
+      type === 'video'
+        ? page.getByTestId(`video-card-${mediaId}`)
+        : page.getByLabel(type === 'image' ? 'Image preview' : 'GIF preview', { exact: true });
+    await expectMediaBubble(page, frame);
+    await expect(page.getByTestId(`message-status-${first.id}`)).toHaveAccessibleName(
+      'Message sent',
+    );
+    const bubble = page.getByTestId(`message-${first.id}`);
+    for (const text of [
+      bubble.getByText('Forwarded from Grace Hopper'),
+      bubble.getByText(caption),
+    ]) {
+      await expect(text).toBeVisible();
+      const [label, media] = await Promise.all([text.boundingBox(), frame.boundingBox()]);
+      expect(label!.x).toBeGreaterThanOrEqual(media!.x);
+      expect(label!.x + label!.width).toBeLessThanOrEqual(media!.x + media!.width);
+    }
+  });
+}
 
 test('message metadata sizes unloaded media and shows durations without detail requests', async ({
   page,
@@ -355,6 +434,7 @@ for (const portrait of [false, true]) {
       )
       .toBe(true);
     await expect(video).toHaveCSS('object-fit', 'contain');
+    await expectMediaBubble(page, video);
   });
 }
 
@@ -372,6 +452,7 @@ for (const panorama of [false, true]) {
     await signIn(page);
     await page.getByRole('button', { name: 'Open Weekend plans' }).click();
     const frame = page.getByLabel('Image preview', { exact: true });
+    await expectMediaBubble(page, frame);
     await expect
       .poll(async () => {
         const box = await frame.boundingBox();
@@ -2640,6 +2721,7 @@ test('video cards use server thumbnails without downloading and open the full-pa
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const card = page.getByTestId(`video-card-${mediaId}`);
+  await expectMediaBubble(page, card);
   await expect(card.getByRole('img', { name: 'Video thumbnail' })).toBeVisible();
   await expect(card.locator('video')).toHaveCount(0);
   await expect(card.getByRole('button', { name: 'Download video', exact: true })).toBeVisible();
@@ -3015,6 +3097,7 @@ test('historical video metadata without dimensions or thumbnails keeps a square 
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const card = page.getByTestId(`video-card-${mediaId}`);
+  await expectMediaBubble(page, card);
   await expect(card.getByRole('button', { name: 'Play video', exact: true })).toBeVisible();
   const box = (await card.boundingBox())!;
   expect(box.width / box.height).toBeCloseTo(1, 2);
