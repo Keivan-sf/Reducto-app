@@ -82,6 +82,8 @@ import { seenByAnotherMember } from '../../api/receipts';
 import { captureHistoryAnchor } from '../../lib/history-anchor';
 import { ChatTailFollow } from '../../lib/chat-tail-follow';
 import { ScrollToLatestButton } from './ScrollToLatestButton';
+import { oldestMention } from '../../api/mentions';
+import { useMentionVisibility } from './useMentionVisibility';
 
 const readViewabilityConfig = { minimumViewTime: 350, viewAreaCoveragePercentThreshold: 60 };
 
@@ -105,6 +107,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     messageCache,
     readVisible,
     getReadState,
+    markMentionSeen,
   } = useChats();
   const voicePlayback = useVoicePlayback();
   const routeFocused = useIsFocused();
@@ -137,6 +140,8 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [jumping, setJumping] = useState(false);
+  const mentionFlight = useRef(false);
+  const [mentionBusy, setMentionBusy] = useState(false);
   const jumpSequence = useRef(0);
   const scrollTarget = useRef<{ id: string; index: number; attempts: number } | null>(null);
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -186,6 +191,22 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
   const [openingHistory, setOpeningHistory] = useState(true);
   const initialReadTarget = useRef<string | null>(null);
+  const mentionVisibility = useMentionVisibility({
+    enabled:
+      !!id &&
+      focused &&
+      !openingHistory &&
+      !jumping &&
+      !jumpTarget &&
+      !details &&
+      !profileUserId &&
+      !gifs &&
+      !actionsVisible,
+    mentions: chat?.unseenMentions,
+    markSeen: (messageId) => markMentionSeen(id!, messageId),
+    onError: setError,
+    viewers,
+  });
   useEffect(() => {
     const report = () => {
       if (
@@ -196,7 +217,8 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         profileUserId ||
         gifs ||
         viewers.isOpen() ||
-        actionsVisible
+        actionsVisible ||
+        AppState.currentState !== 'active'
       )
         return;
       readVisible(
@@ -401,11 +423,37 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         setJumpTarget(null);
         scrollTarget.current = null;
       }, 3000);
+      return true;
     } catch (err) {
       if (sequence === jumpSequence.current) setError((err as Error).message);
     } finally {
       if (sequence === jumpSequence.current) setJumping(false);
     }
+  }
+  async function jumpToMention() {
+    if (!id || mentionFlight.current) return;
+    mentionFlight.current = true;
+    setMentionBusy(true);
+    setError('');
+    const sequence = jumpSequence.current;
+    try {
+      const messageId = await oldestMention(chat?.unseenMentions ?? [], (messageId) =>
+        messageCache.message(id, messageId),
+      );
+      if (sequence !== jumpSequence.current) {
+        mentionFlight.current = false;
+        setMentionBusy(false);
+        return;
+      }
+      if (messageId) {
+        mentionVisibility.retry(messageId);
+        await jumpToMessage(messageId);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    }
+    mentionFlight.current = false;
+    setMentionBusy(false);
   }
   function scrollLoadedLatest() {
     if (jumpWindow || search !== null || jumpTarget || (id && messageCache.hasNewer(id)))
@@ -922,6 +970,8 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
       )}
       <View style={{ flex: 1 }}>
         <View
+          ref={(view) => mentionVisibility.setViewport(view)}
+          collapsable={false}
           testID="positioned-chat-history"
           style={{ flex: 1, opacity: openingHistory ? 0 : 1 }}
           pointerEvents={openingHistory ? 'none' : 'auto'}
@@ -940,7 +990,10 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
             keyExtractor={(message) => message.id}
             keyboardShouldPersistTaps="handled"
             onScrollBeginDrag={cancelPositioning}
-            onLayout={() => tailFollow.layout()}
+            onLayout={() => {
+              tailFollow.layout();
+              mentionVisibility.schedule();
+            }}
             scrollEventThrottle={16}
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={readViewabilityConfig}
@@ -963,6 +1016,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
             onStartReached={() => void expandWindow(false)}
             onStartReachedThreshold={0.5}
             onScroll={({ nativeEvent }) => {
+              mentionVisibility.schedule();
               const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
               historyMetrics.current = {
                 offset: contentOffset.y,
@@ -976,6 +1030,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
               loadVisibleEdges();
             }}
             onContentSizeChange={(_width, height) => {
+              mentionVisibility.schedule();
               historyMetrics.current.height = height;
               tailFollow.layout();
               loadVisibleEdges();
@@ -1107,6 +1162,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                   )}
                   <Pressable
                     accessible={false}
+                    ref={(view) => mentionVisibility.register(message.id, view)}
                     testID={`message-row-${message.id}`}
                     onPress={(event) => openMessageMenu(message, event)}
                     onLongPress={(event) => openMessageMenu(message, event)}
@@ -1324,13 +1380,21 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           </View>
         )}
         <ScrollToLatestButton
+          mention
+          raised
+          visible={!openingHistory && search === null && !!chat?.unseenMentions?.length}
+          unreadCount={chat?.unseenMentions?.length ?? 0}
+          disabled={jumping || seekingVoice || mentionBusy}
+          onPress={() => void jumpToMention()}
+        />
+        <ScrollToLatestButton
           visible={
             !openingHistory &&
             search === null &&
             (awayFromBottom || (jumpWindow?.hasMoreAfter ?? hasNewer(id ?? '')))
           }
           unreadCount={unread[id ?? ''] ?? 0}
-          disabled={jumping || seekingVoice}
+          disabled={jumping || seekingVoice || mentionBusy}
           onPressIn={scrollLoadedLatest}
           onPress={() => void showLatest()}
         />

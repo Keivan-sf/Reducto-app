@@ -31,6 +31,13 @@ export interface Conversation {
   inviteLink?: string;
   lastSeenMessageId?: string | null;
   unreadCount?: number;
+  unseenMentions?: Mention[];
+}
+export interface Mention {
+  userId: string;
+  conversationId: string;
+  messageId: string;
+  seen: boolean;
 }
 export interface SeenState {
   lastSeenMessageId: string | null;

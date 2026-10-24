@@ -613,6 +613,152 @@ async function signIn(page: Page) {
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 }
 
+test('unseen mentions jump oldest first, mark only visible targets, and disappear when exhausted', async ({
+  page,
+}) => {
+  const history = Array.from({ length: 130 }, (_, index) => ({
+    ...first,
+    id: `mention-${String(130 - index).padStart(3, '0')}`,
+    text: `Message ${index} @ada`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history);
+  const realtime = await mockRealtime(page);
+  let mentions = [history[80], history[5]].map((message) => ({
+    userId: user.id,
+    conversationId: chat.id,
+    messageId: message.id,
+    seen: false,
+  }));
+  const marked: string[] = [];
+  let failSeen = true;
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [
+          { ...chat, lastSeenMessageId: history[129].id, unreadCount: 5, unseenMentions: mentions },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/conversations/*/messages/*', (route) => {
+    const message = history.find((entry) => route.request().url().endsWith(`/${entry.id}`));
+    return message ? route.fulfill({ json: { message } }) : route.fallback();
+  });
+  await page.route('**/api/conversations/*/mentions/*/seen', async (route) => {
+    expect(route.request().method()).toBe('PUT');
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    const mention = mentions.find((entry) =>
+      route.request().url().includes(`/${entry.messageId}/`),
+    )!;
+    await expect(page.getByTestId(`message-${mention.messageId}`)).toBeInViewport();
+    if (failSeen) {
+      failSeen = false;
+      return route.fulfill({ status: 500, json: { error: 'Mention update failed' } });
+    }
+    marked.push(mention.messageId);
+    mentions = mentions.filter((entry) => entry !== mention);
+    return route.fulfill({ json: { mention: { ...mention, seen: true } } });
+  });
+  await signIn(page);
+  await expect(page.getByTestId(`mentions-${chat.id}`)).toBeVisible();
+  const mentionBadge = await page.getByTestId(`mentions-${chat.id}`).boundingBox();
+  const unreadBadge = await page.getByTestId(`unread-${chat.id}`).boundingBox();
+  expect(mentionBadge!.x + mentionBadge!.width).toBeLessThan(unreadBadge!.x);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const jump = page.getByTestId('jump-to-mention');
+  await expect(page.getByTestId('unseen-mentions-count')).toHaveText('2');
+  expect(marked).toEqual([]);
+  await jump.click();
+  await expect(page.getByText('Mention update failed', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('unseen-mentions-count')).toHaveText('2');
+  await jump.click();
+  await expect.poll(() => marked).toEqual([history[5].id]);
+  await expect(page.getByTestId('unseen-mentions-count')).toHaveText('1');
+  await expect(page.getByTestId('scroll-to-latest')).toBeVisible();
+  const [mentionButton, latestButton] = await Promise.all([
+    jump.boundingBox(),
+    page.getByTestId('scroll-to-latest').boundingBox(),
+  ]);
+  expect(mentionButton!.y + mentionButton!.height).toBeLessThan(latestButton!.y);
+  await jump.click();
+  await expect.poll(() => marked).toEqual([history[5].id, history[80].id]);
+  await expect(jump).toBeHidden();
+  mentions = [
+    { userId: user.id, conversationId: chat.id, messageId: history[100].id, seen: false },
+  ];
+  await expect.poll(realtime.connections).toBeGreaterThan(0);
+  realtime.emit('mention.created', { mention: mentions[0] });
+  realtime.emit('mention.created', { mention: mentions[0] });
+  realtime.emit('mention.created', {
+    mention: { ...mentions[0], userId: 'someone-else', messageId: history[101].id },
+  });
+  await expect(page.getByTestId('unseen-mentions-count')).toHaveText('1');
+  await jump.click();
+  await expect.poll(() => marked).toEqual([history[5].id, history[80].id, history[100].id]);
+  await expect(jump).toBeHidden();
+});
+
+test('visible mentions are seen on opening, scrolling, and realtime delivery without using the mention button', async ({
+  page,
+}) => {
+  const history = Array.from({ length: 30 }, (_, index) => ({
+    ...first,
+    id: `visible-mention-${index}`,
+    text: `Message ${index} @ada`,
+    createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+  }));
+  await mockApi(page, history);
+  const realtime = await mockRealtime(page);
+  const mentionFor = (index: number) => ({
+    userId: user.id,
+    conversationId: chat.id,
+    messageId: history[index].id,
+    seen: false,
+  });
+  let mentions = [mentionFor(0), mentionFor(15), mentionFor(28), mentionFor(29)];
+  const marked: string[] = [];
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [
+          { ...chat, lastSeenMessageId: history[29].id, unreadCount: 0, unseenMentions: mentions },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/conversations/*/mentions/*/seen', async (route) => {
+    const mention = mentions.find((entry) =>
+      route.request().url().includes(`/${entry.messageId}/`),
+    )!;
+    await expect(page.getByTestId(`message-${mention.messageId}`)).toBeInViewport();
+    marked.push(mention.messageId);
+    mentions = mentions.filter((entry) => entry !== mention);
+    return route.fulfill({ json: { mention: { ...mention, seen: true } } });
+  });
+  await signIn(page);
+  await page.waitForTimeout(450);
+  expect(marked).toEqual([]);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect.poll(() => [...marked].sort()).toEqual([history[28].id, history[29].id].sort());
+  await expect(page.getByTestId('unseen-mentions-count')).toHaveText('2');
+  await expect.poll(realtime.connections).toBeGreaterThan(0);
+  mentions.push(mentionFor(27));
+  realtime.emit('mention.created', { mention: mentionFor(27) });
+  await expect.poll(() => marked.includes(history[27].id)).toBe(true);
+  await expect(page.getByTestId('unseen-mentions-count')).toHaveText('2');
+  await page.getByTestId('chat-history').evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(() => marked.includes(history[0].id)).toBe(true);
+  expect(marked).not.toContain(history[15].id);
+  await expect(page.getByTestId('unseen-mentions-count')).toHaveText('1');
+  await page.getByTestId('jump-to-mention').click();
+  await expect.poll(() => marked.includes(history[15].id)).toBe(true);
+  await expect(page.getByTestId('jump-to-mention')).toBeHidden();
+  expect(new Set(marked).size).toBe(marked.length);
+});
+
 test('login requires a server URL and remembers the chosen server for HTTP and realtime', async ({
   page,
 }) => {

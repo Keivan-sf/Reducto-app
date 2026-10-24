@@ -189,6 +189,17 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
                     {last?.senderId === session!.user.id ? 'You: ' : ''}
                     {last ? preview(last) : last === null ? preview() : ''}
                   </Text>
+                  {!!chat.unseenMentions?.length && (
+                    <View
+                      testID={`mentions-${chat.id}`}
+                      accessibilityLabel={`${chat.unseenMentions.length} unseen mentions`}
+                      style={[s.badge, selected && { backgroundColor: 'white' }]}
+                    >
+                      <Text style={{ color: selected ? colors.blue : 'white', fontWeight: '700' }}>
+                        @
+                      </Text>
+                    </View>
+                  )}
                   {!!unread[chat.id] && (
                     <View
                       testID={`unread-${chat.id}`}

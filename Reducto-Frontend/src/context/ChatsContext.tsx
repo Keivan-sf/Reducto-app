@@ -13,6 +13,7 @@ import type {
   Conversation,
   Emoji,
   Member,
+  Mention,
   Message,
   MessageUpdatedEvent,
   ProfileUpdatedEvent,
@@ -57,6 +58,7 @@ interface ChatsState {
     hasAfter: boolean,
   ) => void;
   getReadState: (id: string) => SeenState | undefined;
+  markMentionSeen: (id: string, messageId: string) => Promise<void>;
 }
 const Context = createContext<ChatsState>(null!);
 export function ChatsProvider({ children }: PropsWithChildren) {
@@ -105,6 +107,25 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       ),
   );
   const [conversationList] = useState(() => new ConversationList());
+  const markMentionSeen = useCallback(
+    async (id: string, messageId: string) => {
+      const { mention } = await api.request<{ mention: Mention }>(
+        `/api/conversations/${encodeURIComponent(id)}/mentions/${encodeURIComponent(messageId)}/seen`,
+        { method: 'PUT' },
+      );
+      const chat = conversationList.values().find((chat) => chat.id === id);
+      if (chat && mention.seen) {
+        conversationList.upsert({
+          ...chat,
+          unseenMentions: (chat.unseenMentions ?? []).filter(
+            (entry) => entry.messageId !== messageId,
+          ),
+        });
+        setConversations(conversationList.values());
+      }
+    },
+    [conversationList],
+  );
   const lastRefreshAt = useRef(0);
   const memberIds = useRef(new Map<string, Set<string>>());
   const resolveReceipt = useCallback(
@@ -405,6 +426,20 @@ export function ChatsProvider({ children }: PropsWithChildren) {
     socket.on('message.updated', (event: MessageUpdatedEvent) => {
       messageCache.edit(event);
     });
+    socket.on('mention.created', ({ mention }: { mention: Mention }) => {
+      if (mention.userId !== userId || mention.seen) return;
+      const chat = conversationList.values().find((chat) => chat.id === mention.conversationId);
+      if (!chat) {
+        void loadConversation(mention.conversationId).catch(report);
+        return;
+      }
+      if (chat.unseenMentions?.some((entry) => entry.messageId === mention.messageId)) return;
+      conversationList.upsert({
+        ...chat,
+        unseenMentions: [...(chat.unseenMentions ?? []), mention],
+      });
+      setConversations(conversationList.values());
+    });
     socket.on(
       'conversation.seen',
       (event: { conversationId: string; userId: string; lastSeenMessageId: string }) => {
@@ -499,6 +534,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
         activate,
         readVisible,
         getReadState,
+        markMentionSeen,
       }}
     >
       {children}

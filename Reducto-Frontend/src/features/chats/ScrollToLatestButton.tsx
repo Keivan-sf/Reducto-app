@@ -8,12 +8,16 @@ export function ScrollToLatestButton({
   disabled,
   onPressIn,
   onPress,
+  mention = false,
+  raised = false,
 }: {
   visible: boolean;
   unreadCount: number;
   disabled: boolean;
   onPressIn?: () => void;
   onPress: () => void;
+  mention?: boolean;
+  raised?: boolean;
 }) {
   const [opacity] = useState(() => new Animated.Value(0));
   const [mounted, setMounted] = useState(visible);
@@ -39,22 +43,33 @@ export function ScrollToLatestButton({
       pointerEvents={visible ? 'auto' : 'none'}
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
-      style={[s.position, { opacity }]}
+      style={[s.position, raised && { bottom: 90 }, { opacity }]}
     >
       <Pressable
-        testID="scroll-to-latest"
+        testID={mention ? 'jump-to-mention' : 'scroll-to-latest'}
         accessibilityRole="button"
-        accessibilityLabel="Back to latest messages"
-        accessibilityHint={unreadCount > 0 ? `${unreadCount} unread messages` : undefined}
+        accessibilityLabel={mention ? 'Jump to oldest unseen mention' : 'Back to latest messages'}
+        accessibilityHint={
+          unreadCount > 0
+            ? `${unreadCount} ${mention ? 'unseen mentions' : 'unread messages'}`
+            : undefined
+        }
         disabled={disabled || !visible}
         onPressIn={onPressIn}
         onPress={onPress}
         style={({ pressed }) => [s.button, (pressed || disabled) && { opacity: 0.7 }]}
       >
-        <Icon name="chevron-down" size={27} color={colors.muted} />
+        {mention ? (
+          <Text style={{ fontSize: 28, color: colors.blue }}>@</Text>
+        ) : (
+          <Icon name="chevron-down" size={27} color={colors.muted} />
+        )}
         {unreadCount > 0 && (
           <View style={s.badge}>
-            <Text testID="scroll-to-latest-unread" style={s.count}>
+            <Text
+              testID={mention ? 'unseen-mentions-count' : 'scroll-to-latest-unread'}
+              style={s.count}
+            >
               {unreadCount}
             </Text>
           </View>
