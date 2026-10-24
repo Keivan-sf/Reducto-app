@@ -217,7 +217,10 @@ function VoiceIconLayer({
   }, [visible, opacity]);
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
-    <Animated.View testID={`voice-icon-${name}`} style={[StyleSheet.absoluteFill, style]}>
+    <Animated.View
+      testID={`voice-icon-${name}`}
+      style={[StyleSheet.absoluteFill, name === 'play' && { transform: [{ translateX: 1 }] }, style]}
+    >
       <Icon name={name} color="white" size={24} />
     </Animated.View>
   );
