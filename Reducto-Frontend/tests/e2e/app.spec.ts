@@ -3269,7 +3269,16 @@ test('voice downloads can be cancelled and retried without starting playback', a
   await expect(cancel).toBeVisible();
   await expect.poll(() => downloads).toBe(2);
   finishDownload();
+  const completionStarted = Date.now();
+  const complete = page.getByRole('button', { name: 'Voice download complete', exact: true });
+  await expect(complete).toBeDisabled();
+  const completedRing = page.getByRole('progressbar', { name: 'Voice download progress' });
+  await expect(completedRing).toHaveAttribute('aria-valuenow', '100');
+  await expect(completedRing.locator('circle')).toHaveAttribute('stroke-dashoffset', '0');
   await expect(page.getByRole('button', { name: 'Play voice message', exact: true })).toBeVisible();
+  expect(Date.now() - completionStarted).toBeGreaterThanOrEqual(1000);
+  await expect(page.getByTestId('voice-icon-play')).toHaveCSS('opacity', '1');
+  await expect(page.getByTestId('voice-icon-close')).toHaveCSS('opacity', '0');
   await expect(page.getByRole('button', { name: 'Pause voice message', exact: true })).toHaveCount(
     0,
   );
