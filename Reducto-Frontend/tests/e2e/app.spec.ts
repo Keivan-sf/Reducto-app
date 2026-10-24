@@ -2514,6 +2514,64 @@ for (const gif of [false, true]) {
   });
 }
 
+for (const outgoing of [false, true]) {
+  test(`${outgoing ? 'outgoing' : 'incoming'} reaction badges highlight my reactions and toggle independently`, async ({
+    page,
+  }) => {
+    await mockApi(page, [
+      {
+        ...first,
+        senderId: outgoing ? user.id : friend.id,
+        reactions: [
+          { userId: friend.id, emoji: '👍' },
+          { userId: user.id, emoji: '❤️' },
+        ],
+      },
+    ]);
+    const changes: { method: string; emoji: string }[] = [];
+    await page.route('**/api/conversations/*/messages/*/reactions', (route) => {
+      changes.push({
+        method: route.request().method(),
+        emoji: route.request().postDataJSON().emoji,
+      });
+      return route.fulfill({ json: {} });
+    });
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const bubble = page.getByTestId(`message-${first.id}`);
+    const addThumb = bubble.getByRole('button', { name: 'Add 👍 reaction', exact: true });
+    const removeThumb = bubble.getByRole('button', { name: 'Remove 👍 reaction', exact: true });
+    const removeHeart = bubble.getByRole('button', { name: 'Remove ❤️ reaction', exact: true });
+    await expect(addThumb).toHaveAttribute('aria-selected', 'false');
+    await expect(removeHeart).toHaveAttribute('aria-selected', 'true');
+    const unselectedColor = await addThumb.evaluate(
+      (node) => getComputedStyle(node).backgroundColor,
+    );
+    const selectedColor = await removeHeart.evaluate(
+      (node) => getComputedStyle(node).backgroundColor,
+    );
+    expect(selectedColor).not.toBe(unselectedColor);
+
+    await addThumb.click();
+    await expect(removeThumb).toHaveText('👍 2');
+    await expect(removeThumb).toHaveCSS('background-color', selectedColor);
+    await expect(removeHeart).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('message-options')).toHaveCount(0);
+
+    await removeThumb.click();
+    await expect(addThumb).toHaveText('👍 1');
+    await expect(addThumb).toHaveCSS('background-color', unselectedColor);
+    await removeHeart.click();
+    await expect(removeHeart).toHaveCount(0);
+    await expect(bubble.getByText('❤️ 1', { exact: true })).toHaveCount(0);
+    expect(changes).toEqual([
+      { method: 'PUT', emoji: '👍' },
+      { method: 'DELETE', emoji: '👍' },
+      { method: 'DELETE', emoji: '❤️' },
+    ]);
+  });
+}
+
 test('attachment downloads and message actions use separate buttons', async ({ page }) => {
   const nestingErrors: string[] = [];
   page.on('console', (message) => {

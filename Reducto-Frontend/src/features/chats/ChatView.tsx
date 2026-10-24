@@ -713,9 +713,8 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     setActionsVisible(true);
     setForward(false);
   }
-  async function react(emoji: Emoji) {
-    if (!actionsVisible || !actionMessage || !id || busy) return;
-    const message = actionMessage;
+  async function react(message: Message, emoji: Emoji) {
+    if (!id || busy || message.delivery) return;
     const remove = message.reactions?.some(
       (reaction) => reaction.emoji === emoji && reaction.userId === session!.user.id,
     );
@@ -1088,6 +1087,9 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                   new Date(message.createdAt).toDateString();
               const reactions = EMOJIS.map((emoji) => ({
                 emoji,
+                selected: message.reactions?.some(
+                  (reaction) => reaction.emoji === emoji && reaction.userId === session!.user.id,
+                ),
                 count:
                   message.reactions?.filter((reaction) => reaction.emoji === emoji).length ?? 0,
               })).filter((entry) => entry.count);
@@ -1249,20 +1251,30 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                         }
                         reactions={
                           !!reactions.length && (
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel="Message actions"
-                              onPress={(event) => openMessageMenu(message, event)}
-                              onLongPress={(event) => openMessageMenu(message, event)}
-                            >
-                              <View style={s.reactions}>
-                                {reactions.map((reaction) => (
-                                  <Text key={reaction.emoji} style={s.reaction}>
+                            <View style={s.reactions}>
+                              {reactions.map((reaction) => (
+                                <Pressable
+                                  key={reaction.emoji}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`${reaction.selected ? 'Remove' : 'Add'} ${reaction.emoji} reaction`}
+                                  aria-selected={!!reaction.selected}
+                                  accessibilityState={{
+                                    selected: !!reaction.selected,
+                                    disabled: busy,
+                                  }}
+                                  disabled={busy}
+                                  onPress={(event) => {
+                                    event.stopPropagation();
+                                    void react(message, reaction.emoji);
+                                  }}
+                                  style={[s.reaction, reaction.selected && s.reactionSelected]}
+                                >
+                                  <Text style={s.reactionText}>
                                     {reaction.emoji} {reaction.count}
                                   </Text>
-                                ))}
-                              </View>
-                            </Pressable>
+                                </Pressable>
+                              ))}
+                            </View>
                           )
                         }
                       >
@@ -1546,7 +1558,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         )}
         busy={busy}
         onReact={(emoji) => {
-          if (!actionMessage?.delivery) void react(emoji);
+          if (actionsVisible && actionMessage) void react(actionMessage, emoji);
         }}
         onClose={() => setActionsVisible(false)}
       />
@@ -1660,8 +1672,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 7,
     backgroundColor: '#3390EC12',
     borderRadius: 12,
-    fontSize: 12,
   },
+  reactionSelected: { backgroundColor: '#3390EC40' },
+  reactionText: { fontSize: 12 },
   composerWrap: { backgroundColor: 'white' },
   pending: {
     flexDirection: 'row',
