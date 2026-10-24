@@ -41,6 +41,7 @@ export class VoicePlayback {
     player: VoiceAudioPlayer;
     unsubscribe: () => void;
     unpin: () => void;
+    startingAt?: number;
   };
   private revision = 0;
   constructor(
@@ -71,12 +72,26 @@ export class VoicePlayback {
           duration: player.currentStatus.duration || track.duration || 0,
         });
         const subscription = player.addListener('playbackStatusUpdate', (status) => {
-          if (this.current?.player !== player) return;
+          const current = this.current;
+          if (!current || current.player !== player) return;
+          // Initial load/seek events can report paused before the play request
+          // advances the clock. Keep that request active until playback starts.
+          if (
+            status.error ||
+            status.didJustFinish ||
+            (status.playing &&
+              current.startingAt !== undefined &&
+              status.currentTime > current.startingAt)
+          )
+            current.startingAt = undefined;
           this.publish({
             ...this.state,
             ...status,
             duration: status.duration > 0 ? status.duration : (track.duration ?? 0),
-            playing: status.didJustFinish ? false : status.playing,
+            playing:
+              status.didJustFinish || status.error
+                ? false
+                : status.playing || current.startingAt !== undefined,
           });
         });
         this.current = { player, unsubscribe: () => subscription.remove(), unpin };
@@ -105,18 +120,22 @@ export class VoicePlayback {
       )
         await current.player.seekTo(0);
       if (revision !== this.revision || current !== this.current) return;
+      current.startingAt = this.state.currentTime;
       current.player.play();
     } catch {
-      if (revision === this.revision && current === this.current)
+      if (revision === this.revision && current === this.current) {
+        current.startingAt = undefined;
         this.publish({
           ...this.state,
           playing: false,
           error: 'Could not play this voice message.',
         });
+      }
     }
   }
   pause = () => {
     ++this.revision;
+    if (this.current) this.current.startingAt = undefined;
     this.current?.player.pause();
     if (this.current) this.publish({ ...this.state, playing: false });
   };

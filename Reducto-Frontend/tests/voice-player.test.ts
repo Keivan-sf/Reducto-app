@@ -101,6 +101,36 @@ test('mini player pause/resume preserves position and shares the existing player
   playback.close();
 });
 
+test('startup status updates do not flicker back to paused before the playback clock advances', async () => {
+  const { playback, players } = harness();
+  await playback.play(track('one'));
+  const states: boolean[] = [];
+  playback.subscribe(() => states.push(playback.read().playing));
+  players[0].emit({ playing: false, currentTime: 0, isLoaded: false });
+  players[0].emit({ playing: false, currentTime: 0, isLoaded: true });
+  players[0].emit({ playing: true, currentTime: 0 });
+  players[0].emit({ playing: true, currentTime: 0.15 });
+  assert.deepEqual(states, [true, true, true, true]);
+  // Once playback advances, an external pause must still be reflected.
+  players[0].emit({ playing: false });
+  assert.equal(playback.read().playing, false);
+  playback.close();
+});
+
+test('pause, errors and completion clear a pending playback start immediately', async () => {
+  for (const action of ['pause', 'error', 'finish'] as const) {
+    const { playback, players } = harness();
+    await playback.play(track('one'));
+    players[0].emit({ playing: false, currentTime: 0 });
+    assert.equal(playback.read().playing, true);
+    if (action === 'pause') playback.pause();
+    else if (action === 'error') players[0].emit({ error: 'Cannot decode audio' });
+    else players[0].emit({ didJustFinish: true });
+    assert.equal(playback.read().playing, false);
+    playback.close();
+  }
+});
+
 test('switching messages stops/releases the old player and transfers the cache pin', async () => {
   const { playback, players, pins } = harness();
   await playback.play(track('one'));

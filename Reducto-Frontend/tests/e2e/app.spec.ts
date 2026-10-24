@@ -2003,6 +2003,7 @@ test('chat scrollbar remains visible but disabled during voice seeking', async (
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const thumb = page.getByRole('scrollbar', { name: 'Chat scrollbar' });
   const progress = page.getByRole('slider', { name: 'Voice message progress' });
+  await page.getByRole('button', { name: 'Download voice message', exact: true }).click();
   await expect(thumb).toBeVisible();
   await expect(progress).toBeVisible();
   const bounds = (await progress.boundingBox())!;
@@ -2022,7 +2023,7 @@ test('chat scrollbar remains visible but disabled during voice seeking', async (
   await expect(thumb).toHaveCSS('opacity', '1');
 });
 
-test('uncached voice messages show loading immediately and reuse the cached download on return', async ({
+test('uncached voice messages wait for a download click and reuse the cached download on return', async ({
   page,
 }, testInfo) => {
   const mediaId = 'delayed-voice';
@@ -2042,7 +2043,10 @@ test('uncached voice messages show loading immediately and reuse the cached down
   });
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
-  await expect(page.getByRole('button', { name: 'Loading voice message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download voice message' })).toBeVisible();
+  expect(downloads).toBe(0);
+  await page.getByRole('button', { name: 'Download voice message' }).click();
+  await expect(page.getByRole('button', { name: 'Cancel voice download' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Play voice message' })).toHaveCount(0);
   await expect.poll(() => downloads).toBe(1);
   finishDownload();
@@ -2111,6 +2115,8 @@ for (const kind of ['gif', 'voice', 'image', 'video'] as const) {
     await page.getByRole('button', { name: 'Open Weekend plans' }).click();
     if (kind === 'video')
       await page.getByRole('button', { name: 'Download video', exact: true }).click();
+    if (kind === 'voice')
+      await page.getByRole('button', { name: 'Download voice message', exact: true }).click();
     const ready = async () => {
       if (kind === 'gif') await expect(page.locator('video')).toHaveAttribute('src', /^blob:/);
       else if (kind === 'voice') await expect(page.getByTestId('voice-player')).toBeVisible();
@@ -3224,6 +3230,145 @@ test('GIF library uploads reuse the original local video for preview and sending
   expect(downloads).toBe(0);
 });
 
+test('voice downloads can be cancelled and retried without starting playback', async ({
+  page,
+}, testInfo) => {
+  const mediaId = 'cancel-voice';
+  let downloads = 0;
+  let finishDownload!: () => void;
+  const held = new Promise<void>((resolve) => {
+    finishDownload = resolve;
+  });
+  await mockApi(page, [{ ...first, text: null, attachment: { type: 'voice', mediaId } }]);
+  await page.route(`**/api/conversations/*/attachments/${mediaId}`, async (route) => {
+    downloads++;
+    await held;
+    await route
+      .fulfill({
+        path: path.join(__dirname, '../fixtures/voice.ogg'),
+        contentType: 'audio/ogg',
+      })
+      .catch(() => {});
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const cancel = page.getByRole('button', { name: 'Cancel voice download', exact: true });
+  await page.getByRole('button', { name: 'Download voice message', exact: true }).click();
+  await expect(cancel).toBeVisible();
+  await expect(page.getByRole('progressbar', { name: 'Voice download progress' })).toHaveAttribute(
+    'aria-valuenow',
+    '1',
+  );
+  await expect.poll(() => downloads).toBe(1);
+  await page.screenshot({ path: testInfo.outputPath('voice-download-ring.png') });
+  await cancel.click();
+  const download = page.getByRole('button', { name: 'Download voice message', exact: true });
+  await expect(download).toBeVisible();
+  await expect(page.getByText('Download cancelled', { exact: true })).toHaveCount(0);
+  await download.click();
+  await expect(cancel).toBeVisible();
+  await expect.poll(() => downloads).toBe(2);
+  finishDownload();
+  await expect(page.getByRole('button', { name: 'Play voice message', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause voice message', exact: true })).toHaveCount(
+    0,
+  );
+});
+
+test('voice download progress animates a partial ring without a background or DOM property errors', async ({
+  page,
+}, testInfo) => {
+  const bytes = readFileSync(path.join(__dirname, '../fixtures/voice.ogg'));
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+  let finishDownload!: () => void;
+  const server = createServer((request, response) => {
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Authorization');
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204).end();
+      return;
+    }
+    response.writeHead(200, {
+      'Content-Type': 'audio/ogg',
+      'Content-Length': bytes.length,
+    });
+    const half = Math.floor(bytes.length / 2);
+    response.write(bytes.subarray(0, half));
+    finishDownload = () => response.end(bytes.subarray(half));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing test server');
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    await mockApi(
+      page,
+      [{ ...first, text: null, attachment: { type: 'voice', mediaId: 'streamed-voice' } }],
+      origin,
+    );
+    await page.route(`${origin}/api/conversations/*/attachments/streamed-voice`, (route) =>
+      route.continue(),
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await page.evaluate(() => {
+      const offsets: number[] = [];
+      Object.assign(window, { __voiceRingOffsets: offsets });
+      new MutationObserver((records) => {
+        for (const record of records) {
+          const element = record.target as Element;
+          if (element.tagName.toLowerCase() === 'circle') {
+            const offset = element.getAttribute('stroke-dashoffset');
+            if (offset !== null) offsets.push(Number(offset));
+          }
+        }
+      }).observe(document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['stroke-dashoffset'],
+      });
+    });
+    await page.getByRole('button', { name: 'Download voice message', exact: true }).click();
+    const progress = page.getByRole('progressbar', { name: 'Voice download progress' });
+    await expect(progress).toHaveAttribute('aria-valuenow', /^(49|50)$/);
+    await expect(progress.locator('circle')).toHaveCount(1);
+    const initialRotation = await progress.evaluate(
+      (element) => getComputedStyle(element).transform,
+    );
+    await expect
+      .poll(() => progress.evaluate((element) => getComputedStyle(element).transform))
+      .not.toBe(initialRotation);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const offsets = (window as unknown as { __voiceRingOffsets: number[] })
+            .__voiceRingOffsets;
+          return new Set(offsets.filter((value) => value > 58 && value < 112)).size;
+        }),
+      )
+      .toBeGreaterThan(2);
+    await expect(progress.locator('circle').last()).toHaveAttribute(
+      'transform',
+      'rotate(-90 21 21)',
+    );
+    await page.screenshot({ path: testInfo.outputPath('voice-partial-download-ring.png') });
+    finishDownload();
+    await expect(
+      page.getByRole('button', { name: 'Play voice message', exact: true }),
+    ).toBeVisible();
+    expect(errors.filter((error) => /Invalid DOM property|transform-origin/.test(error))).toEqual(
+      [],
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test('voice attachments play, pause, seek on a straight progress line, and expose message options', async ({
   page,
 }, testInfo) => {
@@ -3242,6 +3387,7 @@ test('voice attachments play, pause, seek on a straight progress line, and expos
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const voice = page.getByTestId('voice-player');
+  await page.getByRole('button', { name: 'Download voice message', exact: true }).click();
   await expect(voice).toBeVisible();
   await expect(voice.getByText('0:03', { exact: true })).toBeVisible();
   await voice.getByRole('button', { name: 'Play voice message', exact: true }).click();
@@ -4429,6 +4575,7 @@ test('persistent voice mini player follows navigation, survives scrolling, and c
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const screen = page.getByTestId(`conversation-${chat.id}`);
+  await screen.getByRole('button', { name: 'Download voice message', exact: true }).click();
   await screen.getByRole('button', { name: 'Play voice message', exact: true }).click();
   const mini = page.getByTestId('voice-mini-player');
   await expect(mini).toHaveCount(1);

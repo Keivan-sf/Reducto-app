@@ -1,18 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type GestureResponderEvent,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Icon, colors } from '../../components/ui';
 import { useCachedFile, voiceFileKey } from '../../context/VideosContext';
 import { videoTime } from '../../lib/video-download.types';
 import { useVoicePlayback, useVoicePlaybackState } from '../../context/VoicePlaybackContext';
 import { VoiceSeekBar } from './VoiceSeekBar';
+import { DownloadProgressRing } from './DownloadProgressRing';
 import type { AttachmentMetadata } from '../../api/types';
 
 export function VoiceMessage({
@@ -34,18 +28,17 @@ export function VoiceMessage({
   onError: (message: string) => void;
   onSeekingChange?: (seeking: boolean) => void;
 }) {
-  const { state, download } = useCachedFile(voiceFileKey(conversationId, mediaId), active);
-  const [autoplay, setAutoplay] = useState(false);
-  useEffect(() => {
-    if (active) void download().catch(() => {});
-  }, [active, download]);
+  const { state, download, cancel } = useCachedFile(voiceFileKey(conversationId, mediaId), active);
+  const request = useRef(0);
+  const loading = state.status === 'loading';
+  const total = loading ? state.progress.total || metadata?.fileSize || 0 : 0;
+  const progress = loading && total > 0 ? Math.min(1, state.progress.received / total) : 0;
   return state.status === 'ready' ? (
     <VoicePlayer
       uri={state.file.uri}
       fileKey={voiceFileKey(conversationId, mediaId)}
       senderId={senderId}
       durationHint={metadata?.durationSeconds ?? state.file.duration}
-      autoplay={autoplay}
       active={active}
       onOptions={onOptions}
       onError={onError}
@@ -55,23 +48,23 @@ export function VoiceMessage({
     <View style={s.row}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={
-          state.status === 'error' ? 'Retry voice message' : 'Loading voice message'
-        }
-        disabled={state.status !== 'error'}
+        accessibilityLabel={loading ? 'Cancel voice download' : 'Download voice message'}
         onLongPress={onOptions}
         onPress={(event) => {
           event.stopPropagation();
-          setAutoplay(true);
-          void download().catch((err) => onError(err.message));
+          const current = ++request.current;
+          if (loading) {
+            cancel();
+          } else {
+            void download().catch((err) => {
+              if (request.current === current) onError(err.message);
+            });
+          }
         }}
         style={s.play}
       >
-        {state.status === 'error' ? (
-          <Icon name="play" color="white" size={24} />
-        ) : (
-          <ActivityIndicator color="white" accessibilityLabel="Loading voice message" />
-        )}
+        {loading && <DownloadProgressRing progress={progress} />}
+        <Icon name={loading ? 'close' : 'arrow-down'} color="white" size={24} />
       </Pressable>
       <View style={s.controls}>
         <View style={s.seekPlaceholder}>
@@ -93,7 +86,6 @@ function VoicePlayer({
   fileKey,
   senderId,
   durationHint,
-  autoplay,
   active,
   onOptions,
   onError,
@@ -103,7 +95,6 @@ function VoicePlayer({
   fileKey: string;
   senderId: string;
   durationHint?: number;
-  autoplay: boolean;
   active: boolean;
   onOptions: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
@@ -111,21 +102,12 @@ function VoicePlayer({
 }) {
   const playback = useVoicePlayback();
   const state = useVoicePlaybackState();
-  const autoplayed = useRef(false);
   const [probedDuration, setProbedDuration] = useState(0);
   const knownDuration = durationHint || probedDuration;
   const selected = state.track?.key === fileKey;
   const playing = selected && state.playing;
   const position = selected ? state.currentTime : 0;
   const duration = selected && state.duration > 0 ? state.duration : knownDuration;
-  useEffect(() => {
-    if (!autoplay || autoplayed.current) return;
-    autoplayed.current = true;
-    void playback
-      .play({ key: fileKey, uri, senderId, duration: knownDuration })
-      .catch(() => onError('Could not play this voice message.'));
-    // Playback belongs to the session; scrolling/navigation never cleans it up.
-  }, [autoplay, playback, fileKey, uri, senderId, knownDuration, onError]);
   const seek = async (seconds: number) => {
     try {
       playback.select({ key: fileKey, uri, senderId, duration: knownDuration });
