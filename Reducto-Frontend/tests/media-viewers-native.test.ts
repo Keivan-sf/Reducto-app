@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { ImageViewerGestures } from '../src/features/chats/image-viewer-gestures';
 
 type Node = { type: unknown; props: Record<string, any> };
 function mount(file: string, imports: Record<string, unknown>) {
@@ -13,7 +14,7 @@ function mount(file: string, imports: Record<string, unknown>) {
     useRef: (current: unknown) => (slots[index++] ??= { current }),
     useState(initial: unknown) {
       const slot = index++;
-      if (!(slot in slots)) slots[slot] = initial;
+      if (!(slot in slots)) slots[slot] = typeof initial === 'function' ? initial() : initial;
       return [
         slots[slot],
         (value: unknown) => {
@@ -58,6 +59,9 @@ function mount(file: string, imports: Record<string, unknown>) {
       if (name === 'react') return react;
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name in imports) return imports[name];
+      if (name === './VideoZoomSurface') return { VideoZoomSurface: 'VideoZoomSurface' };
+      if (name === './VideoPlaybackControls')
+        return { VideoPlaybackControls: 'VideoPlaybackControls' };
       throw new Error(`Unexpected import ${name}`);
     },
   });
@@ -331,4 +335,127 @@ test('Native GIF playback stays muted and looping, reports dimensions, and pause
   assert.equal(plays, 3);
   t.unmount();
   assert.equal(pauseRef.current, null);
+});
+
+test('Android video zoom owns the entire touch stream, including adding and lifting a second finger', () => {
+  class Value {
+    constructor(public value: number) {}
+    setValue(value: number) {
+      this.value = value;
+    }
+    stopAnimation() {}
+  }
+  const t = mount('VideoZoomSurface', {
+    './image-viewer-gestures': { ImageViewerGestures },
+    'react-native': {
+      View: 'View',
+      StyleSheet: { absoluteFill: {}, create: (styles: unknown) => styles },
+      Easing: { cubic: (v: number) => v, out: (fn: unknown) => fn },
+      Animated: {
+        View: 'Animated.View',
+        Value,
+        timing: (value: Value, { toValue }: { toValue: number }) => ({
+          start: () => value.setValue(toValue),
+        }),
+        parallel: (animations: { start: () => void }[]) => ({
+          start: () => animations.forEach((a) => a.start()),
+        }),
+      },
+    },
+  });
+  const tree = t.render({
+    uri: 'file:///video.mp4',
+    active: true,
+    size: { width: 400, height: 600 },
+    children: 'video',
+  });
+  const surface = tree.props;
+  const transform = find(tree, 'Animated.View').props;
+  assert.equal(transform.pointerEvents, 'none', 'the native player never consumes a touch start');
+  assert.equal(surface.collapsable, false);
+  assert.equal(surface.onStartShouldSetResponder(), true);
+  assert.equal(surface.onResponderTerminationRequest(), false);
+  surface.onLayout({ nativeEvent: { layout: { width: 400, height: 600 } } });
+  const event = (...points: number[][]) => ({
+    nativeEvent: { touches: points.map(([locationX, locationY]) => ({ locationX, locationY })) },
+  });
+  const scale = transform.style[1].transform[2].scale as Value;
+  const y = transform.style[1].transform[1].translateY as Value;
+  surface.onResponderGrant(event([150, 300]));
+  surface.onResponderStart(event([150, 300], [250, 300]));
+  surface.onResponderMove(event([100, 300], [300, 300]));
+  assert.equal(scale.value, 2);
+  surface.onResponderEnd(event([100, 300]));
+  surface.onResponderMove(event([100, 400]));
+  assert.equal(scale.value, 2);
+  assert.equal(y.value, 100, 'one remaining finger pans without jumping or dismissing');
+  surface.onResponderEnd(event());
+  surface.onResponderRelease();
+  surface.onResponderGrant(event([100, 300], [300, 300]));
+  surface.onResponderMove(event([150, 300], [250, 300]));
+  surface.onResponderTerminate();
+  assert.equal(scale.value, 1);
+  t.render({ uri: 'file:///another.mp4', active: true });
+  assert.equal(scale.value, 1, 'switching videos resets the zoom');
+});
+
+test('Zoomable native video disables player touch controls and keeps playback controls outside the zoom surface', async () => {
+  const player = {
+    status: 'readyToPlay',
+    playing: false,
+    duration: 60,
+    currentTime: 10,
+    muted: false,
+    timeUpdateEventInterval: 0,
+    pause() {
+      this.playing = false;
+    },
+    play() {
+      this.playing = true;
+    },
+    replay() {
+      this.currentTime = 0;
+      this.playing = true;
+    },
+    async replaceAsync() {},
+  };
+  const t = mount('VideoPlayback', {
+    'react-native': {
+      View: 'View',
+      Text: 'Text',
+      ActivityIndicator: 'ActivityIndicator',
+      StyleSheet: {},
+      AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
+    },
+    expo: { useEvent: (_player: unknown, _event: string, initial: unknown) => initial },
+    'expo-video': { useVideoPlayer: () => player, VideoView: 'VideoView' },
+  });
+  let allowed = true;
+  const tree = t.render({
+    uri: 'file:///video.mp4',
+    zoomable: true,
+    active: true,
+    canPlay: () => allowed,
+  });
+  await tick();
+  assert.equal(find(tree, 'VideoView').props.nativeControls, false);
+  assert.ok(find(tree, 'VideoZoomSurface'));
+  assert.equal(find(find(tree, 'VideoZoomSurface'), 'VideoPlaybackControls'), undefined);
+  assert.equal(player.timeUpdateEventInterval, 0.25);
+  const controls = find(tree, 'VideoPlaybackControls').props;
+  controls.onTogglePlay();
+  assert.equal(player.playing, false);
+  controls.onTogglePlay();
+  assert.equal(player.playing, true);
+  controls.onSeek(35);
+  assert.equal(player.currentTime, 35);
+  controls.onToggleMute();
+  assert.equal(player.muted, true);
+  controls.onTogglePlay();
+  allowed = false;
+  controls.onTogglePlay();
+  assert.equal(player.playing, false, 'closing cannot restart playback');
+  t.render({ uri: 'file:///video.mp4', zoomable: true, active: false });
+  assert.equal(player.timeUpdateEventInterval, 0);
+  t.unmount();
 });

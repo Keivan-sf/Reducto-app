@@ -17,12 +17,14 @@ interface SeekPreview {
 
 /** Keep the gesture until release, including outside the track or message bubble. */
 export function VoiceSeekBar({
+  accessibilityLabel = 'Voice message progress',
   value,
   duration,
   enabled = true,
   onSeek,
   onDraggingChange,
 }: {
+  accessibilityLabel?: string;
   value: number;
   duration: number;
   enabled?: boolean;
@@ -124,7 +126,7 @@ export function VoiceSeekBar({
     <View
       ref={view}
       accessibilityRole="adjustable"
-      accessibilityLabel="Voice message progress"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: !available }}
       accessibilityValue={{
         min: 0,

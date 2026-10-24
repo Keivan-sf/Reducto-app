@@ -3,6 +3,8 @@ import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-nativ
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import type { VideoPlaybackProps } from './VideoPlayback.types';
+import { VideoZoomSurface } from './VideoZoomSurface';
+import { VideoPlaybackControls } from './VideoPlaybackControls';
 
 const allowPlayback = () => true;
 export function VideoPlayback({
@@ -13,6 +15,7 @@ export function VideoPlayback({
   loop = false,
   muted = false,
   nativeControls = true,
+  zoomable = false,
   onSize,
   onError,
 }: VideoPlaybackProps) {
@@ -90,18 +93,53 @@ export function VideoPlayback({
       subscription.remove();
     };
   }, [player, loop, canPlay]);
+  useEffect(() => {
+    // Expo VideoPlayer is a mutable native handle; its setters are the supported API.
+    // eslint-disable-next-line react-hooks/immutability
+    player.timeUpdateEventInterval = zoomable && active ? 0.25 : 0;
+  }, [player, zoomable, active]);
+  const video = (
+    <VideoView
+      player={player}
+      surfaceType="textureView"
+      nativeControls={zoomable ? false : nativeControls}
+      playsInline
+      contentFit="contain"
+      style={StyleSheet.absoluteFill}
+      fullscreenOptions={{ enable: false }}
+      allowsPictureInPicture={false}
+    />
+  );
   return (
     <View style={{ flex: 1 }}>
-      <VideoView
-        player={player}
-        surfaceType="textureView"
-        nativeControls={nativeControls}
-        playsInline
-        contentFit="contain"
-        style={StyleSheet.absoluteFill}
-        fullscreenOptions={{ enable: false }}
-        allowsPictureInPicture={false}
-      />
+      {zoomable ? (
+        <>
+          <VideoZoomSurface uri={uri} active={active} size={size}>
+            {video}
+          </VideoZoomSurface>
+          <VideoPlaybackControls
+            player={player}
+            active={active}
+            onTogglePlay={() => {
+              if (player.playing) player.pause();
+              else if (active && canPlay()) {
+                if (player.currentTime >= player.duration) player.replay();
+                else player.play();
+              }
+            }}
+            onToggleMute={() => {
+              // eslint-disable-next-line react-hooks/immutability -- Native VideoPlayer setter.
+              player.muted = !player.muted;
+            }}
+            onSeek={(seconds) => {
+              // eslint-disable-next-line react-hooks/immutability -- Native VideoPlayer setter.
+              player.currentTime = seconds;
+            }}
+          />
+        </>
+      ) : (
+        video
+      )}
       {active && status === 'loading' && (
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { justifyContent: 'center' }]}>
           <ActivityIndicator color="white" />

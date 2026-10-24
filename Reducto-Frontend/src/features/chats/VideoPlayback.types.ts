@@ -8,6 +8,7 @@ export type VideoPlaybackProps = {
   loop?: boolean;
   muted?: boolean;
   nativeControls?: boolean;
+  zoomable?: boolean;
   onSize?: (size: { width: number; height: number }) => void;
   onError?: () => void;
 };

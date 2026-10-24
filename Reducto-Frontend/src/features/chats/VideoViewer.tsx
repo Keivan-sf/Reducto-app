@@ -56,6 +56,7 @@ export function VideoViewer({
       </View>
       <View style={{ flex: 1 }}>
         <VideoPlayback
+          zoomable
           uri={state.status === 'ready' ? state.file.uri : undefined}
           pauseRef={pauseRef}
           canPlay={canPlay}
