@@ -44,7 +44,7 @@ export function ScrollToLatestButton({
       pointerEvents={visible ? 'auto' : 'none'}
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
-      style={[s.position, raised && { bottom: 90 }, { opacity }]}
+      style={[s.position, raised && { bottom: 74 }, { opacity }]}
     >
       <Pressable
         testID={mention ? 'jump-to-mention' : 'scroll-to-latest'}
@@ -56,14 +56,15 @@ export function ScrollToLatestButton({
             : undefined
         }
         disabled={disabled || !visible}
+        hitSlop={2}
         onPressIn={onPressIn}
         onPress={onPress}
         style={({ pressed }) => [s.button, (pressed || disabled) && { opacity: 0.7 }]}
       >
         {mention ? (
-          <MentionIcon size={22} />
+          <MentionIcon size={16} />
         ) : (
-          <Icon name="chevron-down" size={27} color={colors.muted} />
+          <Icon name="chevron-down" size={19} color={colors.muted} />
         )}
         {unreadCount > 0 && (
           <View style={s.badge}>
@@ -87,8 +88,8 @@ const s = StyleSheet.create({
     bottom: 16,
   },
   button: {
-    width: 52,
-    height: 52,
+    width: 42,
+    height: 42,
     borderRadius: 26,
     backgroundColor: 'white',
     borderWidth: 1,
@@ -99,14 +100,14 @@ const s = StyleSheet.create({
   },
   badge: {
     position: 'absolute',
-    top: -12,
-    minWidth: 26,
-    height: 26,
-    paddingHorizontal: 6,
-    borderRadius: 13,
+    top: -8,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
     backgroundColor: colors.blue,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  count: { color: 'white', fontSize: 14, fontWeight: '500' },
+  count: { color: 'white', fontSize: 10, fontWeight: '500' },
 });
