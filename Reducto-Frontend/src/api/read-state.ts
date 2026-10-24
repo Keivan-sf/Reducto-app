@@ -41,11 +41,11 @@ export class ReadState {
         Object.fromEntries([...this.entries].map(([id, entry]) => [id, entry.unreadCount])),
       );
   }
-  sync(chats: Conversation[], startedAt: number) {
+  sync(chats: Conversation[], startedAt: number, prune = true) {
     if (this.disposed) return;
     const allowed = new Set(chats.map(({ id }) => id));
     for (const [id, entry] of this.entries) {
-      if (allowed.has(id)) continue;
+      if (!prune || allowed.has(id)) continue;
       clearTimeout(entry.timer);
       entry.controller?.abort();
       this.entries.delete(id);
@@ -57,8 +57,11 @@ export class ReadState {
         continue;
       this.entries.set(chat.id, {
         ...previous,
-        lastSeenMessageId: chat.lastSeenMessageId ?? null,
-        unreadCount: Math.max(0, chat.unreadCount ?? 0),
+        lastSeenMessageId:
+          chat.lastSeenMessageId !== undefined
+            ? chat.lastSeenMessageId
+            : (previous?.lastSeenMessageId ?? null),
+        unreadCount: Math.max(0, chat.unreadCount ?? previous?.unreadCount ?? 0),
         known: previous?.known ?? new Map(),
         revision: this.revision,
       });
@@ -70,8 +73,18 @@ export class ReadState {
     if (entry) for (const message of messages) entry.known.set(message.id, message);
   }
   created(message: Message) {
-    const entry = this.entries.get(message.conversationId);
-    if (!entry || entry.known.has(message.id)) return;
+    if (this.disposed) return;
+    let entry = this.entries.get(message.conversationId);
+    if (!entry) {
+      entry = {
+        lastSeenMessageId: null,
+        unreadCount: 0,
+        known: new Map(),
+        revision: this.revision,
+      };
+      this.entries.set(message.conversationId, entry);
+    }
+    if (entry.known.has(message.id)) return;
     entry.known.set(message.id, message);
     const seen = entry.lastSeenMessageId && entry.known.get(entry.lastSeenMessageId);
     if (message.id === entry.lastSeenMessageId || (seen && comparePosition(message, seen) <= 0))
@@ -180,6 +193,13 @@ export class ReadState {
       if (entry.queued && !this.disposed && this.entries.get(id) === entry)
         this.schedule(id, entry, entry.queued === target ? 5000 : this.delay);
     }
+  }
+  remove(id: string) {
+    const entry = this.entries.get(id);
+    clearTimeout(entry?.timer);
+    entry?.controller?.abort();
+    this.entries.delete(id);
+    this.emit();
   }
   dispose() {
     this.disposed = true;

@@ -20,7 +20,7 @@ export function GroupDialog({
   onClose: () => void;
 }) {
   const { session } = useSession();
-  const { members, refresh } = useChats();
+  const { members, loadConversation, removeConversation } = useChats();
   const { profiles } = useProfiles();
   const people = members[chat.id] ?? [];
   const peerId = people.find((member) => member.userId !== session!.user.id)?.userId;
@@ -35,14 +35,14 @@ export function GroupDialog({
   const [success, setSuccess] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  async function run(action: () => Promise<unknown>, message: string) {
+  async function run(action: () => Promise<unknown>, message: string, sync = true) {
     if (busy) return;
     setBusy(true);
     setError('');
     setSuccess('');
     try {
       await action();
-      await refresh();
+      if (sync) await loadConversation(chat.id);
       setSuccess(message);
     } catch (err) {
       setError((err as Error).message);
@@ -83,14 +83,18 @@ export function GroupDialog({
             secondary
             disabled={busy}
             onPress={() =>
-              void run(async () => {
-                const { inviteLink } = await api.get<{ inviteLink: string }>(
-                  `/api/groups/${chat.id}/invite`,
-                );
-                const token = groupInviteToken(inviteLink);
-                if (!token) throw new Error('The server returned an invalid invite link.');
-                await Clipboard.setStringAsync(groupInviteUri(token));
-              }, 'Invite link copied. Share it with your friends.')
+              void run(
+                async () => {
+                  const { inviteLink } = await api.get<{ inviteLink: string }>(
+                    `/api/groups/${chat.id}/invite`,
+                  );
+                  const token = groupInviteToken(inviteLink);
+                  if (!token) throw new Error('The server returned an invalid invite link.');
+                  await Clipboard.setStringAsync(groupInviteUri(token));
+                },
+                'Invite link copied. Share it with your friends.',
+                false,
+              )
             }
           />
           <Field
@@ -205,13 +209,18 @@ export function GroupDialog({
               danger
               busy={busy}
               onPress={() =>
-                void run(async () => {
-                  if (role === 'owner')
-                    await api.request(`/api/groups/${chat.id}`, { method: 'DELETE' });
-                  else await api.post(`/api/groups/${chat.id}/leave`);
-                  onClose();
-                  router.replace('/');
-                }, '')
+                void run(
+                  async () => {
+                    if (role === 'owner')
+                      await api.request(`/api/groups/${chat.id}`, { method: 'DELETE' });
+                    else await api.post(`/api/groups/${chat.id}/leave`);
+                    removeConversation(chat.id);
+                    onClose();
+                    router.replace('/');
+                  },
+                  '',
+                  false,
+                )
               }
             />
             <Button title="Cancel" secondary onPress={() => setConfirm(false)} />

@@ -226,3 +226,24 @@ test('sending in a newly discovered conversation persists seen without waiting f
   assert.deepEqual(state.peek(chat.id), { lastSeenMessageId: messages[0].id, unreadCount: 0 });
   state.dispose();
 });
+
+test('targeted conversation sync preserves other read states and counts the first incoming message once', () => {
+  const state = new ReadState(
+    async () => ({ lastSeenMessageId: null, unreadCount: 0 }),
+    () => {},
+  );
+  state.sync([chat], state.version());
+  const incoming = { ...messages[1], conversationId: 'new-chat' };
+  state.created(incoming);
+  state.created(incoming);
+  state.sync(
+    [{ ...chat, id: 'new-chat', unreadCount: undefined, lastSeenMessageId: undefined }],
+    state.version(),
+    false,
+  );
+  assert.equal(state.peek('new-chat')?.unreadCount, 1);
+  assert.equal(state.peek(chat.id)?.unreadCount, 10);
+  state.remove('new-chat');
+  assert.equal(state.peek('new-chat'), undefined);
+  state.dispose();
+});

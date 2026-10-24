@@ -547,6 +547,7 @@ async function mockApi(
       };
     else if (path.endsWith('/me')) body = { user };
     else if (path === '/api/conversations') body = { conversations: [chat] };
+    else if (path === `/api/conversations/${chat.id}`) body = { conversation: chat };
     else if (path.endsWith('/members'))
       body = {
         members: [
@@ -1546,7 +1547,7 @@ test('conversation previews show the actual latest message independently of unre
   expect(limits.every((limit) => limit === 1)).toBe(true);
 });
 
-test('API unread counts decrease as visible messages are read, persist seen positions, and sync another client without notifications', async ({
+test('API unread counts decrease as visible messages are read, persist seen positions, and recover another client on refresh without polling', async ({
   page,
 }, testInfo) => {
   await page.clock.install();
@@ -1602,6 +1603,8 @@ test('API unread counts decrease as visible messages are read, persist seen posi
     const before = listCalls;
     serverState = { lastSeenMessageId: history[9].id, unreadCount: 1 };
     await page.clock.fastForward(10000);
+    expect(listCalls).toBe(before);
+    await page.getByRole('button', { name: 'Refresh conversations', exact: true }).click();
     await expect.poll(() => listCalls).toBeGreaterThan(before);
     await expect(badge).toHaveText('1');
   } finally {
@@ -5110,4 +5113,107 @@ test('persistent music mini player follows navigation, survives scrolling, and c
   await mini.getByRole('button', { name: 'Close audio player', exact: true }).click();
   await expect(mini).toHaveCount(0);
   expect(downloads).toBe(1);
+});
+
+test('empty private chats open without reloading the list and remain local until refresh', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page, []);
+  const privateChat = { ...chat, id: 'private-chat', type: 'private', name: null };
+  let listRequests = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/conversations') listRequests++;
+  });
+  await page.route('**:3001/api/conversations/private', (route) =>
+    route.fulfill({ json: { conversation: privateChat } }),
+  );
+  await page.route('**:3001/api/conversations/private-chat', (route) =>
+    route.fulfill({ json: { conversation: privateChat } }),
+  );
+  await signIn(page);
+  const baseline = listRequests;
+  await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+  await page.getByPlaceholder('@username').fill('grace');
+  await page.getByRole('button', { name: 'Open chat', exact: true }).click();
+  await expect(page).toHaveURL(/\/chat\/private-chat$/);
+  await expect(page.getByPlaceholder('Write a message…')).toBeVisible();
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats' }).click();
+  await expect(page.getByRole('button', { name: 'Open Grace Hopper', exact: true })).toBeVisible();
+  expect(listRequests).toBe(baseline);
+  await page.getByRole('button', { name: 'Refresh conversations', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Open Grace Hopper', exact: true })).toHaveCount(0);
+});
+
+test('realtime messages discover only the affected chat and renames and deletions update locally', async ({
+  page,
+}) => {
+  await mockApi(page);
+  const realtime = await mockRealtime(page);
+  const incomingChat = { ...chat, id: 'incoming-private', type: 'private', name: null };
+  await page.route('**:3001/api/conversations/incoming-private', (route) =>
+    route.fulfill({ json: { conversation: incomingChat } }),
+  );
+  let listCalls = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/conversations') listCalls++;
+  });
+  await signIn(page);
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+  const baseline = listCalls;
+  realtime.emit('message.created', {
+    message: { ...first, id: 'incoming', conversationId: incomingChat.id, text: 'First hello' },
+  });
+  await expect(page.getByRole('button', { name: 'Open Grace Hopper', exact: true })).toBeVisible();
+  await expect(page.getByTestId(`preview-${incomingChat.id}`)).toHaveText('First hello');
+  await expect(page.getByTestId(`unread-${incomingChat.id}`)).toHaveText('1');
+  realtime.emit('conversation.updated', { conversationId: chat.id, name: 'Renamed group' });
+  await expect(page.getByRole('button', { name: 'Open Renamed group', exact: true })).toBeVisible();
+  realtime.emit('conversation.deleted', { conversationId: incomingChat.id });
+  await expect(page.getByRole('button', { name: 'Open Grace Hopper', exact: true })).toHaveCount(0);
+  expect(listCalls).toBe(baseline);
+});
+
+test('sending the first private message keeps the conversation after refresh', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page, []);
+  await mockRealtime(page);
+  const privateChat = { ...chat, id: 'first-message-chat', type: 'private', name: null };
+  const sent = {
+    ...first,
+    id: 'first-private-message',
+    conversationId: privateChat.id,
+    senderId: user.id,
+    text: 'Hello Grace',
+  };
+  let sentFirstMessage = false;
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: sentFirstMessage ? [chat, privateChat] : [chat] } }),
+  );
+  await page.route('**:3001/api/conversations/private', (route) =>
+    route.fulfill({ json: { conversation: privateChat } }),
+  );
+  await page.route('**:3001/api/conversations/first-message-chat', (route) =>
+    route.fulfill({ json: { conversation: privateChat } }),
+  );
+  await page.route('**:3001/api/conversations/first-message-chat/messages*', (route) => {
+    if (route.request().method() === 'POST') {
+      sentFirstMessage = true;
+      return route.fulfill({ json: { message: sent } });
+    }
+    return route.fulfill({ json: { messages: sentFirstMessage ? [sent] : [], nextCursor: null } });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+  await page.getByPlaceholder('@username').fill('grace');
+  await page.getByRole('button', { name: 'Open chat', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill(sent.text);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByTestId(`message-${sent.id}`)).toBeVisible();
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Refresh conversations', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Open Grace Hopper', exact: true })).toBeVisible();
+  await expect(page.getByTestId(`preview-${privateChat.id}`)).toHaveText('You: Hello Grace');
 });

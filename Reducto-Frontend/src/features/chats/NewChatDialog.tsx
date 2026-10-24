@@ -10,7 +10,7 @@ import { useProfiles } from '../../context/ProfilesContext';
 import { groupInviteToken, groupJoinPath } from '../../lib/links';
 
 export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const { refresh } = useChats();
+  const { loadConversation } = useChats();
   const { directory } = useProfiles();
   const [mode, setMode] = useState<'private' | 'group' | 'join'>('private');
   const [value, setValue] = useState('');
@@ -44,7 +44,7 @@ export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose:
         path = groupJoinPath(token);
       }
       const { conversation } = await api.post<{ conversation: Conversation }>(path, body);
-      await refresh();
+      await loadConversation(conversation.id, mode === 'private');
       onClose();
       setValue('');
       router.push(`/chat/${conversation.id}`);

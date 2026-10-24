@@ -8,7 +8,7 @@ import { Button, colors, Notice, styles } from '../../components/ui';
 import { groupJoinPath, INVITE_TOKEN } from '../../lib/links';
 
 export default function JoinGroupScreen({ token }: { token: string }) {
-  const { refresh } = useChats();
+  const { loadConversation } = useChats();
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const valid = INVITE_TOKEN.test(token);
@@ -17,7 +17,7 @@ export default function JoinGroupScreen({ token }: { token: string }) {
     let active = true;
     void (async () => {
       const { conversation } = await api.post<{ conversation: Conversation }>(groupJoinPath(token));
-      await refresh();
+      await loadConversation(conversation.id);
       if (active) router.replace(`/chat/${conversation.id}`);
     })().catch((err) => {
       if (active) setError(err.message);
@@ -25,7 +25,7 @@ export default function JoinGroupScreen({ token }: { token: string }) {
     return () => {
       active = false;
     };
-  }, [token, valid, refresh, attempt]);
+  }, [token, valid, loadConversation, attempt]);
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 20 }}>
       <Text style={styles.title}>{valid ? 'Join group' : 'Invalid group invite'}</Text>
