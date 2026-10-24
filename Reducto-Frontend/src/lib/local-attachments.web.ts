@@ -23,3 +23,4 @@ export async function saveLocalFile(file: VideoFile) {
   anchor.download = file.name ?? 'attachment';
   anchor.click();
 }
+export const openLocalFile = saveLocalFile;

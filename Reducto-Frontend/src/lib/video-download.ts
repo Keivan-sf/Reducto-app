@@ -3,13 +3,23 @@ import type { VideoFile } from '../api/video-cache';
 import type { VideoDownloadRequest } from './video-download.types';
 
 export async function loadVideoFile(request: VideoDownloadRequest): Promise<VideoFile> {
-  const directory = new Directory(Paths.cache, 'reducto-videos');
+  const unique = `reducto-media-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // Keep document basenames intact for external viewers, with a unique parent
+  // directory so different attachments named alike cannot overwrite each other.
+  const directory = new Directory(
+    Paths.cache,
+    request.fileName ? `reducto-files/${unique}` : 'reducto-videos',
+  );
+  const name = request.fileName?.replace(/[/\\\x00-\x1f]/g, '_');
   const destination = new File(
     directory,
-    `reducto-media-${Date.now()}-${Math.random().toString(36).slice(2)}${request.mimeType === 'audio/ogg' ? '.ogg' : request.mimeType?.startsWith('image/') ? '.jpg' : '.mp4'}`,
+    name && name !== '.' && name !== '..'
+      ? name
+      : `${unique}${request.mimeType === 'audio/ogg' ? '.ogg' : request.mimeType?.startsWith('image/') ? '.jpg' : '.mp4'}`,
   );
   const dispose = () => {
-    if (destination.exists) destination.delete();
+    if (request.fileName && directory.exists) directory.delete();
+    else if (destination.exists) destination.delete();
   };
   const get = (headers: Record<string, string>) => {
     if (request.signal.aborted) {

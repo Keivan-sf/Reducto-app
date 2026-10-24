@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page, type WebSocketRoute } from '@pla
 import path from 'node:path';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
+import { imageDensity } from '../../src/lib/image-density';
 const inviteToken = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
 const inviteUri = `reducto:///api/groups/join/${inviteToken}`;
 
@@ -2104,6 +2105,64 @@ test('chat scrollbar remains visible but disabled during voice seeking', async (
   await expect(thumb).toHaveCSS('opacity', '1');
 });
 
+test('document messages download on demand, retry, cancel, and save original bytes and filename', async ({
+  page,
+}, testInfo) => {
+  const mediaId = 'download-document';
+  const fileName = 'PhoneticsPhonology2018-Preface.docx';
+  const bytes = Buffer.from('original document bytes');
+  const metadata = {
+    id: mediaId,
+    type: 'document',
+    fileName,
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    fileSize: bytes.length,
+  };
+  let downloads = 0;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await mockApi(page, [{ ...first, text: null, attachment: { type: 'document', mediaId } }]);
+  await page.route(`**/api/conversations/*/attachments/${mediaId}/metadata`, (route) =>
+    route.fulfill({ json: { attachment: metadata } }),
+  );
+  await page.route(`**/api/conversations/*/attachments/${mediaId}`, async (route) => {
+    const attempt = ++downloads;
+    if (attempt === 1) return route.fulfill({ status: 503 });
+    if (attempt === 2) await held;
+    return route.fulfill({ contentType: 'application/octet-stream', body: bytes });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const row = page.getByTestId(`document-message-${mediaId}`);
+  await expect(row.getByText(fileName, { exact: true })).toBeVisible();
+  await expect(row.getByText(`${bytes.length} B`, { exact: true })).toBeVisible();
+  expect(downloads).toBe(0);
+  await row.getByRole('button', { name: 'Download document', exact: true }).click();
+  await expect(row.getByText('Tap to retry')).toBeVisible();
+  await row.getByRole('button', { name: 'Download document', exact: true }).click();
+  await expect.poll(() => downloads).toBe(2);
+  await expect(row.getByText(`0 B / ${bytes.length} B`, { exact: true })).toBeVisible();
+  await row.getByRole('button', { name: 'Cancel document download', exact: true }).click();
+  await expect(row.getByRole('button', { name: 'Download document', exact: true })).toBeVisible();
+  release();
+  await row.getByRole('button', { name: 'Download document', exact: true }).click();
+  await expect(row.getByRole('button', { name: 'Save document', exact: true })).toBeVisible();
+  const saved = page.waitForEvent('download');
+  await row.getByRole('button', { name: 'Save document', exact: true }).click();
+  const file = await saved;
+  expect(file.suggestedFilename()).toBe(fileName);
+  expect(readFileSync((await file.path())!)).toEqual(bytes);
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(row.getByRole('button', { name: 'Save document', exact: true })).toBeVisible();
+  expect(downloads).toBe(3);
+});
+
 test('uncached voice messages wait for a download click and reuse the cached download on return', async ({
   page,
 }, testInfo) => {
@@ -3109,46 +3168,122 @@ test('historical video metadata without dimensions or thumbnails keeps a square 
   expect(downloads).toBe(0);
 });
 
-for (const kind of ['image', 'video', 'document', 'audio'] as const) {
-  test(`uploaded ${kind} attachments reuse local bytes for previews, playback, saving, and reopening`, async ({
+for (const selection of [
+  'image',
+  'image-wide',
+  'image-tall',
+  'image-small',
+  'video',
+  'document',
+  'audio',
+  'typescript',
+] as const) {
+  test(`uploaded ${selection} attachments reuse local bytes for previews, playback, saving, and reopening`, async ({
     page,
   }, testInfo) => {
+    const kind =
+      selection === 'typescript' ? 'document' : selection.startsWith('image') ? 'image' : selection;
+    const imageSize =
+      selection === 'image-wide'
+        ? [4000, 2000]
+        : selection === 'image-tall'
+          ? [2000, 4000]
+          : selection === 'image-small'
+            ? [64, 32]
+            : undefined;
     await mockApi(page, []);
+    if (kind === 'image')
+      await page.addInitScript(() => {
+        const toBlob = HTMLCanvasElement.prototype.toBlob;
+        (window as any).__imageEncodings = [];
+        HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+          (window as any).__imageEncodings.push({ type, quality });
+          return toBlob.call(this, callback, type, quality);
+        };
+      });
     let downloads = 0;
     const id = `uploaded-${kind}`;
     const name =
-      kind === 'image'
-        ? 'uploaded.png'
-        : kind === 'video'
-          ? 'uploaded.mp4'
-          : kind === 'audio'
-            ? 'sound.mp3'
-            : 'notes.txt';
+      selection === 'typescript'
+        ? 'example.ts'
+        : kind === 'image'
+          ? imageSize
+            ? 'uploaded.jpeg'
+            : 'uploaded.png'
+          : kind === 'video'
+            ? 'uploaded.mp4'
+            : kind === 'audio'
+              ? 'sound.mp3'
+              : 'notes.txt';
     const mimeType =
-      kind === 'image'
-        ? 'image/png'
-        : kind === 'video'
-          ? 'video/mp4'
-          : kind === 'audio'
-            ? 'audio/mpeg'
-            : 'text/plain';
-    const buffer =
-      kind === 'image'
+      selection === 'typescript'
+        ? 'video/mp2t'
+        : kind === 'image'
+          ? imageSize
+            ? 'image/jpeg'
+            : 'image/png'
+          : kind === 'video'
+            ? 'video/mp4'
+            : kind === 'audio'
+              ? 'audio/mpeg'
+              : 'text/plain';
+    const buffer = imageSize
+      ? Buffer.from(
+          await page.evaluate(([width, height]) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext('2d')!;
+            context.fillStyle = '#3390EC';
+            context.fillRect(0, 0, width, height);
+            return Array.from(atob(canvas.toDataURL('image/jpeg', 1).split(',')[1]), (char) =>
+              char.charCodeAt(0),
+            );
+          }, imageSize),
+        )
+      : kind === 'image'
         ? readFileSync(path.join(__dirname, '../fixtures/portrait.png'))
         : kind === 'video'
           ? readFileSync(path.join(__dirname, '../fixtures/portrait.mp4'))
           : Buffer.from('original uploaded bytes');
-    await page.route('**/api/conversations/*/attachments', (route) => {
+    if (imageSize) {
+      const jfif = buffer.indexOf(Buffer.from('JFIF\0'));
+      expect(jfif).toBeGreaterThan(0);
+      buffer[jfif + 7] = 1;
+      buffer.writeUInt16BE(selection === 'image-small' ? 72 : 300, jfif + 8);
+      buffer.writeUInt16BE(selection === 'image-small' ? 48 : 300, jfif + 10);
+    }
+    const uploadName = kind === 'image' ? 'uploaded.jpg' : name;
+    const uploadMime = kind === 'image' ? 'image/jpeg' : mimeType;
+    let uploadedBytes: Buffer;
+    await page.route('**/api/conversations/*/attachments', async (route) => {
       expect(route.request().method()).toBe('POST');
+      const multipart = route.request().postDataBuffer()!.toString();
+      if (kind === 'document') expect(multipart).toContain('name="kind"\r\n\r\ndocument');
+      else expect(multipart).not.toContain('name="kind"');
+      const form = await new Response(new Uint8Array(route.request().postDataBuffer()!), {
+        headers: { 'Content-Type': route.request().headers()['content-type'] },
+      }).formData();
+      const uploaded = (form as unknown as { get(name: string): File }).get('file');
+      expect(uploaded.name).toBe(uploadName);
+      expect(uploaded.type).toBe(uploadMime);
+      uploadedBytes = Buffer.from(await uploaded.arrayBuffer());
+      if (kind === 'image') {
+        expect(uploadedBytes.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+        expect(uploadedBytes.equals(buffer)).toBe(false);
+        expect(imageDensity(uploadedBytes)).toEqual(
+          selection === 'image-small' ? { x: 72, y: 48 } : { x: 96, y: 96 },
+        );
+      }
       return route.fulfill({
         status: 201,
         json: {
           attachment: {
             id,
             type: kind,
-            fileName: name,
-            contentType: mimeType,
-            fileSize: buffer.length,
+            fileName: uploadName,
+            contentType: uploadMime,
+            fileSize: uploadedBytes.length,
             width: 360,
             height: 640,
             thumbnailUrl: kind === 'video' ? 'https://media.example/uploaded-thumb.jpg' : null,
@@ -3171,17 +3306,49 @@ for (const kind of ['image', 'video', 'document', 'audio'] as const) {
     const picker = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
     await (await picker).setFiles({ name, mimeType, buffer });
-    await expect(page.getByText(name, { exact: true })).toBeVisible();
+    await expect(page.getByText(uploadName, { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     const message = page.getByTestId('message-44444444-4444-4444-8444-444444444444');
     await expect(message).toBeVisible();
     if (kind === 'image') {
+      expect(await page.evaluate(() => (window as any).__imageEncodings)).toContainEqual({
+        type: 'image/jpeg',
+        quality: 0.87,
+      });
       await expect(message.locator('img')).toHaveAttribute('src', /^blob:/);
+      const cached = await message.locator('img').evaluate(async (image: HTMLImageElement) => {
+        const response = await fetch(image.src);
+        const blob = await response.blob();
+        return { type: blob.type, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) };
+      });
+      expect(cached.type).toBe('image/jpeg');
+      expect(Buffer.from(cached.bytes)).toEqual(uploadedBytes!);
       await expect
         .poll(() =>
           message.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth > 0),
         )
         .toBeTruthy();
+      const dimensions = await message
+        .locator('img')
+        .evaluate((image: HTMLImageElement) => ({
+          width: image.naturalWidth,
+          height: image.naturalHeight,
+        }));
+      expect(dimensions.width).toBeLessThanOrEqual(1280);
+      expect(dimensions.height).toBeLessThanOrEqual(1280);
+      if (imageSize) {
+        const scale = Math.min(1, 1280 / Math.max(...imageSize));
+        expect(dimensions).toEqual({
+          width: Math.round(imageSize[0] * scale),
+          height: Math.round(imageSize[1] * scale),
+        });
+      }
+    }
+    if (kind === 'document') {
+      await expect(message.getByText(name, { exact: true })).toBeVisible();
+      const saved = page.waitForEvent('download');
+      await message.getByRole('button', { name: 'Save document', exact: true }).click();
+      expect((await saved).suggestedFilename()).toBe(name);
     }
     if (kind === 'video') {
       await expect(message.getByRole('button', { name: 'Save video', exact: true })).toBeVisible();
@@ -3199,7 +3366,9 @@ for (const kind of ['image', 'video', 'document', 'audio'] as const) {
     await message.getByRole('button', { name: 'Message actions', exact: true }).click();
     const saved = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Save attachment', exact: true }).click();
-    expect((await saved).suggestedFilename()).toBe(name);
+    const savedFile = await saved;
+    expect(savedFile.suggestedFilename()).toBe(uploadName);
+    expect(readFileSync((await savedFile.path())!)).toEqual(uploadedBytes!);
     await expect(page.getByTestId('message-options')).toHaveCount(0);
     if (testInfo.project.name === 'mobile')
       await page.getByRole('button', { name: 'Back to chats', exact: true }).click();

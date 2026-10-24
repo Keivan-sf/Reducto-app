@@ -1,5 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import { Platform } from 'react-native';
+import { startActivityAsync } from 'expo-intent-launcher';
 import type { VideoFile } from '../api/video-cache';
 import type { UploadAsset } from './uploads';
 
@@ -38,4 +40,18 @@ export async function saveLocalFile(file: VideoFile) {
   if (!(await Sharing.isAvailableAsync()))
     throw new Error('Sharing files is unavailable on this device.');
   await Sharing.shareAsync(file.uri, { mimeType: file.mimeType });
+}
+
+export async function openLocalFile(file: VideoFile) {
+  if (Platform.OS !== 'android') return saveLocalFile(file);
+  try {
+    await startActivityAsync('android.intent.action.VIEW', {
+      data: new File(file.uri).contentUri,
+      type: file.mimeType || 'application/octet-stream',
+      flags: 1, // Grant the chosen app read access to this cached file.
+    });
+  } catch {
+    // Files without an installed viewer can still be saved or shared.
+    await saveLocalFile(file);
+  }
 }

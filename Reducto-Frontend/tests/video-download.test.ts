@@ -40,6 +40,12 @@ function nativeDownloader(
     create() {
       mkdirSync(this.path, { recursive: true });
     }
+    get exists() {
+      return existsSync(this.path);
+    }
+    delete() {
+      rmSync(this.path, { recursive: true });
+    }
   }
   class File {
     path: string;
@@ -114,6 +120,27 @@ test('native downloads recover once if Android removes the directory during a re
   const saved = await load(request());
   assert.equal(calls.length, 2);
   assert.equal(saved.exists?.(), true);
+});
+
+test('native document downloads preserve their extension, MIME type, and original filename', async () => {
+  let savedPath = '';
+  const { load } = nativeDownloader((_attempt, destination) => {
+    savedPath = destination;
+  });
+  const saved = await load({
+    ...request(),
+    fileName: 'Preface.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  });
+  assert.equal(saved.name, 'Preface.docx');
+  assert.equal(
+    saved.mimeType,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  );
+  assert.equal(path.extname(savedPath), '.docx');
+  assert.equal(path.basename(savedPath), 'Preface.docx');
+  saved.dispose();
+  assert.equal(existsSync(path.dirname(savedPath)), false);
 });
 
 test('auth refresh and a missing-directory retry both preserve the refreshed bearer token', async () => {

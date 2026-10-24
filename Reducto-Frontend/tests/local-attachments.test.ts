@@ -28,6 +28,7 @@ for (const scheme of ['file', 'content']) {
     roots.push(root);
     const original = path.join(root, 'original.pdf');
     writeFileSync(original, 'original document bytes');
+    const viewed: { action: string; options: { data: string; type: string; flags: number } }[] = [];
     class Directory {
       path: string;
       constructor(...parts: string[]) {
@@ -57,6 +58,9 @@ for (const scheme of ['file', 'content']) {
       get uri() {
         return pathToFileURL(this.path).href;
       }
+      get contentUri() {
+        return `content://reducto/${path.basename(this.path)}`;
+      }
       get exists() {
         return existsSync(this.path);
       }
@@ -83,6 +87,16 @@ for (const scheme of ['file', 'content']) {
         if (name === 'expo-file-system')
           return { Directory, File, Paths: { cache: path.join(root, 'cache') } };
         if (name === 'expo-sharing') return {};
+        if (name === 'react-native') return { Platform: { OS: 'android' } };
+        if (name === 'expo-intent-launcher')
+          return {
+            startActivityAsync: async (
+              action: string,
+              options: { data: string; type: string; flags: number },
+            ) => {
+              viewed.push({ action, options });
+            },
+          };
         throw new Error(`Unexpected import ${name}`);
       },
     });
@@ -96,6 +110,12 @@ for (const scheme of ['file', 'content']) {
     assert.equal(path.basename(fileURLToPath(local.uri)), 'report.pdf');
     assert.equal(local.bytes, statSync(original).size);
     assert.equal(readFileSync(fileURLToPath(local.uri), 'utf8'), 'original document bytes');
+    await module.exports.openLocalFile(local);
+    assert.equal(viewed.length, 1);
+    assert.equal(viewed[0].action, 'android.intent.action.VIEW');
+    assert.equal(viewed[0].options.data, 'content://reducto/report.pdf');
+    assert.equal(viewed[0].options.type, 'application/pdf');
+    assert.equal(viewed[0].options.flags, 1, 'the viewer gets read access to the file');
     local.dispose();
     assert.equal(local.exists?.(), false);
     assert.equal(readFileSync(original, 'utf8'), 'original document bytes');

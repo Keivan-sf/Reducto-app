@@ -54,13 +54,22 @@ import { GifPreview } from './GifPreview';
 import { useGifs } from '../../context/GifsContext';
 import { ReplyPreview, ReplyQuote } from './ReplyPreview';
 import { VoiceMessage } from './VoiceMessage';
+import { DocumentMessage } from './DocumentMessage';
+import { uploadKind } from '../../lib/upload-kind';
+import { compressImageUpload } from '../../lib/compress-image-upload';
 import { MessageComposer } from './MessageComposer';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { useVoicePlayback } from '../../context/VoicePlaybackContext';
 import { VoiceMiniPlayer } from './VoiceMiniPlayer';
 import { VideoCard } from './VideoCard';
 import { useMediaViewers } from './MediaViewers';
-import { useVideos, videoKey, gifFileKey, voiceFileKey } from '../../context/VideosContext';
+import {
+  useVideos,
+  videoKey,
+  gifFileKey,
+  voiceFileKey,
+  documentFileKey,
+} from '../../context/VideosContext';
 import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
 import { videoTime } from '../../lib/video-download.types';
@@ -539,7 +548,14 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     let local: VideoFile | undefined;
     try {
       local = await retainUpload(file);
-      if (file.mimeType === 'image/gif') {
+      const kind = uploadKind(file.mimeType ?? local.mimeType, file.name);
+      if (kind === 'media' && local.mimeType?.toLowerCase().startsWith('image/')) {
+        const compressed = await compressImageUpload(local);
+        local.dispose();
+        local = compressed;
+      }
+      const uploadName = local.name ?? file.name;
+      if (kind === 'gif') {
         const body = await fileForm('gif', { ...file, uri: local.uri });
         const { gif } = await api.request<{ gif: Gif }>('/api/gifs', {
           method: 'POST',
@@ -551,7 +567,12 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         local = undefined;
         setAttachment({ type: 'gif', gifId: gif.id });
       } else {
-        const body = await fileForm('file', { ...file, uri: local.uri });
+        const body = await fileForm('file', {
+          uri: local.uri,
+          name: uploadName,
+          mimeType: local.mimeType,
+        });
+        if (kind === 'document') body.append('kind', 'document');
         const { attachment: media } = await api.request<{
           attachment: AttachmentMetadata;
         }>(`/api/conversations/${id}/attachments`, {
@@ -560,11 +581,14 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           signal: AbortSignal.timeout(120000),
         });
         mediaMetadata.remember(id, media);
-        videoCache.remember(videoKey(id, media.id), local);
+        videoCache.remember(
+          media.type === 'document' ? documentFileKey(id, media.id) : videoKey(id, media.id),
+          local,
+        );
         local = undefined;
         setAttachment({ type: media.type, mediaId: media.id });
       }
-      setAttachmentName(file.name);
+      setAttachmentName(uploadName);
     } catch (err) {
       local?.dispose();
       setError((err as Error).message);
@@ -708,9 +732,13 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                   onPress: () => {
                     const attachment = actionMessage.attachment!;
                     setActionsVisible(false);
-                    if (id && attachment.type === 'voice')
+                    if (id && (attachment.type === 'voice' || attachment.type === 'document'))
                       void videoCache
-                        .get(voiceFileKey(id, attachment.mediaId))
+                        .get(
+                          attachment.type === 'voice'
+                            ? voiceFileKey(id, attachment.mediaId)
+                            : documentFileKey(id, attachment.mediaId),
+                        )
                         .then(saveLocalFile)
                         .catch((err) => setError(err.message));
                     else if (id && attachment.type === 'video')
@@ -1130,6 +1158,15 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                             active={
                               focused && !voiceActive && !gifs && visibleMessages.has(message.id)
                             }
+                            onOptions={(event) => openMessageMenu(message, event)}
+                            onError={setError}
+                          />
+                        ) : message.attachment?.type === 'document' ? (
+                          <DocumentMessage
+                            conversationId={id}
+                            mediaId={message.attachment.mediaId}
+                            initialMetadata={mediaMetadata}
+                            active={focused && visibleMessages.has(message.id)}
                             onOptions={(event) => openMessageMenu(message, event)}
                             onError={setError}
                           />

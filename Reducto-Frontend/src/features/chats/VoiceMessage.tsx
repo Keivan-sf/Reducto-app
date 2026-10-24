@@ -1,17 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
-import { Icon, colors } from '../../components/ui';
+import { colors } from '../../components/ui';
 import { useCachedFile, voiceFileKey } from '../../context/VideosContext';
 import { videoTime } from '../../lib/video-download.types';
 import { useVoicePlayback, useVoicePlaybackState } from '../../context/VoicePlaybackContext';
 import { VoiceSeekBar } from './VoiceSeekBar';
+import { AttachmentControlIcon } from './AttachmentControlIcon';
 import { DownloadProgressRing } from './DownloadProgressRing';
 import type { AttachmentMetadata } from '../../api/types';
 
@@ -163,7 +158,7 @@ function VoicePlayer({
         style={s.play}
       >
         {(downloading || completing) && <DownloadProgressRing progress={progress} />}
-        <VoiceControlIcon name={icon} />
+        <AttachmentControlIcon name={icon} />
       </Pressable>
       <View style={s.controls}>
         {ready ? (
@@ -189,44 +184,6 @@ function VoicePlayer({
         </Text>
       </View>
     </View>
-  );
-}
-const voiceIcons = ['arrow-down', 'close', 'play', 'pause'] as const;
-function VoiceControlIcon({ name }: { name: (typeof voiceIcons)[number] }) {
-  return (
-    <View pointerEvents="none" style={{ width: 24, height: 24 }}>
-      {voiceIcons.map((icon) => (
-        <VoiceIconLayer key={icon} name={icon} visible={name === icon} />
-      ))}
-    </View>
-  );
-}
-function VoiceIconLayer({
-  name,
-  visible,
-}: {
-  name: (typeof voiceIcons)[number];
-  visible: boolean;
-}) {
-  const opacity = useSharedValue(visible ? 1 : 0);
-  useEffect(() => {
-    opacity.value = withTiming(visible ? 1 : 0, {
-      duration: 140,
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-    });
-  }, [visible, opacity]);
-  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  return (
-    <Animated.View
-      testID={`voice-icon-${name}`}
-      style={[
-        StyleSheet.absoluteFill,
-        name === 'play' && { transform: [{ translateX: 1 }] },
-        style,
-      ]}
-    >
-      <Icon name={name} color="white" size={24} />
-    </Animated.View>
   );
 }
 // Older messages may lack server duration metadata. This silent probe is

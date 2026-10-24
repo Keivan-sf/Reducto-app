@@ -12,11 +12,13 @@ import { ThumbnailCache } from '../api/thumbnail-cache';
 import { loadVideoFile } from '../lib/video-download';
 import { api } from './SessionContext';
 import { useGifs } from './GifsContext';
+import { useMediaMetadata } from './MediaMetadataContext';
 
 const Context = createContext<VideoCache>(null!);
 const ThumbnailContext = createContext<ThumbnailCache>(null!);
 export function VideosProvider({ children }: PropsWithChildren) {
   const gifs = useGifs();
+  const mediaMetadata = useMediaMetadata();
   const [cache] = useState(() => {
     const owner = api.getSession()!;
     const headers = () => {
@@ -55,11 +57,20 @@ export function VideosProvider({ children }: PropsWithChildren) {
         }
       }
       const voice = key.startsWith('voice:');
-      const path = voice ? key.slice('voice:'.length) : key;
+      const document = /^document:(\/api\/conversations\/([^/]+)\/attachments\/([^/]+))$/.exec(key);
+      const metadata = document
+        ? (
+            await mediaMetadata.get(
+              decodeURIComponent(document[2]),
+              decodeURIComponent(document[3]),
+            )
+          ).attachment
+        : undefined;
+      const path = document ? document[1] : voice ? key.slice('voice:'.length) : key;
       const file = await loadVideoFile({
         url: `${owner.serverUrl}${path}`,
-        mimeType: voice ? 'audio/ogg' : mimeType,
-        fileName: voice ? 'voice.ogg' : undefined,
+        mimeType: metadata?.contentType ?? (voice ? 'audio/ogg' : mimeType),
+        fileName: metadata?.fileName ?? (voice ? 'voice.ogg' : undefined),
         headers: headers(),
         signal,
         progress,
@@ -105,6 +116,8 @@ export const videoKey = (conversationId: string, mediaId: string) =>
   `/api/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(mediaId)}`;
 export const voiceFileKey = (conversationId: string, mediaId: string) =>
   `voice:${videoKey(conversationId, mediaId)}`;
+export const documentFileKey = (conversationId: string, mediaId: string) =>
+  `document:${videoKey(conversationId, mediaId)}`;
 export const gifFileKey = (gifId: string) => `/api/gifs/${encodeURIComponent(gifId)}/local`;
 export function useVideoFile(conversationId: string, mediaId: string, active = true) {
   return useCachedFile(videoKey(conversationId, mediaId), active);
