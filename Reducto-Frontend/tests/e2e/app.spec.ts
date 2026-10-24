@@ -5313,3 +5313,44 @@ test('private conversation menu opens the other user details', async ({ page }) 
   await expect(page.getByText('@grace', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('MEMBERS', { exact: true })).toHaveCount(0);
 });
+
+test('message username mentions link by syntax and look up users only when clicked', async ({
+  page,
+}) => {
+  await mockApi(page, [
+    { ...first, text: 'Hello (@Username_12), @missing_user and @offline_user. mail@example.com' },
+  ]);
+  await mockRealtime(page);
+  const lookups: string[] = [];
+  await page.route('**:3001/api/users/by-username/*', (route) => {
+    const username = new URL(route.request().url()).pathname.split('/').at(-1)!;
+    lookups.push(username);
+    if (username === 'missing_user')
+      return route.fulfill({ status: 404, json: { error: 'User not found' } });
+    if (username === 'offline_user')
+      return route.fulfill({ status: 503, json: { error: 'Server unavailable' } });
+    return route.fulfill({ json: { user: { ...friend, username } } });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const mention = page.getByRole('link', { name: '@Username_12', exact: true });
+  await expect(mention).toBeVisible();
+  await expect(mention).toHaveCSS('color', 'rgb(51, 144, 236)');
+  expect(lookups).toEqual([]);
+  await expect(page.getByRole('link', { name: '@example', exact: true })).toHaveCount(0);
+  await mention.click();
+  await expect(page.getByText('User details', { exact: true })).toBeVisible();
+  await expect(page.getByText('@username_12', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
+  expect(lookups).toEqual(['username_12']);
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(page.getByText('User details', { exact: true })).toHaveCount(0);
+  await page.getByRole('link', { name: '@missing_user', exact: true }).click();
+  await expect(page.getByTestId('notification')).toHaveText(
+    "Username @missing_user doesn't exist.",
+  );
+  await expect(page.getByText('User details', { exact: true })).toHaveCount(0);
+  await page.getByRole('link', { name: '@offline_user', exact: true }).click();
+  await expect(page.getByTestId('notification')).toHaveText('Server unavailable');
+  expect(lookups).toEqual(['username_12', 'missing_user', 'offline_user']);
+});

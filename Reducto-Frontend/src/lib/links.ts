@@ -43,6 +43,7 @@ export interface TextPart {
   text: string;
   href?: string;
   internal?: boolean;
+  username?: string;
 }
 export function linkify(text: string): TextPart[] {
   const pattern = /\b(?:(?:https?|ftp|reducto):\/\/|www\.)[^\s<>"'\u0000-\u001f]+/gi;
@@ -71,4 +72,22 @@ export function linkify(text: string): TextPart[] {
   }
   if (position < text.length) parts.push({ text: text.slice(position) });
   return parts;
+}
+
+/** Preserve URLs as a single link; only scan ordinary text for username mentions. */
+export function linkifyMentions(text: string): TextPart[] {
+  return linkify(text).flatMap((part) => {
+    if (part.href) return [part];
+    const parts: TextPart[] = [];
+    const pattern = /(^|[^\p{L}\p{N}_@])@([a-z0-9_]{1,32})(?![\p{L}\p{N}_@])/giu;
+    let position = 0;
+    for (const match of part.text.matchAll(pattern)) {
+      const start = match.index + match[1].length;
+      if (start > position) parts.push({ text: part.text.slice(position, start) });
+      parts.push({ text: `@${match[2]}`, username: match[2].toLowerCase() });
+      position = start + match[2].length + 1;
+    }
+    if (position < part.text.length) parts.push({ text: part.text.slice(position) });
+    return parts;
+  });
 }

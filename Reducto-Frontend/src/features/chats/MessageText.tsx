@@ -8,23 +8,38 @@ import {
   type GestureResponderEvent,
 } from 'react-native';
 import { colors } from '../../components/ui';
-import { internalLinkPath, linkify } from '../../lib/links';
+import { internalLinkPath, linkifyMentions } from '../../lib/links';
 
 export function MessageText({
   text,
   style,
   onMessagePress,
   onError,
+  onOpenUsername,
 }: {
   text: string;
   style?: StyleProp<TextStyle>;
   onMessagePress: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
+  onOpenUsername: (username: string) => void;
 }) {
   return (
     <Text selectable style={style} onPress={onMessagePress} onLongPress={onMessagePress}>
-      {linkify(text).map((part, index) =>
-        part.href ? (
+      {linkifyMentions(text).map((part, index) =>
+        part.username ? (
+          <Text
+            key={index}
+            accessibilityRole="link"
+            accessibilityLabel={part.text}
+            style={{ color: colors.blue }}
+            onPress={(event) => {
+              event.stopPropagation();
+              onOpenUsername(part.username!);
+            }}
+          >
+            {part.text}
+          </Text>
+        ) : part.href ? (
           <Link
             key={index}
             href={part.internal ? internalLinkPath(part.href) : part.href}

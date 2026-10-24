@@ -47,6 +47,7 @@ import { fileForm } from '../../lib/uploads';
 import { downloadAttachment } from '../../lib/download';
 import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
+import { ApiError } from '../../api/client';
 import { UserProfileDialog } from './UserProfileDialog';
 import { GifDialog } from './GifDialog';
 import { MessageText } from './MessageText';
@@ -86,7 +87,7 @@ const readViewabilityConfig = { minimumViewTime: 350, viewAreaCoveragePercentThr
 
 export default function ChatView({ id, active }: { id?: string; active: boolean }) {
   const { session } = useSession();
-  const { profiles } = useProfiles();
+  const { profiles, directory } = useProfiles();
   const {
     conversations,
     messages,
@@ -147,6 +148,29 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const [error, setError] = useState('');
   const [details, setDetails] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const usernameLookup = useRef(0);
+  useEffect(
+    () => () => {
+      usernameLookup.current++;
+    },
+    [focused, id],
+  );
+  async function openUsername(username: string) {
+    const sequence = ++usernameLookup.current;
+    setError('');
+    try {
+      const profile = await directory.byUsername(username);
+      if (sequence === usernameLookup.current) setProfileUserId(profile.id);
+    } catch (err) {
+      if (sequence !== usernameLookup.current) return;
+      setError(
+        err instanceof ApiError && err.status === 404
+          ? `Username @${username} doesn't exist.`
+          : (err as Error).message,
+      );
+    }
+  }
+
   const [gifs, setGifs] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [actionsVisible, setActionsVisible] = useState(false);
@@ -1162,6 +1186,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                               text={message.text}
                               style={s.messageText}
                               onError={setError}
+                              onOpenUsername={(username) => void openUsername(username)}
                               onMessagePress={(event) => openMessageMenu(message, event)}
                             />
                           )

@@ -6,6 +6,7 @@ import {
   groupJoinPath,
   internalLinkPath,
   linkify,
+  linkifyMentions,
 } from '../src/lib/links';
 import { redirectSystemPath } from '../src/app/+native-intent';
 
@@ -88,4 +89,36 @@ test('unsupported app links remain links while unsafe schemes and malformed URLs
       .join(''),
     text,
   );
+});
+
+test('username mentions follow syntax and preserve punctuation, case, and all message text', () => {
+  const text = `Hi (@Username_12), @a! @${'z'.repeat(32)} @other_user.`;
+  const parts = linkifyMentions(text);
+  assert.equal(parts.map((part) => part.text).join(''), text);
+  assert.deepEqual(
+    parts.filter((part) => part.username).map((part) => part.username),
+    ['username_12', 'a', 'z'.repeat(32), 'other_user'],
+  );
+});
+
+test('mentions exclude email addresses, embedded names, doubled @ and overlong or non-ASCII usernames', () => {
+  const text = `mail@example.com abc@user @@user @${'x'.repeat(33)} @ @éclair @nameé 文@name`;
+  const parts = linkifyMentions(text);
+  assert.equal(parts.map((part) => part.text).join(''), text);
+  assert.equal(
+    parts.some((part) => part.username),
+    false,
+  );
+});
+
+test('username mentions do not split URLs, credentials, or app links', () => {
+  const text =
+    'https://example.org/@someone?to=@other www.example.org/@name ftp://user@host/file @outside';
+  const parts = linkifyMentions(text);
+  assert.equal(parts.map((part) => part.text).join(''), text);
+  assert.deepEqual(
+    parts.filter((part) => part.username).map((part) => part.username),
+    ['outside'],
+  );
+  assert.equal(parts.filter((part) => part.href).length, 3);
 });
