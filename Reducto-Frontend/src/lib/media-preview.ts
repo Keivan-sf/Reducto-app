@@ -17,7 +17,7 @@ export interface MediaSize {
   height: number;
 }
 
-/** Bound extreme shapes; contain-fit media adds padding instead of cropping. */
+/** Bound extreme shapes; cover-fit previews fill the frame and crop excess edges. */
 export function mediaPreviewSize(size?: MediaSize) {
   const valid =
     size &&

@@ -433,13 +433,13 @@ for (const portrait of [false, true]) {
         }),
       )
       .toBe(true);
-    await expect(video).toHaveCSS('object-fit', 'contain');
+    await expect(video).toHaveCSS('object-fit', 'cover');
     await expectMediaBubble(page, video);
   });
 }
 
 for (const panorama of [false, true]) {
-  test(`image previews adapt to ${panorama ? 'extreme panorama' : 'portrait'} dimensions without cropping`, async ({
+  test(`image previews adapt to ${panorama ? 'extreme panorama' : 'portrait'} dimensions and fill their frame`, async ({
     page,
   }) => {
     await mockApi(page, [{ ...first, attachment: { type: 'image', mediaId: 'photo' } }]);
@@ -463,7 +463,7 @@ for (const panorama of [false, true]) {
       .poll(() =>
         frame.evaluate((element) => {
           const box = element.getBoundingClientRect();
-          // React Native Web renders an Image as a background sized to contain.
+          // React Native Web renders an Image as a background sized to cover the frame.
           const image = element.querySelector('[style*="background-image"]');
           return (
             box.width <= 260 &&
@@ -471,7 +471,7 @@ for (const panorama of [false, true]) {
             box.left >= 0 &&
             box.right <= window.innerWidth &&
             !!image &&
-            getComputedStyle(image).backgroundSize === 'contain'
+            getComputedStyle(image).backgroundSize === 'cover'
           );
         }),
       )
@@ -2723,6 +2723,7 @@ test('video cards use server thumbnails without downloading and open the full-pa
   const card = page.getByTestId(`video-card-${mediaId}`);
   await expectMediaBubble(page, card);
   await expect(card.getByRole('img', { name: 'Video thumbnail' })).toBeVisible();
+  await expect(card.locator('[style*="background-image"]')).toHaveCSS('background-size', 'cover');
   await expect(card.locator('video')).toHaveCount(0);
   await expect(card.getByRole('button', { name: 'Download video', exact: true })).toBeVisible();
   expect(downloads).toBe(0);
@@ -2959,6 +2960,7 @@ for (const kind of ['image', 'video', 'gif'] as const) {
           )
           .toBe(true);
         await expect(page.getByRole('img', { name: 'GIF thumbnail', exact: true })).toHaveCount(0);
+        await expect(frame.locator('video')).toHaveCSS('object-fit', 'cover');
       }
       await expect
         .poll(async () => {

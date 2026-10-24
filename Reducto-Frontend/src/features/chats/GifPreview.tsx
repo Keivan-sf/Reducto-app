@@ -74,7 +74,7 @@ export function GifPreview({
           <Image
             accessibilityLabel="Uploaded GIF"
             source={{ uri: local.uri }}
-            resizeMode="contain"
+            resizeMode="cover"
             style={{ width: '100%', height: '100%' }}
             onError={() => files.forget(gifFileKey(gifId), 'GIF unavailable')}
           />

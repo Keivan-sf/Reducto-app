@@ -45,7 +45,7 @@ export function AttachmentImage({
         <Image
           source={{ uri: cached.uri }}
           style={{ width: '100%', height: '100%' }}
-          resizeMode="contain"
+          resizeMode="cover"
           onLoad={({ nativeEvent }) =>
             nativeEvent.source &&
             setSize({

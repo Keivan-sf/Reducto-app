@@ -41,7 +41,7 @@ export function ServerThumbnail({
     <Image
       accessibilityLabel={label}
       source={{ uri: source }}
-      resizeMode="contain"
+      resizeMode="cover"
       style={[StyleSheet.absoluteFill, { width: '100%', height: '100%' }]}
       onError={() => {
         if (state.status === 'ready') {

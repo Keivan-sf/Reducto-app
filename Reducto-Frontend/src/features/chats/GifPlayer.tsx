@@ -75,7 +75,7 @@ export function GifPlayer({
         playsInline
         fullscreenOptions={{ enable: false }}
         allowsPictureInPicture={false}
-        contentFit="contain"
+        contentFit="cover"
         surfaceType="textureView"
       />
       {(!active || frameUri !== uri) && (
