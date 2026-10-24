@@ -2434,7 +2434,8 @@ test('private chats and group members display fetched names, usernames and signe
   await expect(header.getByText('@grace', { exact: true })).toBeVisible();
   await expect(header.getByRole('img', { name: 'Grace Hopper profile photo' })).toBeVisible();
   await header.click();
-  await expect(page.getByText('MEMBERS', { exact: true })).toBeVisible();
+  await expect(page.getByText('User details', { exact: true })).toBeVisible();
+  await expect(page.getByText('MEMBERS', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Grace Hopper', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('@grace', { exact: true }).last()).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
@@ -5216,4 +5217,99 @@ test('sending the first private message keeps the conversation after refresh', a
   await page.getByRole('button', { name: 'Refresh conversations', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Open Grace Hopper', exact: true })).toBeVisible();
   await expect(page.getByTestId(`preview-${privateChat.id}`)).toHaveText('You: Hello Grace');
+});
+
+for (const entry of ['message avatar', 'member avatar'] as const) {
+  test(`group ${entry} opens user details and a private conversation without refreshing the list`, async ({
+    page,
+  }) => {
+    await mockApi(page);
+    await mockRealtime(page);
+    const member = entry === 'member avatar' ? { ...friend, username: null } : friend;
+    await page.route('**:3001/api/users/friend', (route) =>
+      route.fulfill({ json: { user: member } }),
+    );
+    const privateChat = { ...chat, id: 'profile-private-chat', type: 'private', name: null };
+    let attempts = 0;
+    let listCalls = 0;
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/conversations') listCalls++;
+    });
+    await page.route('**:3001/api/conversations/private', (route) => {
+      expect(route.request().postDataJSON()).toEqual({ userId: friend.id });
+      attempts++;
+      if (attempts === 1)
+        return route.fulfill({ status: 503, json: { error: 'Please try again' } });
+      return route.fulfill({ json: { conversation: privateChat } });
+    });
+    await page.route('**:3001/api/conversations/profile-private-chat', (route) =>
+      route.fulfill({ json: { conversation: privateChat } }),
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const baseline = listCalls;
+    if (entry === 'member avatar')
+      await page.getByRole('button', { name: 'View conversation details' }).click();
+    await page
+      .getByRole('button', { name: 'View Grace Hopper profile', exact: true })
+      .last()
+      .click();
+    await expect(page.getByText('User details', { exact: true })).toBeVisible();
+    await expect(page.getByText('USER ID', { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('img', { name: 'Grace Hopper profile photo' }).last(),
+    ).toBeVisible();
+    if (member.username)
+      await expect(page.getByText('@grace', { exact: true }).last()).toBeVisible();
+    await expect(page.getByTestId('message-options')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
+    await expect(page.getByText('Please try again', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
+    await expect(page).toHaveURL(/\/chat\/profile-private-chat$/);
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+    await expect(page.getByText('User details', { exact: true })).toHaveCount(0);
+    expect(listCalls).toBe(baseline);
+    expect(attempts).toBe(2);
+  });
+}
+
+test('group member names and your own member row open user details', async ({ page }) => {
+  await mockApi(page);
+  await mockRealtime(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'View conversation details' }).click();
+  await page
+    .getByRole('button', { name: 'View Grace Hopper profile', exact: true })
+    .last()
+    .getByText('Grace Hopper', { exact: true })
+    .click();
+  await expect(page.getByText('User details', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close dialog' })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(page.getByText('User details', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'View conversation details' }).click();
+  await page
+    .getByRole('button', { name: 'View Ada Lovelace profile', exact: true })
+    .getByText('Ada Lovelace (you)', { exact: true })
+    .click();
+  await expect(page.getByText('User details', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open conversation', exact: true })).toHaveCount(0);
+});
+
+test('private conversation menu opens the other user details', async ({ page }) => {
+  await mockApi(page);
+  await mockRealtime(page);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [{ ...chat, type: 'private', name: null }] } }),
+  );
+  await page.goto('/');
+  await page.getByPlaceholder('you@example.com').fill('ada@example.com');
+  await page.getByPlaceholder('Enter your password').fill('goodpassword');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Grace Hopper', exact: true }).click();
+  await page.getByRole('button', { name: 'Conversation details', exact: true }).click();
+  await expect(page.getByText('User details', { exact: true })).toBeVisible();
+  await expect(page.getByText('@grace', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('MEMBERS', { exact: true })).toHaveCount(0);
 });

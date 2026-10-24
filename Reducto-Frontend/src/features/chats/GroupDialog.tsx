@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { api, useSession } from '../../context/SessionContext';
@@ -14,10 +14,12 @@ export function GroupDialog({
   chat,
   visible,
   onClose,
+  onViewUser,
 }: {
   chat: Conversation;
   visible: boolean;
   onClose: () => void;
+  onViewUser: (userId: string) => void;
 }) {
   const { session } = useSession();
   const { members, loadConversation, removeConversation } = useChats();
@@ -123,33 +125,38 @@ export function GroupDialog({
           key={member.userId}
           style={{ gap: 8, borderBottomWidth: 1, borderColor: colors.border, paddingBottom: 14 }}
         >
-          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-            <Avatar
-              name={
-                member.userId === session!.user.id
-                  ? session!.user.name
-                  : profileName(profiles[member.userId])
-              }
-              uri={profiles[member.userId]?.avatarUrl ?? undefined}
-              size={36}
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.dark, fontSize: 14 }}>
-                {member.userId === session!.user.id
-                  ? `${session!.user.name} (you)`
-                  : profileName(profiles[member.userId])}
-              </Text>
-              {profiles[member.userId]?.username && (
-                <Text style={{ color: colors.muted, fontSize: 12 }}>
-                  @{profiles[member.userId].username}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View ${member.userId === session!.user.id ? session!.user.name : profileName(profiles[member.userId])} profile`}
+            onPress={() => onViewUser(member.userId)}
+            style={{ gap: 8, minHeight: 44 }}
+          >
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              <Avatar
+                name={
+                  member.userId === session!.user.id
+                    ? session!.user.name
+                    : profileName(profiles[member.userId])
+                }
+                uri={profiles[member.userId]?.avatarUrl ?? undefined}
+                size={36}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.dark, fontSize: 14 }}>
+                  {member.userId === session!.user.id
+                    ? `${session!.user.name} (you)`
+                    : profileName(profiles[member.userId])}
                 </Text>
-              )}
-              <Text style={{ color: colors.muted, fontSize: 12 }}>{member.role}</Text>
+                {profiles[member.userId]?.username && (
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>
+                    @{profiles[member.userId].username}
+                  </Text>
+                )}
+                <Text style={{ color: colors.muted, fontSize: 12 }}>{member.role}</Text>
+              </View>
             </View>
-          </View>
-          <Text selectable style={{ color: colors.muted, fontSize: 11 }}>
-            {member.userId}
-          </Text>
+            <Text style={{ color: colors.muted, fontSize: 11 }}>{member.userId}</Text>
+          </Pressable>
           {chat.type === 'group' &&
             manager &&
             member.role !== 'owner' &&

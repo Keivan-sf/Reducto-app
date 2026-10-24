@@ -47,6 +47,7 @@ import { fileForm } from '../../lib/uploads';
 import { downloadAttachment } from '../../lib/download';
 import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
+import { UserProfileDialog } from './UserProfileDialog';
 import { GifDialog } from './GifDialog';
 import { MessageText } from './MessageText';
 import { MessageBubbleContent } from './MessageBubbleContent';
@@ -145,6 +146,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState('');
   const [details, setDetails] = useState(false);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [gifs, setGifs] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [actionsVisible, setActionsVisible] = useState(false);
@@ -167,6 +169,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         openingHistory ||
         !focused ||
         details ||
+        profileUserId ||
         gifs ||
         viewers.isOpen() ||
         actionsVisible
@@ -194,6 +197,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     openingHistory,
     focused,
     details,
+    profileUserId,
     gifs,
     viewers,
     actionsVisible,
@@ -833,7 +837,12 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="View conversation details"
-          onPress={() => setDetails(true)}
+          disabled={chat.type === 'private' && !peerId}
+          onPress={() => {
+            if (chat.type === 'private') {
+              if (peerId) setProfileUserId(peerId);
+            } else setDetails(true);
+          }}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}
         >
           <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={44} />
@@ -858,7 +867,12 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         <IconButton
           name="ellipsis-vertical"
           label="Conversation details"
-          onPress={() => setDetails(true)}
+          disabled={chat.type === 'private' && !peerId}
+          onPress={() => {
+            if (chat.type === 'private') {
+              if (peerId) setProfileUserId(peerId);
+            } else setDetails(true);
+          }}
         />
       </View>
       {active && <VoiceMiniPlayer />}
@@ -1083,13 +1097,28 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                     style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}
                   >
                     {!mine && chat.type === 'group' && (
-                      <View style={{ marginRight: 8, alignSelf: 'flex-end' }}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`View ${profileName(profiles[message.senderId])} profile`}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          setProfileUserId(message.senderId);
+                        }}
+                        style={{
+                          marginRight: 8,
+                          alignSelf: 'flex-end',
+                          minWidth: 44,
+                          minHeight: 44,
+                          justifyContent: 'flex-end',
+                          alignItems: 'center',
+                        }}
+                      >
                         <Avatar
                           name={profileName(profiles[message.senderId])}
                           uri={profiles[message.senderId]?.avatarUrl ?? undefined}
                           size={32}
                         />
-                      </View>
+                      </Pressable>
                     )}
                     <View
                       testID={`message-${message.id}`}
@@ -1362,7 +1391,22 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           />
         </View>
       </View>
-      <GroupDialog chat={chat} visible={focused && details} onClose={() => setDetails(false)} />
+      <GroupDialog
+        chat={chat}
+        visible={focused && details}
+        onClose={() => setDetails(false)}
+        onViewUser={(userId) => {
+          setDetails(false);
+          setProfileUserId(userId);
+        }}
+      />
+      {focused && profileUserId && (
+        <UserProfileDialog
+          key={profileUserId}
+          userId={profileUserId}
+          onClose={() => setProfileUserId(null)}
+        />
+      )}
       <GifDialog
         visible={focused && gifs}
         onClose={() => setGifs(false)}
