@@ -241,3 +241,94 @@ test('Closing during video preparation prevents late autoplay while retaining th
   t.unmount();
   assert.equal(pauseRef.current, null);
 });
+
+test('Native GIF playback stays muted and looping, reports dimensions, and pauses before dismissal', async () => {
+  let plays = 0;
+  let pauses = 0;
+  const sources: unknown[] = [];
+  const sizes: unknown[] = [];
+  const pauseRef: { current: (() => void) | null } = { current: null };
+  const size = { width: 360, height: 640 };
+  const player = {
+    status: 'readyToPlay',
+    loop: false,
+    muted: false,
+    videoTrack: { size },
+    pause() {
+      pauses++;
+    },
+    play() {
+      plays++;
+    },
+    replay() {
+      plays++;
+    },
+    async replaceAsync(source: unknown) {
+      sources.push(source);
+    },
+  };
+  let initialized = false;
+  let appState: ((state: string) => void) | undefined;
+  const t = mount('VideoPlayback', {
+    'react-native': {
+      ActivityIndicator: 'ActivityIndicator',
+      View: 'View',
+      Text: 'Text',
+      StyleSheet: {},
+      AppState: {
+        currentState: 'active',
+        addEventListener: (_event: string, listener: (state: string) => void) => {
+          appState = listener;
+          return { remove() {} };
+        },
+      },
+    },
+    expo: {
+      useEvent: (_player: unknown, event: string, initial: unknown) =>
+        event === 'sourceLoad' ? { availableVideoTracks: [{ size }] } : initial,
+    },
+    'expo-video': {
+      useVideoPlayer: (_source: unknown, setup: (value: typeof player) => void) => {
+        if (!initialized) {
+          initialized = true;
+          setup(player);
+        }
+        return player;
+      },
+      VideoView: 'VideoView',
+    },
+  });
+  const props = {
+    uri: 'file:///gif.mp4',
+    loop: true,
+    muted: true,
+    nativeControls: false,
+    pauseRef,
+    onSize: (size: unknown) => sizes.push(size),
+  };
+  const shown = t.render({ ...props, active: true });
+  await tick();
+  assert.equal(player.loop, true);
+  assert.equal(player.muted, true);
+  assert.equal(find(shown, 'VideoView').props.nativeControls, false);
+  assert.equal(find(shown, 'VideoView').props.surfaceType, 'textureView');
+  assert.equal(find(shown, 'VideoView').props.playsInline, true);
+  assert.equal(sizes[0], size);
+  assert.equal(plays, 1);
+  appState!('background');
+  appState!('active');
+  assert.equal(plays, 2, 'foregrounding resumes a visible GIF');
+  const beforeClose = pauses;
+  pauseRef.current!();
+  assert.equal(pauses, beforeClose + 1);
+  t.render({ ...props, active: false });
+  await tick();
+  appState!('active');
+  assert.equal(plays, 2, 'foregrounding never resumes a hidden viewer');
+  t.render({ ...props, active: true });
+  await tick();
+  assert.equal(sources.length, 1, 'reopening retains the loaded source');
+  assert.equal(plays, 3);
+  t.unmount();
+  assert.equal(pauseRef.current, null);
+});

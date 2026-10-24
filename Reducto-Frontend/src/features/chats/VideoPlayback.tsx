@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import type { VideoPlaybackProps } from './VideoPlayback.types';
 
 const allowPlayback = () => true;
 export function VideoPlayback({
@@ -9,13 +10,16 @@ export function VideoPlayback({
   active = true,
   pauseRef,
   canPlay = allowPlayback,
-}: {
-  uri?: string;
-  active?: boolean;
-  pauseRef?: RefObject<(() => void) | null>;
-  canPlay?: () => boolean;
-}) {
-  const player = useVideoPlayer(null);
+  loop = false,
+  muted = false,
+  nativeControls = true,
+  onSize,
+  onError,
+}: VideoPlaybackProps) {
+  const player = useVideoPlayer(null, (video) => {
+    video.loop = loop;
+    video.muted = muted;
+  });
   const pending = useRef(Promise.resolve());
   const playing = useRef(false);
   const loadedUri = useRef<string | undefined>(undefined);
@@ -64,23 +68,35 @@ export function VideoPlayback({
     };
   }, [player, pauseRef]);
   const { status } = useEvent(player, 'statusChange', { status: player.status });
+  const loaded = useEvent(player, 'sourceLoad');
+  const { videoTrack } = useEvent(player, 'videoTrackChange', { videoTrack: player.videoTrack });
+  const size = videoTrack?.size ?? loaded?.availableVideoTracks?.[0]?.size;
+  useEffect(() => {
+    if (size && size.width > 0 && size.height > 0) onSize?.(size);
+  }, [size, onSize]);
+  useEffect(() => {
+    if (failed || status === 'error') onError?.();
+  }, [failed, status, onError]);
   useEffect(() => {
     let disposed = false;
     const subscription = AppState.addEventListener('change', (state) => {
-      if (!disposed && state !== 'active') player.pause();
+      if (disposed) return;
+      if (state !== 'active') player.pause();
+      else if (loop && playing.current && canPlay() && loadedUri.current) player.play();
     });
     // useVideoPlayer releases the native object; never call it from cleanup.
     return () => {
       disposed = true;
       subscription.remove();
     };
-  }, [player]);
+  }, [player, loop, canPlay]);
   return (
     <View style={{ flex: 1 }}>
       <VideoView
         player={player}
         surfaceType="textureView"
-        nativeControls
+        nativeControls={nativeControls}
+        playsInline
         contentFit="contain"
         style={StyleSheet.absoluteFill}
         fullscreenOptions={{ enable: false }}

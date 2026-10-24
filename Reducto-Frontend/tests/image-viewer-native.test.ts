@@ -7,7 +7,7 @@ import { ImageViewerGestures } from '../src/features/chats/image-viewer-gestures
 
 type Node = { type: unknown; props: Record<string, any> };
 const { outputText } = ts.transpileModule(
-  readFileSync(new URL('../src/features/chats/ImageViewer.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/features/chats/ZoomableMediaViewer.tsx', import.meta.url), 'utf8'),
   {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -16,7 +16,7 @@ const { outputText } = ts.transpileModule(
     },
   },
 );
-function viewer() {
+function viewer(kind: 'image' | 'gif' = 'image') {
   let closes = 0,
     forwards = 0,
     saves = 0;
@@ -36,11 +36,12 @@ function viewer() {
     }
   }
   const jsx = (type: unknown, props: Record<string, unknown>) => ({ type, props });
-  const module = { exports: {} as typeof import('../src/features/chats/ImageViewer') };
+  const module = { exports: {} as typeof import('../src/features/chats/ZoomableMediaViewer') };
   runInNewContext(outputText, {
     module,
     exports: module.exports,
     require: (name: string) => {
+      if (name === './VideoPlayback') return { VideoPlayback: 'VideoPlayback' };
       if (name === './image-viewer-gestures') return { ImageViewerGestures };
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name === 'react')
@@ -51,6 +52,7 @@ function viewer() {
           ],
           useRef: (current: unknown) => ({ current }),
           useEffect() {},
+          useCallback: (fn: unknown) => fn,
         };
       if (name === 'react-native')
         return {
@@ -102,9 +104,9 @@ function viewer() {
       throw new Error(`Unexpected import ${name}`);
     },
   });
-  const tree = module.exports.ImageViewer({
-    conversationId: 'chat',
-    mediaId: 'photo',
+  const tree = module.exports.ZoomableMediaViewer({
+    kind,
+    fileKey: 'image-key',
     title: 'Alice',
     createdAt: '2026-10-23T12:00:00Z',
     onClose: () => {
@@ -123,7 +125,7 @@ function viewer() {
       if (found) return found;
     }
   }
-  const surface = find((node) => node.props.testID === 'image-viewer-surface')!.props;
+  const surface = find((node) => node.props.testID === `${kind}-viewer-surface`)!.props;
   const event = (x = 100, y = 300, fingers = 1) => ({
     nativeEvent: {
       pageX: x,
@@ -241,4 +243,31 @@ test('Android pinch, then lifting one finger, remains a pan gesture even after z
   t.surface.onResponderMove(t.event(200, 460));
   t.surface.onResponderRelease();
   assert.equal(t.counts().closes, 0);
+});
+
+test('Android GIF viewer uses silent looping playback inside the shared zoom and swipe surface', async () => {
+  const t = viewer('gif');
+  const playback = t.find((node) => node.type === 'VideoPlayback')!.props;
+  assert.equal(playback.uri, 'file:///image.png');
+  assert.equal(playback.loop, true);
+  assert.equal(playback.muted, true);
+  assert.equal(playback.nativeControls, false);
+  assert.equal(playback.active, true);
+  t.surface.onLayout({ nativeEvent: { layout: { width: 400, height: 600 } } });
+  playback.onSize({ width: 800, height: 1200 });
+  for (let i = 0; i < 2; i++) {
+    t.surface.onResponderGrant(t.event(200, 300));
+    t.surface.onResponderRelease();
+  }
+  assert.equal(t.values[1].value, 2.5);
+  t.surface.onResponderGrant(t.event(200, 300));
+  t.surface.onResponderMove(t.event(200, 450));
+  t.surface.onResponderRelease();
+  assert.equal(t.counts().closes, 0);
+  assert.equal(t.values[3].value, 150);
+  t.find((node) => node.props.label === 'Forward GIF')!.props.onPress();
+  t.find((node) => node.props.label === 'Save attachment')!.props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(t.counts().forwards, 1);
+  assert.equal(t.counts().saves, 1);
 });

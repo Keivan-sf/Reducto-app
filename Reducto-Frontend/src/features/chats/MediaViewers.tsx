@@ -17,6 +17,7 @@ import { usePathname } from 'expo-router';
 import { AppViewport } from '../../components/AppViewport';
 import { MediaViewerSession } from '../../lib/media-viewer-session';
 import { ImageViewer } from './ImageViewer';
+import { GifViewer } from './GifViewer';
 import { VideoViewer } from './VideoViewer';
 import { ViewerLayer } from './ViewerLayer';
 
@@ -27,13 +28,22 @@ type VideoRequest = Omit<
   ComponentProps<typeof VideoViewer>,
   'visible' | 'pauseRef' | 'onClose' | 'canPlay' | 'onCancelDownload'
 > & { onClose?: () => void };
+type GifRequest = Omit<
+  ComponentProps<typeof GifViewer>,
+  'visible' | 'pauseRef' | 'canPlay' | 'onClose'
+> & {
+  onClose?: () => void;
+};
 type Selection = (
-  { type: 'image'; props: ImageRequest } | { type: 'video'; props: VideoRequest }
+  | { type: 'image'; props: ImageRequest }
+  | { type: 'video'; props: VideoRequest }
+  | { type: 'gif'; props: GifRequest }
 ) & { pathname: string };
 type Session = MediaViewerSession<Selection>;
 const Context = createContext<{
   openImage: (props: ImageRequest) => void;
   openVideo: (props: VideoRequest) => void;
+  openGif: (props: GifRequest) => void;
   isOpen: Session['isOpen'];
   subscribe: Session['subscribe'];
 }>(null!);
@@ -54,6 +64,10 @@ export function MediaViewersProvider({ children }: PropsWithChildren) {
       openVideo: (props: VideoRequest) => {
         Keyboard.dismiss();
         session.open({ type: 'video', props, pathname });
+      },
+      openGif: (props: GifRequest) => {
+        Keyboard.dismiss();
+        session.open({ type: 'gif', props, pathname });
       },
       isOpen: session.isOpen,
       subscribe: session.subscribe,
@@ -85,10 +99,12 @@ function MediaViewerHost({
   const { content, visible } = useSyncExternalStore(session.subscribe, session.read, session.read);
   const [opacity] = useState(() => new Animated.Value(0));
   const pauseRef = useRef<(() => void) | null>(null);
+  const gifPauseRef = useRef<(() => void) | null>(null);
   const [retained, setRetained] = useState<{
     content: Selection | null;
     image?: ImageRequest;
     video?: VideoRequest;
+    gif?: GifRequest;
   }>({ content: null });
   if (content !== retained.content) {
     setRetained({
@@ -96,6 +112,7 @@ function MediaViewerHost({
       content,
       ...(content?.type === 'image' ? { image: content.props } : {}),
       ...(content?.type === 'video' ? { video: content.props } : {}),
+      ...(content?.type === 'gif' ? { gif: content.props } : {}),
     });
   }
   const close = useCallback(() => session.close(), [session]);
@@ -118,6 +135,7 @@ function MediaViewerHost({
           if (finished) complete();
         });
         if (session.read().content?.type === 'video') pauseRef.current?.();
+        if (session.read().content?.type === 'gif') gifPauseRef.current?.();
       }),
     [session, opacity],
   );
@@ -138,8 +156,31 @@ function MediaViewerHost({
   const showingVideo = content?.type === 'video';
   const image = showingImage ? content.props : retained.image;
   const video = showingVideo ? content.props : retained.video;
+  const showingGif = content?.type === 'gif';
+  const gif = showingGif ? content.props : retained.gif;
   return (
     <ViewerLayer visible={visible} onClose={close} opacity={opacity}>
+      <View
+        pointerEvents={showingGif ? 'auto' : 'none'}
+        accessibilityElementsHidden={!showingGif}
+        importantForAccessibility={showingGif ? 'auto' : 'no-hide-descendants'}
+        aria-hidden={!showingGif}
+        style={[StyleSheet.absoluteFill, { opacity: showingGif ? 1 : 0 }]}
+      >
+        {(Platform.OS === 'android' || showingGif) && (
+          <GifViewer
+            gifId=""
+            title=""
+            createdAt=""
+            {...gif}
+            visible={visible && showingGif}
+            onClose={close}
+            onForward={() => session.close(() => gif?.onForward())}
+            pauseRef={gifPauseRef}
+            canPlay={session.canPlay}
+          />
+        )}
+      </View>
       <View
         pointerEvents={showingImage ? 'auto' : 'none'}
         accessibilityElementsHidden={!showingImage}

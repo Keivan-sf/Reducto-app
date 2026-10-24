@@ -1063,6 +1063,18 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                                   setForward(true);
                                 },
                               });
+                            } else if (message.attachment?.type === 'gif') {
+                              event.stopPropagation();
+                              viewers.openGif({
+                                gifId: message.attachment.gifId,
+                                title: profileName(profiles[message.senderId]),
+                                createdAt: message.createdAt,
+                                caption: message.text,
+                                onForward: () => {
+                                  setActionMessage(message);
+                                  setForward(true);
+                                },
+                              });
                             } else openMessageMenu(message, event);
                           }}
                           onLongPress={(event) => openMessageMenu(message, event)}

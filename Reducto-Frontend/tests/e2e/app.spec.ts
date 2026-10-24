@@ -172,7 +172,7 @@ test('GIF previews autoplay muted, loop, and never expose video controls', async
       timeout: 10000,
     })
     .toBeGreaterThan(1);
-  await page.getByRole('button', { name: 'Open gif attachment' }).click();
+  await page.getByRole('button', { name: 'Message actions', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Save GIF' })).toBeVisible();
   expect(lookups).toBe(1);
 });
@@ -2147,10 +2147,7 @@ for (const gif of [false, true]) {
     ]);
     await signIn(page);
     await page.getByRole('button', { name: 'Open Weekend plans' }).click();
-    const open = () =>
-      gif
-        ? page.getByRole('button', { name: 'Open gif attachment' }).click()
-        : page.getByRole('button', { name: 'Message actions', exact: true }).click();
+    const open = () => page.getByRole('button', { name: 'Message actions', exact: true }).click();
     const label = gif ? 'Save GIF' : 'Copy';
     await open();
     await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
@@ -3964,109 +3961,334 @@ test('image viewer opens full screen, reuses cached bytes, closes with Back, Esc
   await expect(page.getByText('Forward to…', { exact: true })).toBeVisible();
 });
 
-test('image viewer zooms, pans, and only swipes closed at base zoom', async ({
+for (const kind of ['image', 'gif'] as const) {
+  test(`${kind} viewer zooms, pans, and only swipes closed at base zoom`, async ({
+    page,
+  }, testInfo) => {
+    await mockApi(page, [
+      {
+        ...first,
+        attachment:
+          kind === 'image'
+            ? { type: 'image', mediaId: 'zoom-photo' }
+            : { type: 'gif', gifId: 'zoom-gif' },
+      },
+    ]);
+    if (kind === 'gif')
+      await page.route('**/api/gifs/zoom-gif', (route) =>
+        route.fulfill({
+          json: {
+            gif: {
+              id: 'zoom-gif',
+              width: 360,
+              height: 640,
+              playbackUrl: 'https://media.example/zoom-gif.mp4',
+              fileSize: 1000,
+            },
+          },
+        }),
+      );
+    let downloads = 0;
+    await page.route(
+      kind === 'image'
+        ? '**/api/conversations/*/attachments/zoom-photo'
+        : 'https://media.example/zoom-gif.mp4',
+      (route) => {
+        downloads++;
+        return route.fulfill({
+          path: path.join(__dirname, `../fixtures/portrait.${kind === 'image' ? 'png' : 'mp4'}`),
+          contentType: kind === 'image' ? 'image/png' : 'video/mp4',
+        });
+      },
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const open = page.getByRole('button', { name: `Open ${kind} attachment`, exact: true });
+    await open.click();
+    const viewer = page.getByTestId(`${kind}-viewer`);
+    if (kind === 'image')
+      await expect(viewer.getByRole('img', { name: 'Full screen image' })).toBeVisible();
+    else
+      await expect
+        .poll(() =>
+          viewer.locator('video').evaluate((video: HTMLVideoElement) => ({
+            ready: video.readyState >= 2,
+            playing: !video.paused,
+            muted: video.muted,
+            loop: video.loop,
+            controls: video.controls,
+            inline: video.playsInline,
+          })),
+        )
+        .toEqual({
+          ready: true,
+          playing: true,
+          muted: true,
+          loop: true,
+          controls: false,
+          inline: true,
+        });
+    const surface = (await page.getByTestId(`${kind}-viewer-surface`).boundingBox())!;
+    const x = surface.x + surface.width / 2;
+    const y = surface.y + surface.height / 2;
+    const transform = () =>
+      page.getByTestId(`${kind}-viewer-transform`).evaluate((element) => {
+        const matrix = new DOMMatrix(getComputedStyle(element).transform);
+        return { scale: matrix.a, x: matrix.e, y: matrix.f };
+      });
+    const mobile = testInfo.project.name === 'mobile';
+    const cdp = mobile ? await page.context().newCDPSession(page) : undefined;
+    const doubleTap = async () => {
+      if (mobile) {
+        await page.touchscreen.tap(x, y);
+        await page.touchscreen.tap(x, y);
+      } else await page.mouse.dblclick(x, y);
+    };
+    const animatedDoubleTap = async (targetScale: number) => {
+      const frames = page.getByTestId(`${kind}-viewer-transform`).evaluate(
+        (element, target) =>
+          new Promise<number[]>((resolve) => {
+            const samples: number[] = [];
+            const sample = () => {
+              const scale = new DOMMatrix(getComputedStyle(element).transform).a;
+              samples.push(scale);
+              if (scale === target) resolve(samples);
+              else requestAnimationFrame(sample);
+            };
+            sample();
+          }),
+        targetScale,
+      );
+      await doubleTap();
+      expect((await frames).some((scale) => scale > 1 && scale < 2.5)).toBe(true);
+    };
+    const drag = async (dx: number, dy: number) => {
+      if (cdp) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x: x + dx, y: y + dy }],
+        });
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else {
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.move(x + dx, y + dy, { steps: 5 });
+        await page.mouse.up();
+      }
+    };
+    await animatedDoubleTap(2.5);
+    await expect.poll(async () => (await transform()).scale).toBe(2.5);
+    await drag(0, 140);
+    await expect(viewer).toBeVisible();
+    await expect.poll(async () => (await transform()).y).toBe(140);
+    await drag(0, -220);
+    await expect(viewer).toBeVisible();
+    await expect.poll(async () => (await transform()).y).toBe(-80);
+    await animatedDoubleTap(1);
+    await expect.poll(transform).toEqual({ scale: 1, x: 0, y: 0 });
+
+    if (cdp) {
+      const points = (span: number) => [
+        { x: x - span / 2, y, id: 1 },
+        { x: x + span / 2, y, id: 2 },
+      ];
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(80) });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(160) });
+      await expect.poll(async () => (await transform()).scale).toBeCloseTo(2);
+      // Pinch back to fit and keep dragging with the finger that remains down.
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(40) });
+      await expect.poll(async () => (await transform()).scale).toBe(1);
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [{ x: x - 20, y, id: 1 }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: x - 20, y: y + 150, id: 1 }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await expect(viewer).toBeVisible();
+    }
+    await drag(0, 140);
+    await expect(viewer).toHaveCount(0);
+    await open.click();
+    await expect.poll(transform).toEqual({ scale: 1, x: 0, y: 0 });
+    await cdp?.detach();
+    expect(downloads).toBe(1);
+  });
+}
+
+test('GIF viewer preserves image viewer controls, fades, cached bytes, and inline playback', async ({
   page,
-}, testInfo) => {
-  await mockApi(page, [{ ...first, attachment: { type: 'image', mediaId: 'zoom-photo' } }]);
-  await page.route('**/api/conversations/*/attachments/zoom-photo', (route) =>
+}) => {
+  const gifId = 'viewer-gif';
+  await mockApi(page, [{ ...first, attachment: { type: 'gif', gifId } }]);
+  await page.route(`**/api/gifs/${gifId}`, (route) =>
     route.fulfill({
-      path: path.join(__dirname, '../fixtures/portrait.png'),
-      contentType: 'image/png',
+      json: {
+        gif: {
+          id: gifId,
+          width: 360,
+          height: 640,
+          playbackUrl: 'https://media.example/viewer-gif.mp4',
+          fileSize: 1000,
+        },
+      },
     }),
+  );
+  let downloads = 0;
+  await page.route('https://media.example/viewer-gif.mp4', (route) => {
+    downloads++;
+    return route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.mp4'),
+      contentType: 'video/mp4',
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const open = page.getByRole('button', { name: 'Open gif attachment', exact: true });
+  const inline = open.locator('video');
+  await expect
+    .poll(() =>
+      inline.evaluate((video: HTMLVideoElement) => !video.paused && video.readyState >= 2),
+    )
+    .toBe(true);
+  const row = await page.getByTestId(`message-row-${first.id}`).elementHandle();
+  const opening = page.evaluate(
+    () =>
+      new Promise<number[]>((resolve) => {
+        const samples: number[] = [];
+        const sample = () => {
+          const layer = document.querySelector('[data-testid="media-viewer-layer"]');
+          if (layer) {
+            const opacity = Number(getComputedStyle(layer).opacity);
+            samples.push(opacity);
+            if (opacity === 1) {
+              resolve(samples);
+              return;
+            }
+          }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }),
+  );
+  await open.click();
+  const viewer = page.getByTestId('gif-viewer');
+  expect((await opening).some((opacity) => opacity > 0 && opacity < 1)).toBe(true);
+  await expect(viewer.getByText('Grace Hopper', { exact: true })).toBeVisible();
+  await expect(viewer.getByText(first.text!, { exact: true })).toBeVisible();
+  const bounds = (await viewer.boundingBox())!;
+  expect(bounds.width).toBe(page.viewportSize()!.width);
+  expect(bounds.height).toBe(page.viewportSize()!.height);
+  await expect.poll(() => inline.evaluate((video: HTMLVideoElement) => video.paused)).toBe(true);
+  const playback = viewer.locator('video');
+  await expect
+    .poll(() =>
+      playback.evaluate(
+        (video: HTMLVideoElement) =>
+          !video.paused && video.readyState >= 2 && video.loop && video.muted && !video.controls,
+      ),
+    )
+    .toBe(true);
+  // Observe a loop wrapping while the full-screen GIF plays.
+  await playback.evaluate((video: HTMLVideoElement & { wraps?: number }) => {
+    video.wraps = 0;
+    let previous = video.currentTime;
+    video.addEventListener('timeupdate', () => {
+      if (video.currentTime < previous) video.wraps!++;
+      previous = video.currentTime;
+    });
+  });
+  await expect
+    .poll(() => playback.evaluate((video: HTMLVideoElement & { wraps?: number }) => video.wraps), {
+      timeout: 10000,
+    })
+    .toBeGreaterThan(0);
+  const saved = page.waitForEvent('download');
+  await viewer.getByRole('button', { name: 'Save attachment', exact: true }).click();
+  expect((await saved).suggestedFilename()).toMatch(/\.mp4$/);
+  await expect(viewer).toBeVisible();
+  const playingElement = await playback.elementHandle();
+  const closing = page.getByTestId('media-viewer-layer').evaluate(
+    (element) =>
+      new Promise<number[]>((resolve) => {
+        const samples: number[] = [];
+        const sample = () => {
+          if (!element.isConnected) {
+            resolve(samples);
+            return;
+          }
+          samples.push(Number(getComputedStyle(element).opacity));
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }),
+  );
+  await viewer.getByRole('button', { name: 'Back to conversation' }).click();
+  expect((await closing).some((opacity) => opacity > 0 && opacity < 1)).toBe(true);
+  expect(await playingElement!.evaluate((video: HTMLVideoElement) => video.paused)).toBe(true);
+  expect(await row!.evaluate((element) => element.isConnected)).toBe(true);
+  await expect.poll(() => inline.evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+  await open.click();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toHaveCount(0);
+  await page.getByRole('button', { name: 'Message actions', exact: true }).click();
+  for (const name of ['Reply', 'Forward', 'Save GIF'])
+    await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Close message options' })
+    .click({ position: { x: 2, y: 2 } });
+  await open.click();
+  await viewer.getByRole('button', { name: 'Forward GIF' }).click();
+  await expect(page.getByText('Forward to…', { exact: true })).toBeVisible();
+  await expect(viewer).toHaveCount(0);
+  expect(downloads).toBe(1);
+});
+
+test('GIF viewer retries a failed download', async ({ page }) => {
+  const gifId = 'retry-viewer-gif';
+  await mockApi(page, [{ ...first, attachment: { type: 'gif', gifId } }]);
+  await page.route(`**/api/gifs/${gifId}`, (route) =>
+    route.fulfill({
+      json: {
+        gif: {
+          id: gifId,
+          width: 360,
+          height: 640,
+          playbackUrl: 'https://media.example/retry-viewer-gif.mp4',
+          fileSize: 1000,
+        },
+      },
+    }),
+  );
+  let fail = true;
+  await page.route('https://media.example/retry-viewer-gif.mp4', (route) =>
+    fail
+      ? route.fulfill({ status: 500 })
+      : route.fulfill({
+          path: path.join(__dirname, '../fixtures/portrait.mp4'),
+          contentType: 'video/mp4',
+        }),
   );
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
-  const open = page.getByRole('button', { name: 'Open image attachment', exact: true });
-  await open.click();
-  const viewer = page.getByTestId('image-viewer');
-  await expect(viewer.getByRole('img', { name: 'Full screen image' })).toBeVisible();
-  const surface = (await page.getByTestId('image-viewer-surface').boundingBox())!;
-  const x = surface.x + surface.width / 2;
-  const y = surface.y + surface.height / 2;
-  const transform = () =>
-    page.getByTestId('image-viewer-transform').evaluate((element) => {
-      const matrix = new DOMMatrix(getComputedStyle(element).transform);
-      return { scale: matrix.a, x: matrix.e, y: matrix.f };
-    });
-  const mobile = testInfo.project.name === 'mobile';
-  const cdp = mobile ? await page.context().newCDPSession(page) : undefined;
-  const doubleTap = async () => {
-    if (mobile) {
-      await page.touchscreen.tap(x, y);
-      await page.touchscreen.tap(x, y);
-    } else await page.mouse.dblclick(x, y);
-  };
-  const animatedDoubleTap = async (targetScale: number) => {
-    const frames = page.getByTestId('image-viewer-transform').evaluate(
-      (element, target) =>
-        new Promise<number[]>((resolve) => {
-          const samples: number[] = [];
-          const sample = () => {
-            const scale = new DOMMatrix(getComputedStyle(element).transform).a;
-            samples.push(scale);
-            if (scale === target) resolve(samples);
-            else requestAnimationFrame(sample);
-          };
-          sample();
-        }),
-      targetScale,
-    );
-    await doubleTap();
-    expect((await frames).some((scale) => scale > 1 && scale < 2.5)).toBe(true);
-  };
-  const drag = async (dx: number, dy: number) => {
-    if (cdp) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-      await cdp.send('Input.dispatchTouchEvent', {
-        type: 'touchMove',
-        touchPoints: [{ x: x + dx, y: y + dy }],
-      });
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    } else {
-      await page.mouse.move(x, y);
-      await page.mouse.down();
-      await page.mouse.move(x + dx, y + dy, { steps: 5 });
-      await page.mouse.up();
-    }
-  };
-  await animatedDoubleTap(2.5);
-  await expect.poll(async () => (await transform()).scale).toBe(2.5);
-  await drag(0, 140);
-  await expect(viewer).toBeVisible();
-  await expect.poll(async () => (await transform()).y).toBe(140);
-  await drag(0, -220);
-  await expect(viewer).toBeVisible();
-  await expect.poll(async () => (await transform()).y).toBe(-80);
-  await animatedDoubleTap(1);
-  await expect.poll(transform).toEqual({ scale: 1, x: 0, y: 0 });
-
-  if (cdp) {
-    const points = (span: number) => [
-      { x: x - span / 2, y, id: 1 },
-      { x: x + span / 2, y, id: 2 },
-    ];
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(80) });
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(160) });
-    await expect.poll(async () => (await transform()).scale).toBeCloseTo(2);
-    // Pinch back to fit and keep dragging with the finger that remains down.
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(40) });
-    await expect.poll(async () => (await transform()).scale).toBe(1);
-    await cdp.send('Input.dispatchTouchEvent', {
-      type: 'touchEnd',
-      touchPoints: [{ x: x - 20, y, id: 1 }],
-    });
-    await cdp.send('Input.dispatchTouchEvent', {
-      type: 'touchMove',
-      touchPoints: [{ x: x - 20, y: y + 150, id: 1 }],
-    });
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await expect(viewer).toBeVisible();
-  }
-  await drag(0, 140);
-  await expect(viewer).toHaveCount(0);
-  await open.click();
-  await expect.poll(transform).toEqual({ scale: 1, x: 0, y: 0 });
-  await cdp?.detach();
+  await page.getByRole('button', { name: 'Open gif attachment', exact: true }).click();
+  const viewer = page.getByTestId('gif-viewer');
+  await expect(viewer.getByRole('button', { name: 'Retry GIF' })).toBeVisible();
+  fail = false;
+  await viewer.getByRole('button', { name: 'Retry GIF' }).click();
+  await expect
+    .poll(() =>
+      viewer
+        .locator('video')
+        .evaluate(
+          (video: HTMLVideoElement) =>
+            !video.paused && video.readyState >= 2 && video.loop && video.muted,
+        ),
+    )
+    .toBe(true);
 });
 
 test('image viewer recovers from a failed download using Retry image', async ({ page }) => {
