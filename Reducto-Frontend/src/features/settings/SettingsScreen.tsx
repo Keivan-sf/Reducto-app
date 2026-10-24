@@ -135,8 +135,8 @@ export default function SettingsScreen() {
             maxLength={32}
           />
           <Text style={s.hint}>A little more you. Choose how you appear in Reducto.</Text>
-          <Notice text={error} />
-          <Notice text={success} success />
+          <Notice text={error} onDismiss={() => setError('')} />
+          <Notice text={success} success onDismiss={() => setSuccess('')} />
           <Button title="Save changes" busy={busy} onPress={() => void save()} />
         </View>
         <View style={s.card}>

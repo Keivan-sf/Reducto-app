@@ -122,14 +122,7 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
         ))}
       </View>
       {showVoicePlayer && <VoiceMiniPlayer />}
-      {!!error && (
-        <View style={{ padding: 12, gap: 6 }}>
-          <Notice text={error} />
-          <Pressable accessibilityRole="button" onPress={() => void reload()}>
-            <Text style={{ color: colors.blue }}>Try again</Text>
-          </Pressable>
-        </View>
-      )}
+      <Notice text={error} onDismiss={() => setError('')} />
       <FlatList
         data={chats}
         keyExtractor={(chat) => chat.id}

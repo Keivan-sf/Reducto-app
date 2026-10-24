@@ -93,11 +93,8 @@ export class HoldRecorder {
     current.controller.abort();
     try {
       current.session?.cancel();
-    } catch (error) {
-      if (this.mounted)
-        this.callbacks.error(
-          error instanceof Error ? error.message : 'Could not cancel recording.',
-        );
+    } catch {
+      // Cancellation is intentional; cleanup failures should not notify the user.
     } finally {
       this.change('idle');
     }

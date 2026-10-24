@@ -1,4 +1,5 @@
 import { useState, type ComponentProps, type PropsWithChildren } from 'react';
+import { NoticeProvider } from './Notice';
 import {
   ActivityIndicator,
   Image,
@@ -14,6 +15,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { initials } from '../lib/messages';
+export { Notice } from './Notice';
 
 export const colors = {
   blue: '#3390EC',
@@ -147,21 +149,6 @@ export function Field({ label, ...props }: ComponentProps<typeof TextInput> & { 
     </View>
   );
 }
-export function Notice({ text, success }: { text: string; success?: boolean }) {
-  return text ? (
-    <View
-      accessibilityRole="alert"
-      style={[styles.notice, success && { backgroundColor: '#EAF6EB' }]}
-    >
-      <Text
-        selectable
-        style={{ color: success ? '#347749' : colors.danger, fontSize: 13, lineHeight: 20 }}
-      >
-        {text}
-      </Text>
-    </View>
-  ) : null;
-}
 export function Dialog({
   visible,
   title,
@@ -177,16 +164,18 @@ export function Dialog({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.dialog}>
-          <View style={styles.dialogHeader}>
-            <Text style={styles.title}>{title}</Text>
-            <IconButton name="close" label="Close dialog" onPress={onClose} />
-          </View>
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ gap: 18, padding: 24, paddingTop: 8 }}
-          >
-            {children}
-          </ScrollView>
+          <NoticeProvider>
+            <View style={styles.dialogHeader}>
+              <Text style={styles.title}>{title}</Text>
+              <IconButton name="close" label="Close dialog" onPress={onClose} />
+            </View>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ gap: 18, padding: 24, paddingTop: 8 }}
+            >
+              {children}
+            </ScrollView>
+          </NoticeProvider>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -223,7 +212,6 @@ export const styles = StyleSheet.create({
     color: colors.dark,
     minHeight: 48,
   },
-  notice: { padding: 12, backgroundColor: '#FFF0F0', borderRadius: 10 },
   overlay: {
     flex: 1,
     backgroundColor: '#17212B66',

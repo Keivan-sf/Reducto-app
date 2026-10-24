@@ -111,6 +111,11 @@ export class VideoCache {
             status: 'error',
             error: error instanceof Error ? error.message : 'Video unavailable',
           });
+        if (controller.signal.aborted) {
+          const cancelled = new Error('Download cancelled', { cause: error });
+          cancelled.name = 'AbortError';
+          throw cancelled;
+        }
         throw error;
       })
       .finally(() => {

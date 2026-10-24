@@ -93,7 +93,9 @@ export function VideoCard({
               .then((file) => {
                 if (state.status === 'ready') return saveVideoFile(file);
               })
-              .catch((err) => onError(err.message));
+              .catch((err) => {
+                if (err.name !== 'AbortError') onError(err.message);
+              });
         }}
         style={s.download}
       >

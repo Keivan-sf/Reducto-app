@@ -80,7 +80,7 @@ test('failed downloads can retry and disposing a session frees files and cancels
   assert.equal(cache.read('video').status, 'error');
   await cache.get('video');
   const pending = cache.get('pending');
-  const rejected = assert.rejects(pending, /aborted/);
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
   await Promise.resolve();
   cache.dispose();
   await rejected;

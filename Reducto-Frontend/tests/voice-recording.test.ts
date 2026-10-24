@@ -208,4 +208,44 @@ test('cancellation restores idle even when native recorder cleanup throws', asyn
   await test.controller.press();
   assert.doesNotThrow(() => test.controller.cancel());
   assert.equal(test.states.at(-1), 'idle');
+  assert.deepEqual(test.errors, []);
+});
+
+test('cancelling an in-flight voice upload does not report an error', async () => {
+  const errors: string[] = [];
+  const phases: RecordingPhase[] = [];
+  let signal: AbortSignal | undefined;
+  let disposed = false;
+  const recorder = new HoldRecorder({
+    begin: async () => ({
+      stop: async () => ({
+        asset: { uri: 'file:///voice.m4a', name: 'voice.m4a', mimeType: 'audio/mp4' },
+        duration: 1,
+        dispose: () => {
+          disposed = true;
+        },
+      }),
+      cancel: () => {},
+    }),
+    send: async (_voice, uploadSignal) => {
+      signal = uploadSignal;
+      await new Promise<void>((_resolve, reject) =>
+        uploadSignal.addEventListener('abort', () => reject(new Error('Upload cancelled')), {
+          once: true,
+        }),
+      );
+    },
+    changed: (phase) => phases.push(phase),
+    error: (message) => errors.push(message),
+  });
+  await recorder.press();
+  recorder.release();
+  await tick();
+  assert.equal(phases.at(-1), 'sending');
+  recorder.cancel();
+  await tick();
+  assert.equal(signal?.aborted, true);
+  assert.deepEqual(errors, []);
+  assert.equal(phases.at(-1), 'idle');
+  assert.equal(disposed, true);
 });

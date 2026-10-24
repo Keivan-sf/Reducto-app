@@ -4,6 +4,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider, useSession } from '../context/SessionContext';
 import { colors } from '../components/ui';
+import { NoticeProvider } from '../components/Notice';
 import { IconFontGate } from '../components/IconFontGate';
 
 function Navigation() {
@@ -28,10 +29,12 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <SessionProvider>
         <View style={{ flex: 1 }}>
-          <StatusBar style="dark" />
-          <IconFontGate>
-            <Navigation />
-          </IconFontGate>
+          <NoticeProvider>
+            <StatusBar style="dark" />
+            <IconFontGate>
+              <Navigation />
+            </IconFontGate>
+          </NoticeProvider>
         </View>
       </SessionProvider>
     </SafeAreaProvider>

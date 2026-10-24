@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, Icon } from '../../components/ui';
+import { colors, Icon, Notice } from '../../components/ui';
 import { useVoicePlayback, useVoicePlaybackState } from '../../context/VoicePlaybackContext';
 import { useProfiles } from '../../context/ProfilesContext';
 import { profileName } from '../../lib/messages';
@@ -24,11 +24,7 @@ export function VoiceMiniPlayer() {
       <Text numberOfLines={1} style={s.name}>
         {profileName(profiles[state.track.senderId])}
       </Text>
-      {!!state.error && (
-        <Text numberOfLines={1} accessibilityRole="alert" style={s.error}>
-          Unable to play
-        </Text>
-      )}
+      <Notice text={state.error ?? ''} />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Close voice player"
@@ -53,5 +49,4 @@ const s = StyleSheet.create({
   },
   button: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   name: { flex: 1, color: colors.dark, fontSize: 13, fontWeight: '500' },
-  error: { color: colors.danger, fontSize: 11, flexShrink: 1 },
 });

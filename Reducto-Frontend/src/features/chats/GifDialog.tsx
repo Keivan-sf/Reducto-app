@@ -110,7 +110,7 @@ export function GifDialog({
           })
         }
       />
-      <Notice text={error} />
+      <Notice text={error} onDismiss={() => setError('')} />
       {!gifs.length && (
         <Text style={styles.subtitle}>Your library is empty. Add your first GIF above.</Text>
       )}

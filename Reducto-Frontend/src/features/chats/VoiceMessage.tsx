@@ -68,7 +68,7 @@ export function VoiceMessage({
         if (loading) cancel();
         else
           void download().catch((err) => {
-            if (request.current === current) onError(err.message);
+            if (request.current === current && err.name !== 'AbortError') onError(err.message);
           });
       }}
       active={active}
@@ -219,7 +219,11 @@ function VoiceIconLayer({
   return (
     <Animated.View
       testID={`voice-icon-${name}`}
-      style={[StyleSheet.absoluteFill, name === 'play' && { transform: [{ translateX: 1 }] }, style]}
+      style={[
+        StyleSheet.absoluteFill,
+        name === 'play' && { transform: [{ translateX: 1 }] },
+        style,
+      ]}
     >
       <Icon name={name} color="white" size={24} />
     </Animated.View>

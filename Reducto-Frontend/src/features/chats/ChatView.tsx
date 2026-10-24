@@ -587,6 +587,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         `/api/conversations/${id}/attachments`,
         { method: 'POST', body, signal },
       );
+      if (signal.aborted) return;
       mediaMetadata.remember(id, media);
       videoCache.remember(voiceFileKey(id, media.id), { ...local, duration: voice.duration });
       local = undefined;
@@ -1252,11 +1253,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         />
       </View>
       <View style={s.composerWrap}>
-        {!!error && (
-          <View style={{ paddingHorizontal: 10, paddingBottom: 8 }}>
-            <Notice text={error} />
-          </View>
-        )}
+        <Notice text={error} onDismiss={() => setError('')} />
         {editing && (
           <View style={s.pending} testID="edit-composer">
             <Icon name="create-outline" color={colors.blue} />

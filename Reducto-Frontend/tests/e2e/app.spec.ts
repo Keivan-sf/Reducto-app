@@ -2840,6 +2840,7 @@ test('video downloads display real streamed progress, refresh authentication, ca
     await page.screenshot({ path: testInfo.outputPath('video-download-progress.png') });
     await card.getByRole('button', { name: 'Cancel video download', exact: true }).click();
     await expect(card.getByRole('button', { name: 'Download video', exact: true })).toBeVisible();
+    await expect(page.getByTestId('notification')).toHaveCount(0);
     await card.getByRole('button', { name: 'Download video', exact: true }).click();
     await expect(card.getByText(/ · [1-9][0-9]?%/)).toBeVisible();
     await expect(card.getByRole('button', { name: 'Save video', exact: true })).toBeVisible();
@@ -4719,4 +4720,37 @@ test('persistent voice mini player follows navigation, survives scrolling, and c
   await mini.getByRole('button', { name: 'Close voice player', exact: true }).click();
   await expect(mini).toHaveCount(0);
   expect(downloads).toBe(1);
+});
+
+test('notifications float without moving the form and dismiss after two seconds', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/login');
+  const submit = page.getByRole('button', { name: 'Sign in', exact: true });
+  await expect(submit).toBeVisible();
+  const before = await submit.boundingBox();
+  await submit.click();
+  const notification = page.getByTestId('notification');
+  await expect(notification).toBeVisible();
+  await expect(notification).toHaveCSS('background-color', 'rgba(23, 33, 43, 0.65)');
+  expect(await submit.boundingBox()).toEqual(before);
+  const samples = await page.evaluate(async () => {
+    const values: number[] = [];
+    const start = performance.now();
+    while (performance.now() - start < 2200) {
+      const element = document.querySelector('[data-testid="notification"]');
+      if (element) values.push(Number(getComputedStyle(element).opacity));
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+    return values;
+  });
+  const peak = samples.indexOf(1);
+  expect(peak).toBeGreaterThan(-1);
+  expect(samples.slice(peak + 1).some((opacity) => opacity > 0 && opacity < 1)).toBe(true);
+  await expect(notification).toBeHidden();
+  expect(await submit.boundingBox()).toEqual(before);
+  await submit.click();
+  await expect(notification).toBeVisible();
+  await expect(notification).toBeHidden({ timeout: 3000 });
 });

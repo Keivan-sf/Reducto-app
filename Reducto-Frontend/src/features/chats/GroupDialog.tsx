@@ -62,8 +62,8 @@ export function GroupDialog({
         {peer?.username && <Text style={styles.subtitle}>@{peer.username}</Text>}
         <Text style={styles.subtitle}>{people.length} members</Text>
       </View>
-      <Notice text={error} />
-      <Notice text={success} success />
+      <Notice text={error} onDismiss={() => setError('')} />
+      <Notice text={success} success onDismiss={() => setSuccess('')} />
       {chat.type === 'group' && manager && (
         <>
           <Field label="Group name" value={name} onChangeText={setName} maxLength={100} />

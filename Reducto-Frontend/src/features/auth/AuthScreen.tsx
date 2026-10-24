@@ -210,7 +210,7 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
                 <Icon name={visible ? 'eye-off-outline' : 'eye-outline'} />
               </Pressable>
             </View>
-            <Notice text={error} />
+            <Notice text={error} onDismiss={() => setError('')} />
             <Button
               title={signup ? 'Create account' : 'Sign in'}
               busy={busy}

@@ -137,7 +137,7 @@ export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose:
             ? 'Make a space for your people. Invite members after creating your group.'
             : 'Have an invite? Join the group and catch up on the conversation.'}
       </Text>
-      <Notice text={error} />
+      <Notice text={error} onDismiss={() => setError('')} />
       <Button
         title={mode === 'private' ? 'Open chat' : mode === 'group' ? 'Create group' : 'Join group'}
         busy={busy}
