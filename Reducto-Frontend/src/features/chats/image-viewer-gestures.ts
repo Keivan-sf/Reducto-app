@@ -24,7 +24,7 @@ export class ImageViewerGestures {
   private session: Session | null = null;
   private lastTap: { point: ImagePoint; time: number } | null = null;
 
-  constructor(private readonly onChange: (transform: Transform) => void) {}
+  constructor(private readonly onChange: (transform: Transform, animate: boolean) => void) {}
 
   reset() {
     this.session = null;
@@ -43,7 +43,7 @@ export class ImageViewerGestures {
     this.publish();
   }
 
-  private publish() {
+  private publish(animate = false) {
     const { width, height } = this.viewport;
     const fit =
       this.image.width && this.image.height
@@ -59,7 +59,7 @@ export class ImageViewerGestures {
       this.transform.y,
       Math.max(0, (imageHeight * this.transform.scale - height) / 2),
     );
-    this.onChange({ ...this.transform });
+    this.onChange({ ...this.transform }, animate);
   }
 
   update(points: ImagePoint[], now = Date.now()) {
@@ -131,6 +131,7 @@ export class ImageViewerGestures {
       session.canDismiss &&
       Math.abs(session.dy) >= 90 &&
       Math.abs(session.dy) > Math.abs(session.dx);
+    let animate = false;
     if (!cancelled && session.canTap && now - session.startedAt < 300) {
       const point = session.points[0];
       if (
@@ -147,10 +148,11 @@ export class ImageViewerGestures {
           dismiss: 0,
         };
         this.lastTap = null;
+        animate = true;
       } else this.lastTap = { point, time: now };
     } else this.lastTap = null;
     this.transform.dismiss = 0;
-    this.publish();
+    this.publish(animate);
     return close;
   }
 }

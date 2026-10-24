@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   Image,
   Platform,
   StyleSheet,
@@ -68,12 +69,30 @@ export function ImageViewer({
   const [panY] = useState(() => new Animated.Value(0));
   const [gestures] = useState(
     () =>
-      new ImageViewerGestures((transform) => {
+      new ImageViewerGestures((transform, animate) => {
         offset.stopAnimation();
         offset.setValue(transform.dismiss);
-        zoom.setValue(transform.scale);
-        panX.setValue(transform.x);
-        panY.setValue(transform.y);
+        const values = [
+          [zoom, transform.scale],
+          [panX, transform.x],
+          [panY, transform.y],
+        ] as const;
+        if (animate) {
+          // Animate scale and focal-point translation together so the image stays anchored.
+          Animated.parallel(
+            values.map(([value, toValue]) =>
+              Animated.timing(value, {
+                toValue,
+                duration: 220,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: true,
+                isInteraction: false,
+              }),
+            ),
+          ).start();
+        } else {
+          for (const [value, toValue] of values) value.setValue(toValue);
+        }
       }),
   );
   const pointers = useRef(new Map<number, ImagePoint>());

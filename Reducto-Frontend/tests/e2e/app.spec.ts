@@ -3996,6 +3996,24 @@ test('image viewer zooms, pans, and only swipes closed at base zoom', async ({
       await page.touchscreen.tap(x, y);
     } else await page.mouse.dblclick(x, y);
   };
+  const animatedDoubleTap = async (targetScale: number) => {
+    const frames = page.getByTestId('image-viewer-transform').evaluate(
+      (element, target) =>
+        new Promise<number[]>((resolve) => {
+          const samples: number[] = [];
+          const sample = () => {
+            const scale = new DOMMatrix(getComputedStyle(element).transform).a;
+            samples.push(scale);
+            if (scale === target) resolve(samples);
+            else requestAnimationFrame(sample);
+          };
+          sample();
+        }),
+      targetScale,
+    );
+    await doubleTap();
+    expect((await frames).some((scale) => scale > 1 && scale < 2.5)).toBe(true);
+  };
   const drag = async (dx: number, dy: number) => {
     if (cdp) {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
@@ -4011,7 +4029,7 @@ test('image viewer zooms, pans, and only swipes closed at base zoom', async ({
       await page.mouse.up();
     }
   };
-  await doubleTap();
+  await animatedDoubleTap(2.5);
   await expect.poll(async () => (await transform()).scale).toBe(2.5);
   await drag(0, 140);
   await expect(viewer).toBeVisible();
@@ -4019,7 +4037,7 @@ test('image viewer zooms, pans, and only swipes closed at base zoom', async ({
   await drag(0, -220);
   await expect(viewer).toBeVisible();
   await expect.poll(async () => (await transform()).y).toBe(-80);
-  await doubleTap();
+  await animatedDoubleTap(1);
   await expect.poll(transform).toEqual({ scale: 1, x: 0, y: 0 });
 
   if (cdp) {

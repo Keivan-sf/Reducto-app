@@ -22,6 +22,7 @@ function viewer() {
     saves = 0;
   const offsets: number[] = [];
   const values: Value[] = [];
+  const animations: { duration: number; useNativeDriver: boolean; toValue: number }[] = [];
   class Value {
     value: number;
     constructor(value: number) {
@@ -61,9 +62,22 @@ function viewer() {
           ActivityIndicator: 'ActivityIndicator',
           Platform: { OS: 'android' },
           StyleSheet: { create: (s: unknown) => s },
+          Easing: {
+            cubic: (value: number) => value ** 3,
+            out: (easing: (value: number) => number) => (value: number) => 1 - easing(1 - value),
+          },
           Animated: {
             View: 'Animated.View',
             Value,
+            timing: (value: Value, config: (typeof animations)[number]) => ({
+              start() {
+                animations.push(config);
+                value.setValue(config.toValue);
+              },
+            }),
+            parallel: (items: { start: () => void }[]) => ({
+              start: () => items.forEach((item) => item.start()),
+            }),
             spring: (offset: Value) => ({ start: () => offset.setValue(0) }),
           },
         };
@@ -124,6 +138,7 @@ function viewer() {
     event,
     offsets,
     values,
+    animations,
     counts: () => ({ closes, forwards, saves }),
   };
 }
@@ -180,15 +195,22 @@ test('Android double tap toggles zoom and vertical panning cannot dismiss until 
   tap();
   tap();
   assert.equal(t.values[1].value, 2.5);
+  assert.equal(t.animations.length, 3, 'scale and both translation axes animate together');
+  for (const config of t.animations) {
+    assert.equal(config.duration, 220);
+    assert.equal(config.useNativeDriver, true);
+  }
   t.surface.onResponderGrant(t.event(200, 300));
   t.surface.onResponderMove(t.event(240, 440));
   t.surface.onResponderRelease();
   assert.equal(t.values[2].value, 40);
   assert.equal(t.values[3].value, 140);
+  assert.equal(t.animations.length, 3, 'panning follows the finger without a timed animation');
   assert.equal(t.counts().closes, 0);
   tap();
   tap();
   assert.equal(t.values[1].value, 1);
+  assert.equal(t.animations.length, 6, 'zooming out animates too');
   assert.equal(t.values[2].value, 0);
   assert.equal(t.values[3].value, 0);
   t.surface.onResponderGrant(t.event(200, 300));
@@ -212,6 +234,7 @@ test('Android pinch, then lifting one finger, remains a pan gesture even after z
   t.surface.onResponderStart(pinch(100));
   t.surface.onResponderMove(pinch(200));
   assert.equal(t.values[1].value, 2);
+  assert.equal(t.animations.length, 0, 'pinching follows the fingers directly');
   t.surface.onResponderMove(pinch(50));
   assert.equal(t.values[1].value, 1);
   t.surface.onResponderEnd(t.event(200, 300));
