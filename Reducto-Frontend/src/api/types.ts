@@ -100,6 +100,10 @@ export interface AttachmentMetadata extends VisualMediaMetadata {
   contentType: string;
   fileSize: number;
   durationSeconds?: number | null;
+  title?: string | null;
+  artist?: string | null;
+  coverKey?: string | null;
+  coverUrl?: string | null;
 }
 export interface Gif extends VisualMediaMetadata {
   playbackUrl: string;

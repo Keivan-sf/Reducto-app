@@ -186,3 +186,33 @@ test('seeking a paused voice preserves pause and completion can be replayed from
   assert.equal(playback.read().playing, true);
   playback.close();
 });
+
+test('music and voice stop each other, including a pending start in another conversation', async () => {
+  const pending: (() => void)[] = [];
+  const { playback, players, pins } = harness(
+    () => new Promise<void>((resolve) => pending.push(resolve)),
+  );
+  const voice = { ...track('voice:chat-one'), kind: 'voice' as const };
+  const music = {
+    ...track('document:chat-two'),
+    kind: 'music' as const,
+    title: 'Song',
+    artist: 'Artist',
+  };
+  const first = playback.play(voice);
+  const second = playback.play(music);
+  pending[0]();
+  pending[1]();
+  await Promise.all([first, second]);
+  assert.equal(players[0].counts().plays, 0);
+  assert.equal(players[0].counts().releases, 1);
+  assert.equal(players[1].counts().plays, 1);
+  assert.equal(playback.read().track?.title, 'Song');
+  assert.deepEqual([...pins], [music.key]);
+  const third = playback.play(voice);
+  pending[2]();
+  await third;
+  assert.deepEqual(players[1].counts(), { plays: 1, pauses: 1, releases: 1 });
+  assert.equal(playback.read().track?.kind, 'voice');
+  playback.close();
+});

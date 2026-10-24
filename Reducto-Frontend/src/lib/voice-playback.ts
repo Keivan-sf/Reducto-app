@@ -3,6 +3,9 @@ export interface VoiceTrack {
   uri: string;
   senderId: string;
   duration?: number;
+  kind?: 'voice' | 'music' | 'audio';
+  title?: string;
+  artist?: string;
 }
 export interface VoiceStatus {
   playing: boolean;
@@ -128,7 +131,10 @@ export class VoicePlayback {
         this.publish({
           ...this.state,
           playing: false,
-          error: 'Could not play this voice message.',
+          error:
+            this.state.track?.kind && this.state.track.kind !== 'voice'
+              ? 'Could not play this audio.'
+              : 'Could not play this voice message.',
         });
       }
     }

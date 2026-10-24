@@ -1,20 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { colors } from '../../components/ui';
-import { useCachedFile, voiceFileKey } from '../../context/VideosContext';
+import { colors, Icon } from '../../components/ui';
+import { documentFileKey, useCachedFile, voiceFileKey } from '../../context/VideosContext';
 import { videoTime } from '../../lib/video-download.types';
 import { useVoicePlayback, useVoicePlaybackState } from '../../context/VoicePlaybackContext';
 import { VoiceSeekBar } from './VoiceSeekBar';
 import { AttachmentControlIcon } from './AttachmentControlIcon';
 import { DownloadProgressRing } from './DownloadProgressRing';
+import { useAttachmentMetadata } from '../../context/MediaMetadataContext';
+import { ServerThumbnail } from './ServerThumbnail';
 import type { AttachmentMetadata } from '../../api/types';
 
 export function VoiceMessage({
   conversationId,
   senderId,
   mediaId,
-  metadata,
+  metadata: initialMetadata,
+  kind = 'voice',
   active,
   onOptions,
   onError,
@@ -24,12 +27,18 @@ export function VoiceMessage({
   senderId: string;
   mediaId: string;
   metadata?: AttachmentMetadata;
+  kind?: 'voice' | 'music' | 'audio';
   active: boolean;
   onOptions: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
   onSeekingChange?: (seeking: boolean) => void;
 }) {
-  const { state, download, cancel } = useCachedFile(voiceFileKey(conversationId, mediaId), active);
+  const metadata = useAttachmentMetadata(conversationId, mediaId, active, initialMetadata);
+  const fileKey =
+    kind === 'voice'
+      ? voiceFileKey(conversationId, mediaId)
+      : documentFileKey(conversationId, mediaId);
+  const { state, download, cancel } = useCachedFile(fileKey, active);
   const request = useRef(0);
   const [previousStatus, setPreviousStatus] = useState(state.status);
   const [completing, setCompleting] = useState(false);
@@ -49,7 +58,9 @@ export function VoiceMessage({
   return (
     <VoicePlayer
       uri={state.status === 'ready' ? state.file.uri : undefined}
-      fileKey={voiceFileKey(conversationId, mediaId)}
+      fileKey={fileKey}
+      kind={kind}
+      metadata={metadata}
       senderId={senderId}
       durationHint={
         metadata?.durationSeconds ?? (state.status === 'ready' ? state.file.duration : undefined)
@@ -76,6 +87,8 @@ export function VoiceMessage({
 function VoicePlayer({
   uri,
   fileKey,
+  kind,
+  metadata,
   senderId,
   durationHint,
   downloading,
@@ -90,6 +103,8 @@ function VoicePlayer({
 }: {
   uri?: string;
   fileKey: string;
+  kind: 'voice' | 'music' | 'audio';
+  metadata?: AttachmentMetadata;
   senderId: string;
   durationHint?: number;
   downloading: boolean;
@@ -102,6 +117,10 @@ function VoicePlayer({
   onError: (message: string) => void;
   onSeekingChange?: (seeking: boolean) => void;
 }) {
+  const audio = kind !== 'voice';
+  const label = audio ? 'audio' : 'voice message';
+  const title = metadata?.title?.trim() || metadata?.fileName || 'Audio';
+  const artist = metadata?.artist?.trim() || 'Unknown artist';
   const playback = useVoicePlayback();
   const state = useVoicePlaybackState();
   const [probedDuration, setProbedDuration] = useState(0);
@@ -113,18 +132,21 @@ function VoicePlayer({
   const ready = !!uri && !completing;
   const icon =
     downloading || completing ? 'close' : !ready ? 'arrow-down' : playing ? 'pause' : 'play';
+  const track = uri
+    ? { key: fileKey, uri, senderId, duration: knownDuration, kind, title, artist }
+    : undefined;
   const seek = async (seconds: number) => {
-    if (!uri) return;
+    if (!track) return;
     try {
-      playback.select({ key: fileKey, uri, senderId, duration: knownDuration });
+      playback.select(track);
       await playback.seek(seconds);
     } catch (error) {
-      onError('Could not seek this voice message.');
+      onError(`Could not seek this ${label}.`);
       throw error;
     }
   };
   return (
-    <View testID={ready ? 'voice-player' : undefined} style={s.row}>
+    <View testID={audio ? 'audio-player' : ready ? 'voice-player' : undefined} style={s.row}>
       {uri && !knownDuration && !selected && (
         <VoiceDurationProbe uri={uri} onDuration={setProbedDuration} />
       )}
@@ -132,37 +154,75 @@ function VoicePlayer({
         accessibilityRole="button"
         accessibilityLabel={
           completing
-            ? 'Voice download complete'
+            ? audio
+              ? 'Audio download complete'
+              : 'Voice download complete'
             : downloading
-              ? 'Cancel voice download'
+              ? audio
+                ? 'Cancel audio download'
+                : 'Cancel voice download'
               : !ready
-                ? 'Download voice message'
+                ? `Download ${label}`
                 : playing
-                  ? 'Pause voice message'
-                  : 'Play voice message'
+                  ? `Pause ${label}`
+                  : `Play ${label}`
         }
         disabled={completing}
         onLongPress={onOptions}
         onPress={(event) => {
           event.stopPropagation();
-          if (!uri) {
+          if (!track) {
             onDownloadPress();
             return;
           }
           if (playing) playback.pause();
-          else
-            void playback
-              .play({ key: fileKey, uri, senderId, duration: knownDuration })
-              .catch(() => onError('Could not play this voice message.'));
+          else void playback.play(track).catch(() => onError(`Could not play this ${label}.`));
         }}
-        style={s.play}
+        style={[s.play, audio && s.audioPlay]}
       >
+        {audio && (
+          <ServerThumbnail
+            uri={metadata?.coverUrl}
+            cacheKey={`cover:${fileKey}:${metadata?.coverKey || ''}`}
+            label="Audio cover"
+          />
+        )}
+        {audio && !!metadata?.coverUrl && (
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: '#00000045' }]}
+          />
+        )}
         {(downloading || completing) && <DownloadProgressRing progress={progress} />}
         <AttachmentControlIcon name={icon} />
       </Pressable>
       <View style={s.controls}>
-        {ready ? (
+        {audio && (
+          <View style={s.heading}>
+            <Text numberOfLines={1} style={s.title}>
+              {title}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Audio message actions"
+              onPress={(event) => {
+                event.stopPropagation();
+                onOptions(event);
+              }}
+              hitSlop={8}
+              style={s.options}
+            >
+              <Icon name="ellipsis-vertical" color={colors.muted} size={18} />
+            </Pressable>
+          </View>
+        )}
+        {audio && !playing ? (
+          <Text numberOfLines={1} style={s.artist}>
+            {artist}
+          </Text>
+        ) : ready ? (
           <VoiceSeekBar
+            compact={audio}
             value={position}
             duration={duration}
             enabled={active}
@@ -177,10 +237,12 @@ function VoicePlayer({
         <Text style={s.time}>
           {failed
             ? `Tap to retry${duration ? ` · ${videoTime(duration)}` : ''}`
-            : ready || duration
-              ? videoTime(playing || position > 0 ? position : duration)
-              : 'Voice message'}
-          {ready && playing ? ` / ${videoTime(duration)}` : ''}
+            : audio
+              ? `${videoTime(position)} / ${videoTime(duration)}`
+              : ready || duration
+                ? videoTime(playing || position > 0 ? position : duration)
+                : 'Voice message'}
+          {!audio && ready && playing ? ` / ${videoTime(duration)}` : ''}
         </Text>
       </View>
     </View>
@@ -219,7 +281,12 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  controls: { flex: 1 },
+  audioPlay: { overflow: 'hidden' },
+  heading: { flexDirection: 'row', alignItems: 'center' },
+  title: { flex: 1, fontSize: 14, lineHeight: 18, fontWeight: '500', color: colors.dark },
+  options: { width: 24, height: 18, alignItems: 'center', justifyContent: 'center' },
+  artist: { height: 20, lineHeight: 20, fontSize: 12, color: colors.muted },
+  controls: { flex: 1, minWidth: 0 },
   // Match VoiceSeekBar's touch area so the duration stays put when loading finishes.
   seekPlaceholder: { height: 32, justifyContent: 'center' },
   track: { height: 3, borderRadius: 2, backgroundColor: '#3390EC38' },

@@ -72,7 +72,6 @@ import {
 } from '../../context/VideosContext';
 import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
-import { videoTime } from '../../lib/video-download.types';
 import { MessageMenu, type MessageMenuAction } from './MessageMenu';
 import { ChatHistoryScrollView } from './ChatHistoryScrollView';
 import { comparePosition } from '../../api/read-state';
@@ -573,6 +572,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           mimeType: local.mimeType,
         });
         if (kind === 'document') body.append('kind', 'document');
+        else if (local.mimeType?.toLowerCase().startsWith('audio/')) body.append('kind', 'music');
         const { attachment: media } = await api.request<{
           attachment: AttachmentMetadata;
         }>(`/api/conversations/${id}/attachments`, {
@@ -582,7 +582,9 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         });
         mediaMetadata.remember(id, media);
         videoCache.remember(
-          media.type === 'document' ? documentFileKey(id, media.id) : videoKey(id, media.id),
+          ['document', 'music', 'audio'].includes(media.type)
+            ? documentFileKey(id, media.id)
+            : videoKey(id, media.id),
           local,
         );
         local = undefined;
@@ -732,7 +734,13 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                   onPress: () => {
                     const attachment = actionMessage.attachment!;
                     setActionsVisible(false);
-                    if (id && (attachment.type === 'voice' || attachment.type === 'document'))
+                    if (
+                      id &&
+                      (attachment.type === 'voice' ||
+                        attachment.type === 'document' ||
+                        attachment.type === 'music' ||
+                        attachment.type === 'audio')
+                    )
                       void videoCache
                         .get(
                           attachment.type === 'voice'
@@ -1148,8 +1156,11 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                           )
                         }
                       >
-                        {message.attachment?.type === 'voice' ? (
+                        {message.attachment?.type === 'voice' ||
+                        message.attachment?.type === 'music' ||
+                        message.attachment?.type === 'audio' ? (
                           <VoiceMessage
+                            kind={message.attachment.type}
                             onSeekingChange={onVoiceSeekingChange}
                             conversationId={id}
                             senderId={message.senderId}
@@ -1236,25 +1247,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                                 initialMetadata={gifMetadata}
                                 active={focused && !gifs && visibleMessages.has(message.id)}
                               />
-                            )}
-                            {!['image', 'gif'].includes(message.attachment.type) && (
-                              <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-                                <Icon
-                                  name={
-                                    ['audio', 'music'].includes(message.attachment.type)
-                                      ? 'musical-notes-outline'
-                                      : 'document-outline'
-                                  }
-                                  color={colors.blue}
-                                />
-                                <Text style={{ color: '#3974A8', fontSize: 13 }}>
-                                  {message.attachment.type}
-                                  {message.attachment.type === 'music' &&
-                                  mediaMetadata?.durationSeconds
-                                    ? ` · ${videoTime(mediaMetadata.durationSeconds)}`
-                                    : ''}
-                                </Text>
-                              </View>
                             )}
                           </Pressable>
                         ) : null}

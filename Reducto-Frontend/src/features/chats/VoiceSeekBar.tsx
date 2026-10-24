@@ -21,6 +21,7 @@ export function VoiceSeekBar({
   value,
   duration,
   enabled = true,
+  compact = false,
   onSeek,
   onDraggingChange,
 }: {
@@ -28,6 +29,7 @@ export function VoiceSeekBar({
   value: number;
   duration: number;
   enabled?: boolean;
+  compact?: boolean;
   onSeek: (seconds: number) => void | Promise<void>;
   onDraggingChange?: (dragging: boolean) => void;
 }) {
@@ -44,7 +46,8 @@ export function VoiceSeekBar({
     draggingChanged.current?.(value);
   };
   const [preview, setPreview] = useState<SeekPreview>();
-  const available = enabled && Number.isFinite(duration) && duration > 0;
+  const hasDuration = Number.isFinite(duration) && duration > 0;
+  const available = enabled && hasDuration;
   const [previousAvailable, setPreviousAvailable] = useState(available);
   if (previousAvailable !== available) {
     setPreviousAvailable(available);
@@ -121,7 +124,9 @@ export function VoiceSeekBar({
     return true;
   };
   const shown = preview?.seconds ?? (Number.isFinite(value) ? value : 0);
-  const fraction = available ? clamp(shown) / duration : 0;
+  // Visibility disables gestures, but the session keeps playing offscreen.
+  // Keep drawing its current position before the visibility callback catches up.
+  const fraction = hasDuration ? clamp(shown) / duration : 0;
   return (
     <View
       ref={view}
@@ -207,7 +212,7 @@ export function VoiceSeekBar({
             onResponderTerminationRequest: () => false,
             onResponderTerminate: cancel,
           })}
-      style={[s.seek, Platform.OS === 'web' && webDragStyle]}
+      style={[s.seek, compact && s.compact, Platform.OS === 'web' && webDragStyle]}
     >
       <View pointerEvents="none" style={s.track}>
         <View style={[s.fill, { width: `${fraction * 100}%` }]} />
@@ -219,6 +224,7 @@ export function VoiceSeekBar({
 const webDragStyle = { touchAction: 'none', userSelect: 'none', cursor: 'pointer' } as const;
 const s = StyleSheet.create({
   seek: { height: 32, justifyContent: 'center' },
+  compact: { height: 20 },
   track: { height: 3, borderRadius: 2, backgroundColor: '#3390EC38' },
   fill: { height: 3, backgroundColor: colors.blue, borderRadius: 2 },
   dot: {

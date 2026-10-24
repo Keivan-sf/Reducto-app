@@ -80,3 +80,32 @@ test('immutable attachment details without signed thumbnails do not expire on ch
   assert.equal(calls, 1);
   assert.equal(first.renewAt, Infinity);
 });
+
+test('music covers renew before expiry even without a video thumbnail', async () => {
+  let now = Date.parse('2026-10-19T00:10:00Z');
+  let calls = 0;
+  const music: AttachmentMetadata = {
+    ...attachment,
+    type: 'music',
+    title: 'Song',
+    artist: 'Artist',
+    thumbnailUrl: null,
+    coverKey: 'covers/song.jpg',
+    coverUrl: 'https://storage.example/cover.jpg?X-Amz-Date=20261019T000000Z&X-Amz-Expires=900',
+  };
+  const cache = new AttachmentCache(
+    async () => {
+      calls++;
+      return { attachment: { ...music, coverUrl: 'https://storage.example/renewed.jpg' } };
+    },
+    () => now,
+  );
+  const entry = cache.remember('chat', music);
+  assert.equal(entry.renewAt, Date.parse('2026-10-19T00:14:00Z'));
+  assert.equal(await cache.get('chat', 'media'), entry);
+  now = entry.renewAt;
+  const renewed = await cache.get('chat', 'media');
+  assert.equal(calls, 1);
+  assert.equal(renewed.attachment.title, 'Song');
+  assert.match(renewed.attachment.coverUrl!, /renewed/);
+});

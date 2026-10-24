@@ -22,104 +22,129 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-for (const scheme of ['file', 'content']) {
-  test(`native ${scheme} uploads retain an owned copy without deleting the original`, async () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'reducto-upload-copy-'));
-    roots.push(root);
-    const original = path.join(root, 'original.pdf');
-    writeFileSync(original, 'original document bytes');
-    const viewed: { action: string; options: { data: string; type: string; flags: number } }[] = [];
-    class Directory {
-      path: string;
-      constructor(...parts: string[]) {
-        this.path = path.join(...parts);
+for (const launcher of ['available', 'missing', 'no-viewer'] as const) {
+  for (const scheme of ['file', 'content']) {
+    test(`native ${scheme} uploads retain an owned copy with launcher ${launcher}`, async () => {
+      const root = mkdtempSync(path.join(tmpdir(), 'reducto-upload-copy-'));
+      roots.push(root);
+      const original = path.join(root, 'original.pdf');
+      writeFileSync(original, 'original document bytes');
+      let launcherImports = 0;
+      const shared: string[] = [];
+      const viewed: { action: string; options: { data: string; type: string; flags: number } }[] =
+        [];
+      class Directory {
+        path: string;
+        constructor(...parts: string[]) {
+          this.path = path.join(...parts);
+        }
+        create() {
+          mkdirSync(this.path, { recursive: true });
+        }
+        get exists() {
+          return existsSync(this.path);
+        }
+        delete() {
+          rmSync(this.path, { recursive: true });
+        }
       }
-      create() {
-        mkdirSync(this.path, { recursive: true });
+      class File {
+        path: string;
+        type = 'application/pdf';
+        constructor(base: string | Directory, name?: string) {
+          this.path =
+            base instanceof Directory
+              ? path.join(base.path, name!)
+              : base === 'content://picker/selected-photo'
+                ? original
+                : fileURLToPath(base);
+        }
+        get uri() {
+          return pathToFileURL(this.path).href;
+        }
+        get contentUri() {
+          return `content://reducto/${path.basename(this.path)}`;
+        }
+        get exists() {
+          return existsSync(this.path);
+        }
+        get size() {
+          return this.exists ? statSync(this.path).size : 0;
+        }
+        async copy(destination: File) {
+          await Promise.resolve();
+          copyFileSync(this.path, destination.path);
+        }
       }
-      get exists() {
-        return existsSync(this.path);
+      const module = { exports: {} as typeof import('../src/lib/local-attachments') };
+      const source = readFileSync(
+        new URL('../src/lib/local-attachments.ts', import.meta.url),
+        'utf8',
+      );
+      const { outputText } = ts.transpileModule(source, {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      });
+      runInNewContext(outputText, {
+        module,
+        exports: module.exports,
+        require: (name: string) => {
+          if (name === 'expo-file-system')
+            return { Directory, File, Paths: { cache: path.join(root, 'cache') } };
+          if (name === 'expo-sharing')
+            return {
+              isAvailableAsync: async () => true,
+              shareAsync: async (uri: string) => {
+                shared.push(uri);
+              },
+            };
+          if (name === 'react-native') return { Platform: { OS: 'android' } };
+          if (name === 'expo-intent-launcher') {
+            launcherImports++;
+            if (launcher === 'missing')
+              throw new Error("Cannot find native module 'ExpoIntentLauncher'");
+            return {
+              startActivityAsync: async (
+                action: string,
+                options: { data: string; type: string; flags: number },
+              ) => {
+                if (launcher === 'no-viewer') throw new Error('No activity found');
+                viewed.push({ action, options });
+              },
+            };
+          }
+          throw new Error(`Unexpected import ${name}`);
+        },
+      });
+      assert.equal(launcherImports, 0, 'startup must not load the optional native module');
+      const local = await module.exports.retainUpload({
+        uri:
+          scheme === 'content' ? 'content://picker/selected-photo' : pathToFileURL(original).href,
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+      });
+      assert.equal(local.name, 'report.pdf');
+      assert.equal(local.mimeType, 'application/pdf');
+      assert.equal(path.basename(fileURLToPath(local.uri)), 'report.pdf');
+      assert.equal(local.bytes, statSync(original).size);
+      assert.equal(readFileSync(fileURLToPath(local.uri), 'utf8'), 'original document bytes');
+      await module.exports.openLocalFile(local);
+      assert.equal(launcherImports, 1);
+      if (launcher === 'available') {
+        assert.equal(shared.length, 0);
+        assert.equal(viewed.length, 1);
+        assert.equal(viewed[0].action, 'android.intent.action.VIEW');
+        assert.equal(viewed[0].options.data, 'content://reducto/report.pdf');
+        assert.equal(viewed[0].options.type, 'application/pdf');
+        assert.equal(viewed[0].options.flags, 1, 'the viewer gets read access to the file');
+      } else {
+        assert.equal(viewed.length, 0);
+        assert.deepEqual(shared, [local.uri]);
       }
-      delete() {
-        rmSync(this.path, { recursive: true });
-      }
-    }
-    class File {
-      path: string;
-      type = 'application/pdf';
-      constructor(base: string | Directory, name?: string) {
-        this.path =
-          base instanceof Directory
-            ? path.join(base.path, name!)
-            : base === 'content://picker/selected-photo'
-              ? original
-              : fileURLToPath(base);
-      }
-      get uri() {
-        return pathToFileURL(this.path).href;
-      }
-      get contentUri() {
-        return `content://reducto/${path.basename(this.path)}`;
-      }
-      get exists() {
-        return existsSync(this.path);
-      }
-      get size() {
-        return this.exists ? statSync(this.path).size : 0;
-      }
-      async copy(destination: File) {
-        await Promise.resolve();
-        copyFileSync(this.path, destination.path);
-      }
-    }
-    const module = { exports: {} as typeof import('../src/lib/local-attachments') };
-    const source = readFileSync(
-      new URL('../src/lib/local-attachments.ts', import.meta.url),
-      'utf8',
-    );
-    const { outputText } = ts.transpileModule(source, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      local.dispose();
+      assert.equal(local.exists?.(), false);
+      assert.equal(readFileSync(original, 'utf8'), 'original document bytes');
     });
-    runInNewContext(outputText, {
-      module,
-      exports: module.exports,
-      require: (name: string) => {
-        if (name === 'expo-file-system')
-          return { Directory, File, Paths: { cache: path.join(root, 'cache') } };
-        if (name === 'expo-sharing') return {};
-        if (name === 'react-native') return { Platform: { OS: 'android' } };
-        if (name === 'expo-intent-launcher')
-          return {
-            startActivityAsync: async (
-              action: string,
-              options: { data: string; type: string; flags: number },
-            ) => {
-              viewed.push({ action, options });
-            },
-          };
-        throw new Error(`Unexpected import ${name}`);
-      },
-    });
-    const local = await module.exports.retainUpload({
-      uri: scheme === 'content' ? 'content://picker/selected-photo' : pathToFileURL(original).href,
-      name: 'report.pdf',
-      mimeType: 'application/pdf',
-    });
-    assert.equal(local.name, 'report.pdf');
-    assert.equal(local.mimeType, 'application/pdf');
-    assert.equal(path.basename(fileURLToPath(local.uri)), 'report.pdf');
-    assert.equal(local.bytes, statSync(original).size);
-    assert.equal(readFileSync(fileURLToPath(local.uri), 'utf8'), 'original document bytes');
-    await module.exports.openLocalFile(local);
-    assert.equal(viewed.length, 1);
-    assert.equal(viewed[0].action, 'android.intent.action.VIEW');
-    assert.equal(viewed[0].options.data, 'content://reducto/report.pdf');
-    assert.equal(viewed[0].options.type, 'application/pdf');
-    assert.equal(viewed[0].options.flags, 1, 'the viewer gets read access to the file');
-    local.dispose();
-    assert.equal(local.exists?.(), false);
-    assert.equal(readFileSync(original, 'utf8'), 'original document bytes');
-  });
+  }
 }
 
 test('web uploads keep the selected file bytes in an owned blob URL', async () => {

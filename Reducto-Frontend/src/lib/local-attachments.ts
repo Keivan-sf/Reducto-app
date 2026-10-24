@@ -1,7 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
-import { startActivityAsync } from 'expo-intent-launcher';
 import type { VideoFile } from '../api/video-cache';
 import type { UploadAsset } from './uploads';
 
@@ -45,6 +44,9 @@ export async function saveLocalFile(file: VideoFile) {
 export async function openLocalFile(file: VideoFile) {
   if (Platform.OS !== 'android') return saveLocalFile(file);
   try {
+    // Older APKs may lack this native module. Resolve it only on demand so
+    // startup succeeds and an unavailable viewer falls back to sharing.
+    const { startActivityAsync } = await import('expo-intent-launcher');
     await startActivityAsync('android.intent.action.VIEW', {
       data: new File(file.uri).contentUri,
       type: file.mimeType || 'application/octet-stream',

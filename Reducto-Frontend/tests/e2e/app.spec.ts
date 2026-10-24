@@ -175,7 +175,7 @@ test('message metadata sizes unloaded media and shows durations without detail r
   for (const [frame, expected] of [
     [image, 0.5],
     [video, 320 / 180],
-    [gif, 0.5],
+    [gif, 80 / 200],
   ] as const) {
     await expect
       .poll(async () => {
@@ -186,7 +186,7 @@ test('message metadata sizes unloaded media and shows durations without detail r
   }
   await expect(video.getByText('Video · 1:13')).toBeVisible();
   await expect(page.getByText('1:04', { exact: true })).toBeVisible();
-  await expect(page.getByText('music · 2:02', { exact: true })).toBeVisible();
+  await expect(page.getByText('0:00 / 2:02', { exact: true })).toBeVisible();
   expect(details).toBe(0);
 });
 
@@ -3328,12 +3328,10 @@ for (const selection of [
           message.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth > 0),
         )
         .toBeTruthy();
-      const dimensions = await message
-        .locator('img')
-        .evaluate((image: HTMLImageElement) => ({
-          width: image.naturalWidth,
-          height: image.naturalHeight,
-        }));
+      const dimensions = await message.locator('img').evaluate((image: HTMLImageElement) => ({
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      }));
       expect(dimensions.width).toBeLessThanOrEqual(1280);
       expect(dimensions.height).toBeLessThanOrEqual(1280);
       if (imageSize) {
@@ -4924,4 +4922,159 @@ test('notifications float without moving the form and dismiss after two seconds'
   await submit.click();
   await expect(notification).toBeVisible();
   await expect(notification).toBeHidden({ timeout: 3000 });
+});
+
+test('persistent music mini player follows navigation, survives scrolling, and closes playback', async ({
+  page,
+}, testInfo) => {
+  const music = {
+    ...first,
+    text: null,
+    attachment: { type: 'music', mediaId: 'persistent-music' },
+    attachmentMetadata: {
+      id: 'persistent-music',
+      type: 'music',
+      durationSeconds: 120,
+      title: 'Test song',
+      artist: 'Test artist',
+      fileName: 'test.wav',
+      contentType: 'audio/wav',
+      fileSize: 1920044,
+      coverKey: 'covers/test.png',
+      coverUrl: 'https://media.example/test-cover.png',
+    },
+  };
+  const later = Array.from({ length: 35 }, (_, index) => ({
+    ...first,
+    id: `after-music-${index}`,
+    text: `Later message ${index}`,
+    createdAt: new Date(Date.parse(first.createdAt) + (index + 1) * 1000).toISOString(),
+  }));
+  const other = { ...chat, id: 'other-music-chat', name: 'Other conversation' };
+  const voice = {
+    ...first,
+    id: 'switching-voice',
+    text: null,
+    attachment: { type: 'voice', mediaId: 'switching-voice' },
+    attachmentMetadata: { id: 'switching-voice', type: 'voice', durationSeconds: 120 },
+  };
+  await mockApi(page, [music, voice, ...later]);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [chat, other] } }),
+  );
+  await page.route(`**/api/conversations/${other.id}/**`, (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    return route.fulfill({
+      json: pathname.endsWith('/members')
+        ? { members: [{ userId: user.id, conversationId: other.id, role: 'owner' }] }
+        : pathname.endsWith('/first')
+          ? { message: null }
+          : { messages: [], nextCursor: null },
+    });
+  });
+  // A long, valid PCM WAV keeps playback running throughout navigation checks.
+  const samples = 8000 * 120;
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(wav.length - 8, 4);
+  wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24);
+  wav.writeUInt32LE(16000, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(samples * 2, 40);
+  let downloads = 0;
+  await page.route('**/api/conversations/*/attachments/persistent-music', (route) => {
+    downloads++;
+    return route.fulfill({ body: wav, contentType: 'audio/wav' });
+  });
+  await page.route('**/api/conversations/*/attachments/switching-voice', (route) =>
+    route.fulfill({ body: wav, contentType: 'audio/wav' }),
+  );
+  await page.route('https://media.example/test-cover.png', (route) =>
+    route.fulfill({
+      body: readFileSync(path.join(process.cwd(), 'tests/fixtures/portrait.png')),
+      contentType: 'image/png',
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const screen = page.getByTestId(`conversation-${chat.id}`);
+  await screen.getByRole('button', { name: 'Download audio', exact: true }).click();
+  await screen.getByRole('button', { name: 'Play audio', exact: true }).click();
+  const cover = screen.getByRole('img', { name: 'Audio cover' });
+  await expect(cover).toBeVisible();
+  await expect
+    .poll(() => cover.evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBeGreaterThan(0);
+  const mini = page.getByTestId('audio-mini-player');
+  await expect(mini).toHaveCount(1);
+  await expect(mini.getByText('Test song · Test artist', { exact: true })).toBeVisible();
+  await expect(mini.getByRole('button')).toHaveCount(2);
+  const pause = () => mini.getByRole('button', { name: 'Pause current audio', exact: true });
+  await expect(pause()).toBeVisible();
+  // Switching in either direction replaces the single session player.
+  await screen.getByRole('button', { name: 'Download voice message', exact: true }).click();
+  await screen.getByRole('button', { name: 'Play voice message', exact: true }).click();
+  await expect(mini).toHaveCount(0);
+  await expect(page.getByTestId('voice-mini-player')).toBeVisible();
+  await expect(screen.getByRole('button', { name: 'Play audio', exact: true })).toBeVisible();
+  await screen.getByRole('button', { name: 'Play audio', exact: true }).click();
+  await expect(page.getByTestId('voice-mini-player')).toHaveCount(0);
+  await expect(
+    screen.getByRole('button', { name: 'Play voice message', exact: true }),
+  ).toBeVisible();
+  await expect(pause()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('music-card-playing.png') });
+  await pause().click();
+  await expect(
+    screen.getByTestId('audio-player').getByText('Test artist', { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('music-card-paused.png') });
+  await mini.getByRole('button', { name: 'Play current audio', exact: true }).click();
+  await expect(mini).toHaveCSS('height', '36px');
+  await expect(mini).toHaveCSS('background-color', 'rgb(244, 247, 250)');
+  const header = screen.getByRole('button', { name: 'View conversation details' });
+  expect((await mini.boundingBox())!.y).toBeGreaterThan((await header.boundingBox())!.y);
+  await screen.getByTestId('chat-history').evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(screen.getByTestId(`message-${first.id}`)).not.toBeInViewport();
+  await expect(pause()).toBeVisible();
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Other conversation' }).click();
+  await expect(mini).toHaveCount(1);
+  await expect(
+    page.getByTestId(`conversation-${other.id}`).getByTestId('audio-mini-player'),
+  ).toBeVisible();
+  await expect(pause()).toBeVisible();
+  // Back to the list: the bar moves beneath its tabs, including on wide screens.
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  else
+    await page.evaluate(() => {
+      history.pushState({}, '', '/');
+      dispatchEvent(new PopStateEvent('popstate'));
+    });
+  await expect(mini).toHaveCount(1);
+  const tabs = page.getByRole('tab', { name: 'All chats' });
+  const tabBox = (await tabs.boundingBox())!;
+  expect((await mini.boundingBox())!.y).toBeGreaterThanOrEqual(tabBox.y + tabBox.height - 1);
+  await expect(pause()).toBeVisible();
+  await pause().click();
+  await expect(mini.getByRole('button', { name: 'Play current audio', exact: true })).toBeVisible();
+  await mini.getByRole('button', { name: 'Play current audio', exact: true }).click();
+  await expect(pause()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('audio-mini-player-list.png') });
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(mini).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath('audio-mini-player-conversation.png') });
+  await mini.getByRole('button', { name: 'Close audio player', exact: true }).click();
+  await expect(mini).toHaveCount(0);
+  expect(downloads).toBe(1);
 });

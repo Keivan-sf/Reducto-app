@@ -25,9 +25,10 @@ export class AttachmentCache {
     const entry = {
       conversationId,
       attachment,
-      renewAt: attachment.thumbnailUrl
-        ? signedMediaRenewAt([attachment.thumbnailUrl], this.now())
-        : Infinity,
+      renewAt:
+        attachment.thumbnailUrl || attachment.coverUrl
+          ? signedMediaRenewAt([attachment.thumbnailUrl, attachment.coverUrl], this.now())
+          : Infinity,
     };
     this.entries.delete(key);
     this.entries.set(key, entry);

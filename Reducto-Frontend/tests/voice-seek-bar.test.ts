@@ -4,7 +4,11 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 
-function nativeSeekBar(deferredMeasurement = false, seekResult?: () => Promise<void>) {
+function nativeSeekBar(
+  deferredMeasurement = false,
+  seekResult?: () => Promise<void>,
+  initiallyEnabled = true,
+) {
   const seeks: number[] = [];
   const previews: unknown[] = [];
   const locks: boolean[] = [];
@@ -70,7 +74,7 @@ function nativeSeekBar(deferredMeasurement = false, seekResult?: () => Promise<v
     },
   });
   let props!: Record<string, unknown> & { ref: { current: unknown } };
-  const render = (value = 2) => {
+  const render = (value = 2, enabled = initiallyEnabled) => {
     let attempts = 0;
     do {
       stateIndex = 0;
@@ -78,6 +82,7 @@ function nativeSeekBar(deferredMeasurement = false, seekResult?: () => Promise<v
       dirty = false;
       const element = module.exports.VoiceSeekBar({
         value,
+        enabled,
         duration: 10,
         onSeek: (seconds) => {
           seeks.push(seconds);
@@ -105,6 +110,13 @@ function nativeSeekBar(deferredMeasurement = false, seekResult?: () => Promise<v
     seeks,
     previews,
     shown: render,
+    fillWidth: () => {
+      const track = props.children as {
+        props: { children: { props: { style: { width?: string }[] } }[] };
+      };
+      return track.props.children[0].props.style[1].width;
+    },
+    canSeek: () => invoke('onStartShouldSetResponder'),
     locks,
     start: (x: number) => invoke('onResponderGrant', event(x)),
     move: (x: number) => invoke('onResponderMove', event(x)),
@@ -222,4 +234,29 @@ test('failed seeks restore actual playback and stale failures do not override a 
   failures[1](new Error('new seek failed'));
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(slider.shown(2), 2);
+});
+
+test('offscreen and returning seek bars display live playback even before gestures are enabled', () => {
+  const slider = nativeSeekBar();
+  slider.shown(6, true);
+  assert.equal(slider.fillWidth(), '60%');
+  slider.shown(6, false);
+  assert.equal(slider.canSeek(), false);
+  assert.equal(slider.fillWidth(), '60%', 'disabling gestures must not reset the indicator');
+  slider.shown(7, false);
+  assert.equal(slider.fillWidth(), '70%', 'offscreen progress follows the session');
+  slider.shown(7, true);
+  assert.equal(slider.canSeek(), true);
+  assert.equal(slider.fillWidth(), '70%');
+  assert.deepEqual(slider.seeks, [], 'visibility changes must never seek the actual player');
+
+  const remounted = nativeSeekBar(false, undefined, false);
+  remounted.shown(8, false);
+  assert.equal(
+    remounted.fillWidth(),
+    '80%',
+    'remounting before viewability updates uses live progress',
+  );
+  remounted.shown(8, true);
+  assert.equal(remounted.fillWidth(), '80%');
 });
