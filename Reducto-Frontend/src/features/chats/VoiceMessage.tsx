@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { colors, Icon } from '../../components/ui';
+import { colors } from '../../components/ui';
 import { documentFileKey, useCachedFile, voiceFileKey } from '../../context/VideosContext';
 import { videoTime } from '../../lib/video-download.types';
 import { useVoicePlayback, useVoicePlaybackState } from '../../context/VoicePlaybackContext';
@@ -202,18 +202,6 @@ function VoicePlayer({
             <Text numberOfLines={1} style={s.title}>
               {title}
             </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Audio message actions"
-              onPress={(event) => {
-                event.stopPropagation();
-                onOptions(event);
-              }}
-              hitSlop={8}
-              style={s.options}
-            >
-              <Icon name="ellipsis-vertical" color={colors.muted} size={18} />
-            </Pressable>
           </View>
         )}
         {audio && !playing ? (
@@ -284,7 +272,6 @@ const s = StyleSheet.create({
   audioPlay: { overflow: 'hidden' },
   heading: { flexDirection: 'row', alignItems: 'center' },
   title: { flex: 1, fontSize: 14, lineHeight: 18, fontWeight: '500', color: colors.dark },
-  options: { width: 24, height: 18, alignItems: 'center', justifyContent: 'center' },
   artist: { height: 20, lineHeight: 20, fontSize: 12, color: colors.muted },
   controls: { flex: 1, minWidth: 0 },
   // Match VoiceSeekBar's touch area so the duration stays put when loading finishes.
