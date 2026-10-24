@@ -25,7 +25,7 @@ export function mediaPreviewSize(size?: MediaSize) {
     Number.isFinite(size.height) &&
     size.width > 0 &&
     size.height > 0;
-  const ratio = valid ? Math.min(2.5, Math.max(0.6, size.width / size.height)) : 1;
-  const width = Math.min(260, 280 * ratio, valid ? Math.max(100, size.width) : 200);
+  const ratio = valid ? Math.min(4, Math.max(0.35, size.width / size.height)) : 1;
+  const width = Math.min(290, 400 * ratio);
   return { width, aspectRatio: ratio };
 }

@@ -2,18 +2,38 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mediaDimensions, mediaPreviewSize } from '../src/lib/media-preview';
 
-test('normal media retains its aspect ratio and small GIFs stay compact', () => {
+test('normal media retains its aspect ratio within the preview bounds', () => {
   for (const size of [
     { width: 160, height: 120 },
     { width: 1080, height: 1920 },
+    { width: 1080, height: 2400 },
+    { width: 1440, height: 3200 },
+    { width: 3440, height: 1440 },
+    { width: 3840, height: 1080 },
     { width: 500, height: 500 },
   ]) {
     const preview = mediaPreviewSize(size);
-    if (size.width / size.height >= 0.6)
-      assert.equal(preview.aspectRatio, size.width / size.height);
-    assert.ok(preview.width <= Math.max(100, size.width));
-    assert.ok(preview.width <= 260);
-    assert.ok(preview.width / preview.aspectRatio <= 280);
+    assert.equal(preview.aspectRatio, size.width / size.height);
+    assert.ok(preview.width <= 290);
+    assert.ok(preview.width / preview.aspectRatio <= 400);
+  }
+});
+
+test('preview size depends only on aspect ratio regardless of source resolution', () => {
+  for (const size of [
+    { width: 4, height: 3 },
+    { width: 9, height: 20 },
+    { width: 1, height: 1 },
+    { width: 10, height: 1 },
+    { width: 1, height: 10 },
+  ]) {
+    const preview = mediaPreviewSize(size);
+    for (const scale of [10, 100, 1000])
+      assert.deepEqual(
+        mediaPreviewSize({ width: size.width * scale, height: size.height * scale }),
+        preview,
+      );
+    assert.equal(preview.width, Math.min(290, 400 * preview.aspectRatio));
   }
 });
 
@@ -23,9 +43,9 @@ test('extreme media dimensions cannot produce oversized or unusably thin preview
     { width: 1, height: 1000000 },
   ]) {
     const preview = mediaPreviewSize(size);
-    assert.ok(preview.aspectRatio >= 0.6 && preview.aspectRatio <= 2.5);
-    assert.ok(preview.width <= 260);
-    assert.ok(preview.width / preview.aspectRatio <= 280);
+    assert.ok(preview.aspectRatio >= 0.35 && preview.aspectRatio <= 4);
+    assert.ok(preview.width <= 290);
+    assert.ok(preview.width / preview.aspectRatio <= 400);
   }
 });
 
@@ -38,9 +58,9 @@ test('missing or invalid metadata uses a finite bounded placeholder', () => {
     { width: 4, height: NaN },
   ]) {
     const preview = mediaPreviewSize(size);
-    assert.ok(Number.isFinite(preview.width) && preview.width > 0 && preview.width <= 260);
+    assert.ok(Number.isFinite(preview.width) && preview.width > 0 && preview.width <= 290);
     assert.equal(preview.aspectRatio, 1);
-    assert.equal(preview.width, 200);
+    assert.equal(preview.width, 290);
   }
 });
 

@@ -172,9 +172,9 @@ test('message metadata sizes unloaded media and shows durations without detail r
   const video = page.getByTestId('video-card-inline-video');
   const gif = page.getByLabel('GIF preview', { exact: true });
   for (const [frame, expected] of [
-    [image, 0.6],
+    [image, 0.5],
     [video, 320 / 180],
-    [gif, 0.6],
+    [gif, 0.5],
   ] as const) {
     await expect
       .poll(async () => {
@@ -425,8 +425,8 @@ for (const portrait of [false, true]) {
             Math.abs(rect.width / rect.height - element.videoWidth / element.videoHeight) < 0.02 &&
             Math.abs(rect.width - frame.width) < 1 &&
             Math.abs(rect.height - frame.height) < 1 &&
-            frame.width <= 260 &&
-            frame.height <= 280 &&
+            frame.width <= 290 &&
+            frame.height <= 400 &&
             frame.left >= 0 &&
             frame.right <= window.innerWidth
           );
@@ -458,7 +458,7 @@ for (const panorama of [false, true]) {
         const box = await frame.boundingBox();
         return box ? box.width / box.height : 0;
       })
-      .toBeCloseTo(panorama ? 2.5 : 0.6, 1);
+      .toBeCloseTo(panorama ? 4 : 0.5, 1);
     await expect
       .poll(() =>
         frame.evaluate((element) => {
@@ -466,8 +466,8 @@ for (const panorama of [false, true]) {
           // React Native Web renders an Image as a background sized to cover the frame.
           const image = element.querySelector('[style*="background-image"]');
           return (
-            box.width <= 260 &&
-            box.height <= 280 &&
+            box.width <= 290 &&
+            box.height <= 400 &&
             box.left >= 0 &&
             box.right <= window.innerWidth &&
             !!image &&
@@ -2938,7 +2938,7 @@ for (const kind of ['image', 'video', 'gif'] as const) {
           const box = await frame.boundingBox();
           return box ? box.width / box.height : 0;
         })
-        .toBeCloseTo(0.6, 2);
+        .toBeCloseTo(360 / 640, 2);
       if (kind !== 'image') {
         await expect.poll(() => thumbnailDownloads).toBe(1);
       }
@@ -2967,7 +2967,7 @@ for (const kind of ['image', 'video', 'gif'] as const) {
           const box = await frame.boundingBox();
           return box ? box.width / box.height : 0;
         })
-        .toBeCloseTo(0.6, 2);
+        .toBeCloseTo(360 / 640, 2);
     } finally {
       releaseMetadata();
       releaseMedia();
