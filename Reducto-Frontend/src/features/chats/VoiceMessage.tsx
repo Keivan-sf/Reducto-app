@@ -73,8 +73,10 @@ export function VoiceMessage({
           <ActivityIndicator color="white" accessibilityLabel="Loading voice message" />
         )}
       </Pressable>
-      <View style={{ flex: 1, gap: 8 }}>
-        <View style={s.track} />
+      <View style={s.controls}>
+        <View style={s.seekPlaceholder}>
+          <View style={s.track} />
+        </View>
         <Text style={s.time}>
           {state.status === 'error'
             ? `Tap to retry${metadata?.durationSeconds ? ` · ${videoTime(metadata.durationSeconds)}` : ''}`
@@ -154,7 +156,7 @@ function VoicePlayer({
       >
         <Icon name={playing ? 'pause' : 'play'} color="white" size={24} />
       </Pressable>
-      <View style={{ flex: 1, gap: 5 }}>
+      <View style={s.controls}>
         <VoiceSeekBar
           value={position}
           duration={duration}
@@ -203,6 +205,9 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  controls: { flex: 1 },
+  // Match VoiceSeekBar's touch area so the duration stays put when loading finishes.
+  seekPlaceholder: { height: 32, justifyContent: 'center' },
   track: { height: 3, borderRadius: 2, backgroundColor: '#3390EC38' },
-  time: { fontSize: 12, color: '#6C93AF' },
+  time: { fontSize: 12, lineHeight: 14, color: '#6C93AF' },
 });
