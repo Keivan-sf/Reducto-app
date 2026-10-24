@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, Icon } from '../../components/ui';
+import { MentionIcon } from '../../components/MentionIcon';
 
 export function ScrollToLatestButton({
   visible,
@@ -60,7 +61,7 @@ export function ScrollToLatestButton({
         style={({ pressed }) => [s.button, (pressed || disabled) && { opacity: 0.7 }]}
       >
         {mention ? (
-          <Text style={{ fontSize: 22, color: colors.blue }}>@</Text>
+          <MentionIcon size={22} />
         ) : (
           <Icon name="chevron-down" size={27} color={colors.muted} />
         )}
