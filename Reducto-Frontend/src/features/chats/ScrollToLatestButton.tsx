@@ -60,7 +60,7 @@ export function ScrollToLatestButton({
         style={({ pressed }) => [s.button, (pressed || disabled) && { opacity: 0.7 }]}
       >
         {mention ? (
-          <Text style={{ fontSize: 28, color: colors.blue }}>@</Text>
+          <Text style={{ fontSize: 22, color: colors.blue }}>@</Text>
         ) : (
           <Icon name="chevron-down" size={27} color={colors.muted} />
         )}

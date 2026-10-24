@@ -665,6 +665,10 @@ test('unseen mentions jump oldest first, mark only visible targets, and disappea
   const mentionBadge = await page.getByTestId(`mentions-${chat.id}`).boundingBox();
   const unreadBadge = await page.getByTestId(`unread-${chat.id}`).boundingBox();
   expect(mentionBadge!.x + mentionBadge!.width).toBeLessThan(unreadBadge!.x);
+  const mentionGlyph = await page.getByTestId(`mentions-${chat.id}`).locator('svg').boundingBox();
+  expect(
+    Math.abs(mentionGlyph!.y + mentionGlyph!.height / 2 - unreadBadge!.y - unreadBadge!.height / 2),
+  ).toBeLessThan(1);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const jump = page.getByTestId('jump-to-mention');
   await expect(page.getByTestId('unseen-mentions-count')).toHaveText('2');

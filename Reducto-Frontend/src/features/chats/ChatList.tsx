@@ -16,6 +16,7 @@ import { conversationName, preview, timeLabel } from '../../lib/messages';
 import { NewChatDialog } from './NewChatDialog';
 import { VoiceMiniPlayer } from './VoiceMiniPlayer';
 import { useProfiles } from '../../context/ProfilesContext';
+import { MentionIcon } from '../../components/MentionIcon';
 
 export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?: boolean }) {
   const { session } = useSession();
@@ -193,11 +194,9 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
                     <View
                       testID={`mentions-${chat.id}`}
                       accessibilityLabel={`${chat.unseenMentions.length} unseen mentions`}
-                      style={[s.badge, selected && { backgroundColor: 'white' }]}
+                      style={s.mention}
                     >
-                      <Text style={{ color: selected ? colors.blue : 'white', fontWeight: '700' }}>
-                        @
-                      </Text>
+                      <MentionIcon />
                     </View>
                   )}
                   {!!unread[chat.id] && (
@@ -299,6 +298,13 @@ const s = StyleSheet.create({
   chatName: { flex: 1, color: colors.dark, fontSize: 15, fontWeight: '600' },
   time: { color: '#9AA7B4', fontSize: 11 },
   preview: { color: colors.muted, fontSize: 13, flex: 1 },
+  mention: {
+    width: 21,
+    height: 21,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   badge: {
     backgroundColor: colors.blue,
     borderRadius: 12,
