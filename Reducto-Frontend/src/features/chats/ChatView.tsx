@@ -1175,9 +1175,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                               )}
                             </View>
                           )}
-                          {message.attachment && (
-                            <Icon name="ellipsis-horizontal" size={18} color={colors.muted} />
-                          )}
                         </View>
                         {!!reactions.length && (
                           <View style={s.reactions}>
