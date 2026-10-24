@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { colors, Icon, IconButton } from '../../components/ui';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { VoiceRecordButton } from './VoiceRecordButton';
@@ -84,6 +84,7 @@ export function MessageComposer({
           autoFocus={editing}
           editable={!recording && !(editing && busy)}
           multiline
+          numberOfLines={Platform.OS === 'web' ? 1 : undefined}
           placeholder="Write a message…"
           placeholderTextColor="#96A3B0"
           value={draft}
@@ -136,11 +137,6 @@ export function MessageComposer({
           />
         )}
       </View>
-      <Text style={s.composerHint}>
-        {Platform.OS === 'web'
-          ? `Enter to ${editing ? 'save' : 'send'} · Shift + Enter for a new line`
-          : 'A little hello goes a long way'}
-      </Text>
     </>
   );
 }
@@ -149,38 +145,34 @@ const s = StyleSheet.create({
   hidden: { display: 'none' },
   composer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     gap: 4,
-    padding: 7,
-    borderRadius: 17,
+    padding: 6,
     backgroundColor: 'white',
-    maxWidth: 900,
     width: '100%',
     alignSelf: 'center',
   },
   messageInput: {
     flex: 1,
+    minWidth: 0,
     minHeight: 44,
     maxHeight: 140,
     paddingVertical: 12,
     paddingHorizontal: 6,
     fontSize: 15,
+    lineHeight: 20,
+    textAlignVertical: 'center',
+    ...(Platform.OS === 'web' ? { fieldSizing: 'content', outlineStyle: 'solid' } : {}),
     color: colors.dark,
+    borderWidth: 0,
     outlineWidth: 0,
   },
   send: {
     width: 44,
     height: 44,
-    borderRadius: 14,
+    borderRadius: 22,
     backgroundColor: colors.blue,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  composerHint: {
-    color: '#9AAAB7',
-    fontSize: 10,
-    textAlign: 'center',
-    paddingTop: 9,
-    paddingBottom: 2,
   },
 });

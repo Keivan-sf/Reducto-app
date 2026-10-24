@@ -257,7 +257,7 @@ const s = StyleSheet.create({
   mic: {
     width: 44,
     height: 44,
-    borderRadius: 14,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.blue,

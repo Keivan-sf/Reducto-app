@@ -1529,7 +1529,7 @@ const s = StyleSheet.create({
     borderRadius: 12,
     fontSize: 12,
   },
-  composerWrap: { padding: 14, paddingBottom: 8, backgroundColor: '#E8EFF3' },
+  composerWrap: { backgroundColor: 'white' },
   pending: {
     flexDirection: 'row',
     gap: 8,

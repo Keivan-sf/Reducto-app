@@ -947,6 +947,39 @@ test('sign in, send a message, edit profile, and sign out', async ({ page }, tes
   expect(errors).toEqual([]);
 });
 
+test('composer fills the chat width and centers circular controls', async ({ page }, testInfo) => {
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const input = page.getByRole('textbox', { name: 'Message', exact: true });
+  const bar = input.locator('..');
+  const header = page.getByRole('button', { name: 'View conversation details' }).locator('..');
+  const attach = page.getByRole('button', { name: 'Attach a file', exact: true });
+  const gifs = page.getByRole('button', { name: 'Open GIF library', exact: true });
+  const mic = page.getByRole('button', { name: 'Hold to record voice message', exact: true });
+  await expect(input).toBeVisible();
+  const headerBox = (await header.boundingBox())!;
+  const barBox = (await bar.boundingBox())!;
+  expect(Math.abs(barBox.x - headerBox.x)).toBeLessThan(1);
+  expect(Math.abs(barBox.width - headerBox.width)).toBeLessThan(1);
+  expect(barBox.height).toBeLessThanOrEqual(60);
+  for (const control of [attach, input, gifs, mic]) {
+    const box = (await control.boundingBox())!;
+    expect(Math.abs(box.y + box.height / 2 - barBox.y - barBox.height / 2)).toBeLessThan(1);
+  }
+  await expect(mic).toHaveCSS('border-radius', '22px');
+  await input.fill('Test message');
+  await expect(input).toHaveCSS('border-top-width', '0px');
+  await expect(input).toHaveCSS('outline-width', '0px');
+  const send = page.getByRole('button', { name: 'Send message', exact: true });
+  await expect(send).toHaveCSS('border-radius', '22px');
+  await page.screenshot({ path: testInfo.outputPath('composer.png') });
+  await input.fill('First line\nSecond line\nThird line');
+  await expect.poll(async () => (await input.boundingBox())!.height).toBeGreaterThan(44);
+  await input.fill('');
+  await expect.poll(async () => (await bar.boundingBox())!.height).toBe(barBox.height);
+});
+
 test('sending keeps the composer focused and preserves edits made during the request', async ({
   page,
 }) => {
