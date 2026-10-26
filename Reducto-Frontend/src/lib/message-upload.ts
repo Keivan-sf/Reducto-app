@@ -14,7 +14,13 @@ import { fileForm, type UploadAsset } from './uploads';
 export function messageUpload(
   conversationId: string,
   asset: UploadAsset & { size?: number },
-  caches: { api: ApiClient; media: AttachmentCache; gifs: GifCache; files: VideoCache },
+  caches: {
+    api: ApiClient;
+    media: AttachmentCache;
+    gifs: GifCache;
+    files: VideoCache;
+    onGifAdded?: (id: string) => void;
+  },
   voice?: { file: VideoFile; duration: number },
 ): UploadJob {
   const kind = voice ? 'voice' : uploadKind(asset.mimeType, asset.name);
@@ -89,6 +95,7 @@ export function messageUpload(
         check(signal);
         progress({ sent: size });
         if (type === 'gif') {
+          caches.onGifAdded?.(result.gif.id);
           caches.gifs.remember(result.gif);
           caches.files.remember(gifFileKey(result.gif.id), local);
           local = undefined;

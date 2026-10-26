@@ -1,6 +1,4 @@
-export async function readEmojiUsage(key: string) {
-  return localStorage.getItem(key);
-}
-export async function writeEmojiUsage(key: string, value: string) {
-  localStorage.setItem(key, value);
-}
+export {
+  readClientPreference as readEmojiUsage,
+  writeClientPreference as writeEmojiUsage,
+} from './client-preferences';

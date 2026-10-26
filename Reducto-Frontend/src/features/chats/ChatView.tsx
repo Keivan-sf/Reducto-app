@@ -48,6 +48,7 @@ import { MessageBubbleContent } from './MessageBubbleContent';
 import { SwipeToReply } from './SwipeToReply';
 import { GifPreview } from './GifPreview';
 import { useGifs } from '../../context/GifsContext';
+import { gifRecencyStore } from '../../lib/gif-recency-store';
 import { ReplyPreview, ReplyQuote } from './ReplyPreview';
 import { VoiceMessage } from './VoiceMessage';
 import { DocumentMessage } from './DocumentMessage';
@@ -610,6 +611,9 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         media: mediaMetadata,
         gifs: gifCache,
         files: videoCache,
+        onGifAdded: (gifId) => {
+          void gifRecencyStore(session!.user.id).record(gifId);
+        },
       }),
     );
     setReplyTo(null);
@@ -787,6 +791,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                     setBusy(true);
                     void api
                       .request(`/api/gifs/${attachment.gifId}`, { method: 'PUT' })
+                      .then(() => gifRecencyStore(session!.user.id).record(attachment.gifId))
                       .catch((err) => setError(err.message))
                       .finally(() => setBusy(false));
                   },

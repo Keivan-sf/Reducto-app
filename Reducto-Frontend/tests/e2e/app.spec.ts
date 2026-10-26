@@ -6201,3 +6201,66 @@ test('emoji grid stays aligned while scrolling and a hold opens skin tones witho
     'Insert thumbs up',
   );
 });
+
+test('GIF library puts the latest used or added GIF first and remembers its order after reload', async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  const gif = (id: string) => ({
+    id,
+    objectKey: `gifs/${id}.mp4`,
+    playbackUrl: 'https://media.example/recent.mp4',
+    fileSize: 4000,
+    width: 160,
+    height: 120,
+    createdAt: '2020-01-01T00:00:00Z',
+  });
+  const library = [gif('new'), gif('middle'), gif('old')];
+  await page.route('**/api/gifs', (route) => route.fulfill({ json: { gifs: library } }));
+  await page.route('**/api/gifs/*', (route) => {
+    if (route.request().method() === 'PUT') {
+      const id = new URL(route.request().url()).pathname.split('/').at(-1)!;
+      if (!library.some((entry) => entry.id === id)) library.unshift(gif(id));
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ json: { gif: gif('old') } });
+  });
+  await page.route('https://media.example/recent.mp4', (route) =>
+    route.fulfill({ path: path.join(__dirname, '../fixtures/loop.mp4'), contentType: 'video/mp4' }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const open = () => page.getByRole('button', { name: 'Open GIF library', exact: true }).click();
+  const expectOrder = async (ids: string[]) => {
+    await expect
+      .poll(() =>
+        page
+          .getByTestId('media-picker')
+          .getByRole('button', { name: 'Send GIF', exact: true })
+          .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-testid'))),
+      )
+      .toEqual(ids.map((id) => `gif-choice-${id}`));
+  };
+  await open();
+  await expectOrder(['new', 'middle', 'old']);
+  await page.getByTestId('gif-choice-old').click();
+  await expect(page.getByTestId('media-picker')).toHaveCount(0);
+  await open();
+  await expectOrder(['old', 'new', 'middle']);
+  await page.getByTestId('gif-choice-new').click();
+  await open();
+  await expectOrder(['new', 'old', 'middle']);
+  const add = async (id: string) => {
+    await page.getByRole('button', { name: 'Add a new GIF', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Add an existing GIF by ID', exact: true }).fill(id);
+    await page.getByRole('button', { name: 'Add to library', exact: true }).click();
+  };
+  await add('middle');
+  await expectOrder(['middle', 'new', 'old']);
+  await add('added');
+  await expectOrder(['added', 'middle', 'new', 'old']);
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  await open();
+  await expectOrder(['added', 'middle', 'new', 'old']);
+});

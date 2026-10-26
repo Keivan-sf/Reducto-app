@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { pickUpload } from '../../lib/pick-upload';
-import { api } from '../../context/SessionContext';
+import { api, useSession } from '../../context/SessionContext';
 import type { Gif } from '../../api/types';
 import { Button, colors, Dialog, Field, Icon, IconButton, Notice } from '../../components/ui';
 import { fileForm } from '../../lib/uploads';
@@ -11,6 +11,8 @@ import { retainUpload } from '../../lib/local-attachments';
 import type { VideoFile } from '../../api/video-cache';
 import { useGifs } from '../../context/GifsContext';
 import { EmojiPanel } from './EmojiPanel';
+import { gifRecencyStore } from '../../lib/gif-recency-store';
+import { sortGifsByRecency } from '../../lib/gif-recency';
 
 type Tab = 'GIF' | 'Emoji';
 export function MediaPicker({
@@ -26,9 +28,13 @@ export function MediaPicker({
   onHoldOpen: (hold: boolean) => void;
   height: number;
 }) {
+  const { session } = useSession();
+  const recency = gifRecencyStore(session!.user.id);
+  const order = useSyncExternalStore(recency.subscribe, recency.snapshot, recency.snapshot);
   const cache = useGifs();
   const files = useVideos();
   const [gifs, setGifs] = useState<Gif[]>([]);
+  const sortedGifs = useMemo(() => sortGifsByRecency(gifs, order), [gifs, order]);
   const [gifId, setGifId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -46,15 +52,17 @@ export function MediaPicker({
   async function load() {
     const result = await api.get<{ gifs: Gif[] }>('/api/gifs');
     result.gifs.forEach((gif) => cache.remember(gif));
+    await recency.syncLibrary(result.gifs.map((gif) => gif.id));
     setGifs(result.gifs);
   }
   useEffect(() => {
     const controller = new AbortController();
     void api
       .get<{ gifs: Gif[] }>('/api/gifs', controller.signal)
-      .then((result) => {
+      .then(async (result) => {
         result.gifs.forEach((gif) => cache.remember(gif));
-        setGifs(result.gifs);
+        await recency.syncLibrary(result.gifs.map((gif) => gif.id));
+        if (!controller.signal.aborted) setGifs(result.gifs);
       })
       .catch((err) => {
         if (!controller.signal.aborted) setError(err.message);
@@ -63,7 +71,7 @@ export function MediaPicker({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [cache]);
+  }, [cache, recency]);
   async function run(action: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
@@ -92,6 +100,7 @@ export function MediaPicker({
           body,
           signal: AbortSignal.timeout(120000),
         });
+        await recency.record(gif.id);
         cache.remember(gif);
         files.remember(gifFileKey(gif.id), local);
         local = undefined;
@@ -117,7 +126,7 @@ export function MediaPicker({
               <ActivityIndicator style={s.empty} color={colors.blue} />
             ) : (
               <FlatList
-                data={gifs}
+                data={sortedGifs}
                 numColumns={3}
                 keyExtractor={(gif) => gif.id}
                 contentContainerStyle={{ padding: 8, paddingBottom: 64, flexGrow: 1 }}
@@ -138,12 +147,16 @@ export function MediaPicker({
                 renderItem={({ item }) => (
                   <Pressable
                     accessibilityRole="button"
+                    testID={`gif-choice-${item.id}`}
                     accessibilityLabel="Send GIF"
                     accessibilityHint="Immediately sends this GIF to the chat"
                     disabled={busy}
                     onPress={() => {
                       try {
-                        if (onSend(item.id)) onClose();
+                        if (onSend(item.id)) {
+                          void recency.record(item.id);
+                          onClose();
+                        }
                       } catch (err) {
                         setError((err as Error).message);
                       }
@@ -223,6 +236,7 @@ export function MediaPicker({
           onPress={() =>
             void run(async () => {
               await api.request(`/api/gifs/${encodeURIComponent(gifId.trim())}`, { method: 'PUT' });
+              await recency.record(gifId.trim());
               setGifId('');
               await load();
               showAdd(false);
