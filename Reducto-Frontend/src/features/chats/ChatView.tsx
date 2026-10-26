@@ -46,6 +46,7 @@ import { UserProfileDialog } from './UserProfileDialog';
 import { GifDialog } from './GifDialog';
 import { MessageText } from './MessageText';
 import { MessageBubbleContent } from './MessageBubbleContent';
+import { SwipeToReply } from './SwipeToReply';
 import { GifPreview } from './GifPreview';
 import { useGifs } from '../../context/GifsContext';
 import { ReplyPreview, ReplyQuote } from './ReplyPreview';
@@ -1098,229 +1099,239 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                       </Text>
                     </View>
                   )}
-                  <Pressable
-                    accessible={false}
-                    ref={(view) => mentionVisibility.register(message.id, view)}
-                    testID={`message-row-${message.id}`}
-                    onPress={(event) => openMessageMenu(message, event)}
-                    onLongPress={(event) => openMessageMenu(message, event)}
-                    {...(Platform.OS === 'web'
-                      ? {
-                          onContextMenu: (event: GestureResponderEvent) => {
-                            event.preventDefault();
-                            openMessageMenu(message, event);
-                          },
-                        }
-                      : {})}
-                    style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}
+                  <SwipeToReply
+                    messageId={message.id}
+                    disabled={!!message.delivery || voiceActive || !focused}
+                    onReply={() => {
+                      setEditing(null);
+                      setReplyTo(message);
+                      setActionsVisible(false);
+                    }}
                   >
-                    {!mine && chat.type === 'group' && (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`View ${profileName(profiles[message.senderId])} profile`}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          setProfileUserId(message.senderId);
-                        }}
-                        style={{
-                          marginRight: 8,
-                          alignSelf: 'flex-end',
-                          minWidth: 44,
-                          minHeight: 44,
-                          justifyContent: 'flex-end',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <Avatar
-                          name={profileName(profiles[message.senderId])}
-                          uri={profiles[message.senderId]?.avatarUrl ?? undefined}
-                          online={profiles[message.senderId]?.online}
-                          size={32}
-                        />
-                      </Pressable>
-                    )}
-                    <View
-                      testID={`message-${message.id}`}
-                      style={[
-                        s.bubble,
-                        mine ? s.outgoing : s.incoming,
-                        visualMedia && s.mediaBubble,
-                        highlighted === message.id && { backgroundColor: '#FFF0B3' },
-                      ]}
+                    <Pressable
+                      accessible={false}
+                      ref={(view) => mentionVisibility.register(message.id, view)}
+                      testID={`message-row-${message.id}`}
+                      onPress={(event) => openMessageMenu(message, event)}
+                      onLongPress={(event) => openMessageMenu(message, event)}
+                      {...(Platform.OS === 'web'
+                        ? {
+                            onContextMenu: (event: GestureResponderEvent) => {
+                              event.preventDefault();
+                              openMessageMenu(message, event);
+                            },
+                          }
+                        : {})}
+                      style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}
                     >
-                      <MessageBubbleContent
-                        visualMedia={visualMedia}
-                        meta={messageMeta}
-                        header={
-                          hasMediaHeader && (
-                            <>
-                              {!mine && chat.type === 'group' && (
-                                <Text style={s.sender}>
-                                  {profileName(profiles[message.senderId])}
-                                </Text>
-                              )}
-                              {!!message.forwardedFrom && (
-                                <Text style={s.forwarded}>
-                                  Forwarded from{' '}
-                                  {profileName(profiles[message.forwardedFrom.senderId])}
-                                </Text>
-                              )}
-                              {!!message.replyToMessageId && (
-                                <ReplyPreview
-                                  conversationId={id}
-                                  messageId={message.replyToMessageId}
-                                  onJump={(target) => void jumpToMessage(target)}
-                                />
-                              )}
-                            </>
-                          )
-                        }
-                        caption={
-                          !!message.text && (
-                            <MessageText
-                              text={message.text}
-                              style={s.messageText}
-                              onError={setError}
-                              onOpenUsername={(username) => void openUsername(username)}
-                              onMessagePress={(event) => openMessageMenu(message, event)}
-                            />
-                          )
-                        }
-                        reactions={
-                          !!reactions.length && (
-                            <View style={s.reactions}>
-                              {reactions.map((reaction) => (
-                                <Pressable
-                                  key={reaction.emoji}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`${reaction.selected ? 'Remove' : 'Add'} ${reaction.emoji} reaction`}
-                                  aria-selected={!!reaction.selected}
-                                  accessibilityState={{
-                                    selected: !!reaction.selected,
-                                    disabled: busy,
-                                  }}
-                                  disabled={busy}
-                                  onPress={(event) => {
-                                    event.stopPropagation();
-                                    void react(message, reaction.emoji);
-                                  }}
-                                  style={[s.reaction, reaction.selected && s.reactionSelected]}
-                                >
-                                  <Text style={s.reactionText}>
-                                    {reaction.emoji} {reaction.count}
-                                  </Text>
-                                </Pressable>
-                              ))}
-                            </View>
-                          )
-                        }
+                      {!mine && chat.type === 'group' && (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`View ${profileName(profiles[message.senderId])} profile`}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            setProfileUserId(message.senderId);
+                          }}
+                          style={{
+                            marginRight: 8,
+                            alignSelf: 'flex-end',
+                            minWidth: 44,
+                            minHeight: 44,
+                            justifyContent: 'flex-end',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Avatar
+                            name={profileName(profiles[message.senderId])}
+                            uri={profiles[message.senderId]?.avatarUrl ?? undefined}
+                            online={profiles[message.senderId]?.online}
+                            size={32}
+                          />
+                        </Pressable>
+                      )}
+                      <View
+                        testID={`message-${message.id}`}
+                        style={[
+                          s.bubble,
+                          mine ? s.outgoing : s.incoming,
+                          visualMedia && s.mediaBubble,
+                          highlighted === message.id && { backgroundColor: '#FFF0B3' },
+                        ]}
                       >
-                        {message.upload ? (
-                          <UploadMessage
-                            upload={message.upload}
-                            outbox={outbox}
-                            localId={message.localId!}
-                            failed={message.delivery === 'failed'}
-                            onCancel={() => outbox.cancel(message.localId!)}
-                            onRetry={() => outbox.retry(message.localId!)}
-                          />
-                        ) : message.attachment?.type === 'voice' ||
-                          message.attachment?.type === 'music' ||
-                          message.attachment?.type === 'audio' ? (
-                          <VoiceMessage
-                            kind={message.attachment.type}
-                            onSeekingChange={onVoiceSeekingChange}
-                            conversationId={id}
-                            senderId={message.senderId}
-                            mediaId={message.attachment.mediaId}
-                            metadata={mediaMetadata}
-                            active={
-                              focused && !voiceActive && !gifs && visibleMessages.has(message.id)
-                            }
-                            onOptions={(event) => openMessageMenu(message, event)}
-                            onError={setError}
-                          />
-                        ) : message.attachment?.type === 'document' ? (
-                          <DocumentMessage
-                            conversationId={id}
-                            mediaId={message.attachment.mediaId}
-                            initialMetadata={mediaMetadata}
-                            active={focused && visibleMessages.has(message.id)}
-                            onOptions={(event) => openMessageMenu(message, event)}
-                            onError={setError}
-                          />
-                        ) : message.attachment?.type === 'video' ? (
-                          <VideoCard
-                            conversationId={id}
-                            mediaId={message.attachment.mediaId}
-                            initialMetadata={mediaMetadata}
-                            active={focused && visibleMessages.has(message.id)}
-                            onPlay={() => {
-                              if (message.attachment?.type !== 'video') return;
-                              voicePlayback.pause();
-                              viewers.openVideo({
-                                conversationId: id,
-                                mediaId: message.attachment.mediaId,
-                                title,
-                              });
-                            }}
-                            onOptions={(event) => openMessageMenu(message, event)}
-                            onError={setError}
-                          />
-                        ) : message.attachment ? (
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Open ${message.attachment.type} attachment`}
-                            onPress={(event) => {
-                              if (message.attachment?.type === 'image') {
-                                event.stopPropagation();
-                                viewers.openImage({
+                        <MessageBubbleContent
+                          visualMedia={visualMedia}
+                          meta={messageMeta}
+                          header={
+                            hasMediaHeader && (
+                              <>
+                                {!mine && chat.type === 'group' && (
+                                  <Text style={s.sender}>
+                                    {profileName(profiles[message.senderId])}
+                                  </Text>
+                                )}
+                                {!!message.forwardedFrom && (
+                                  <Text style={s.forwarded}>
+                                    Forwarded from{' '}
+                                    {profileName(profiles[message.forwardedFrom.senderId])}
+                                  </Text>
+                                )}
+                                {!!message.replyToMessageId && (
+                                  <ReplyPreview
+                                    conversationId={id}
+                                    messageId={message.replyToMessageId}
+                                    onJump={(target) => void jumpToMessage(target)}
+                                  />
+                                )}
+                              </>
+                            )
+                          }
+                          caption={
+                            !!message.text && (
+                              <MessageText
+                                text={message.text}
+                                style={s.messageText}
+                                onError={setError}
+                                onOpenUsername={(username) => void openUsername(username)}
+                                onMessagePress={(event) => openMessageMenu(message, event)}
+                              />
+                            )
+                          }
+                          reactions={
+                            !!reactions.length && (
+                              <View style={s.reactions}>
+                                {reactions.map((reaction) => (
+                                  <Pressable
+                                    key={reaction.emoji}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`${reaction.selected ? 'Remove' : 'Add'} ${reaction.emoji} reaction`}
+                                    aria-selected={!!reaction.selected}
+                                    accessibilityState={{
+                                      selected: !!reaction.selected,
+                                      disabled: busy,
+                                    }}
+                                    disabled={busy}
+                                    onPress={(event) => {
+                                      event.stopPropagation();
+                                      void react(message, reaction.emoji);
+                                    }}
+                                    style={[s.reaction, reaction.selected && s.reactionSelected]}
+                                  >
+                                    <Text style={s.reactionText}>
+                                      {reaction.emoji} {reaction.count}
+                                    </Text>
+                                  </Pressable>
+                                ))}
+                              </View>
+                            )
+                          }
+                        >
+                          {message.upload ? (
+                            <UploadMessage
+                              upload={message.upload}
+                              outbox={outbox}
+                              localId={message.localId!}
+                              failed={message.delivery === 'failed'}
+                              onCancel={() => outbox.cancel(message.localId!)}
+                              onRetry={() => outbox.retry(message.localId!)}
+                            />
+                          ) : message.attachment?.type === 'voice' ||
+                            message.attachment?.type === 'music' ||
+                            message.attachment?.type === 'audio' ? (
+                            <VoiceMessage
+                              kind={message.attachment.type}
+                              onSeekingChange={onVoiceSeekingChange}
+                              conversationId={id}
+                              senderId={message.senderId}
+                              mediaId={message.attachment.mediaId}
+                              metadata={mediaMetadata}
+                              active={
+                                focused && !voiceActive && !gifs && visibleMessages.has(message.id)
+                              }
+                              onOptions={(event) => openMessageMenu(message, event)}
+                              onError={setError}
+                            />
+                          ) : message.attachment?.type === 'document' ? (
+                            <DocumentMessage
+                              conversationId={id}
+                              mediaId={message.attachment.mediaId}
+                              initialMetadata={mediaMetadata}
+                              active={focused && visibleMessages.has(message.id)}
+                              onOptions={(event) => openMessageMenu(message, event)}
+                              onError={setError}
+                            />
+                          ) : message.attachment?.type === 'video' ? (
+                            <VideoCard
+                              conversationId={id}
+                              mediaId={message.attachment.mediaId}
+                              initialMetadata={mediaMetadata}
+                              active={focused && visibleMessages.has(message.id)}
+                              onPlay={() => {
+                                if (message.attachment?.type !== 'video') return;
+                                voicePlayback.pause();
+                                viewers.openVideo({
                                   conversationId: id,
                                   mediaId: message.attachment.mediaId,
-                                  title: profileName(profiles[message.senderId]),
-                                  createdAt: message.createdAt,
-                                  caption: message.text,
-                                  onForward: () => {
-                                    setActionMessage(message);
-                                    setForward(true);
-                                  },
+                                  title,
                                 });
-                              } else if (message.attachment?.type === 'gif') {
-                                event.stopPropagation();
-                                viewers.openGif({
-                                  gifId: message.attachment.gifId,
-                                  title: profileName(profiles[message.senderId]),
-                                  createdAt: message.createdAt,
-                                  caption: message.text,
-                                  onForward: () => {
-                                    setActionMessage(message);
-                                    setForward(true);
-                                  },
-                                });
-                              } else openMessageMenu(message, event);
-                            }}
-                            onLongPress={(event) => openMessageMenu(message, event)}
-                            style={s.attachment}
-                          >
-                            {message.attachment.type === 'image' && (
-                              <AttachmentImage
-                                conversationId={id}
-                                mediaId={message.attachment.mediaId}
-                                initialMetadata={mediaMetadata}
-                              />
-                            )}
-                            {message.attachment.type === 'gif' && (
-                              <GifPreview
-                                gifId={message.attachment.gifId}
-                                initialMetadata={gifMetadata}
-                                active={focused && !gifs && visibleMessages.has(message.id)}
-                              />
-                            )}
-                          </Pressable>
-                        ) : null}
-                      </MessageBubbleContent>
-                    </View>
-                  </Pressable>
+                              }}
+                              onOptions={(event) => openMessageMenu(message, event)}
+                              onError={setError}
+                            />
+                          ) : message.attachment ? (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={`Open ${message.attachment.type} attachment`}
+                              onPress={(event) => {
+                                if (message.attachment?.type === 'image') {
+                                  event.stopPropagation();
+                                  viewers.openImage({
+                                    conversationId: id,
+                                    mediaId: message.attachment.mediaId,
+                                    title: profileName(profiles[message.senderId]),
+                                    createdAt: message.createdAt,
+                                    caption: message.text,
+                                    onForward: () => {
+                                      setActionMessage(message);
+                                      setForward(true);
+                                    },
+                                  });
+                                } else if (message.attachment?.type === 'gif') {
+                                  event.stopPropagation();
+                                  viewers.openGif({
+                                    gifId: message.attachment.gifId,
+                                    title: profileName(profiles[message.senderId]),
+                                    createdAt: message.createdAt,
+                                    caption: message.text,
+                                    onForward: () => {
+                                      setActionMessage(message);
+                                      setForward(true);
+                                    },
+                                  });
+                                } else openMessageMenu(message, event);
+                              }}
+                              onLongPress={(event) => openMessageMenu(message, event)}
+                              style={s.attachment}
+                            >
+                              {message.attachment.type === 'image' && (
+                                <AttachmentImage
+                                  conversationId={id}
+                                  mediaId={message.attachment.mediaId}
+                                  initialMetadata={mediaMetadata}
+                                />
+                              )}
+                              {message.attachment.type === 'gif' && (
+                                <GifPreview
+                                  gifId={message.attachment.gifId}
+                                  initialMetadata={gifMetadata}
+                                  active={focused && !gifs && visibleMessages.has(message.id)}
+                                />
+                              )}
+                            </Pressable>
+                          ) : null}
+                        </MessageBubbleContent>
+                      </View>
+                    </Pressable>
+                  </SwipeToReply>
                 </View>
               );
             }}

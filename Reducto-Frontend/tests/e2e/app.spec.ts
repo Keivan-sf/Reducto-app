@@ -1402,6 +1402,83 @@ test('sign-up allows leaving the optional username blank', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 });
 
+test('touch swipe replies with motion and ignores short, vertical and cancelled gestures', async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(!isMobile, 'Uses real browser touch input');
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const bubble = page.getByTestId(`message-${first.id}`);
+  const motion = page.getByTestId(`swipe-reply-motion-${first.id}`);
+  await expect(bubble).toBeVisible();
+  const client = await page.context().newCDPSession(page);
+  const bounds = (await bubble.boundingBox())!;
+  const x = bounds.x + bounds.width - 20;
+  const y = bounds.y + bounds.height / 2;
+  const point = (px: number, py: number) => [{ x: px, y: py, id: 1 }];
+  async function drag(dx: number, dy = 0, cancel = false) {
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(x, y) });
+    for (let step = 1; step <= 5; step++) {
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: point(x + (dx * step) / 5, y + (dy * step) / 5),
+      });
+    }
+    if (dx === -90 && !cancel) {
+      await expect(motion).not.toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+      await expect(page.getByTestId('reply-composer')).toHaveCount(0);
+    }
+    await client.send('Input.dispatchTouchEvent', {
+      type: cancel ? 'touchCancel' : 'touchEnd',
+      touchPoints: [],
+    });
+  }
+  for (const [dx, dy, cancel] of [
+    [-30, 0, false],
+    [40, 0, false],
+    [-15, -60, false],
+    [-90, 0, true],
+  ] as const) {
+    await drag(dx, dy, cancel);
+    await expect(page.getByTestId('reply-composer')).toHaveCount(0);
+    await expect(page.getByTestId('message-options')).toHaveCount(0);
+    await expect(motion).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+  }
+  await drag(-90);
+  await expect(page.getByTestId('reply-composer')).toContainText('Hello from the group');
+  await expect(page.getByTestId('message-options')).toHaveCount(0);
+  await expect(motion).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Swipe reply');
+  const sending = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/messages'),
+  );
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  expect((await sending).postDataJSON()).toEqual({
+    text: 'Swipe reply',
+    replyToMessageId: first.id,
+  });
+});
+
+test('mouse drags never activate swipe replies', async ({ page }) => {
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const bubble = page.getByTestId(`message-${first.id}`);
+  const bounds = (await bubble.boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width - 20, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width - 110, bounds.y + bounds.height / 2, { steps: 8 });
+  await expect(page.getByTestId(`swipe-reply-motion-${first.id}`)).toHaveCSS(
+    'transform',
+    'matrix(1, 0, 0, 1, 0, 0)',
+  );
+  await page.mouse.up();
+  await expect(page.getByTestId('reply-composer')).toHaveCount(0);
+});
+
 test('reply composer sends reply IDs, renders a compact preview, and supports cancelling', async ({
   page,
 }, testInfo) => {
