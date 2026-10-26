@@ -204,3 +204,49 @@ test('reconnection refreshes fresh cached profiles and retries failed notificati
   await directory.refreshKnown();
   assert.deepEqual(published.at(-1), current);
 });
+
+test('socket presence updates cached profiles immediately without another request', async () => {
+  let calls = 0;
+  const published: UserProfile[] = [];
+  const directory = new UserDirectory(
+    async () => {
+      calls++;
+      return { user: { ...user, online: false, last_seen: null } };
+    },
+    (profile) => published.push(profile),
+  );
+  await directory.get(user.id);
+  directory.updatePresence({ userId: user.id, online: true, last_seen: '2026-10-26T12:00:00Z' });
+  assert.equal(published.at(-1)?.online, true);
+  assert.equal((await directory.get(user.id)).online, true);
+  directory.updatePresence({ userId: user.id, online: false, last_seen: '2026-10-26T12:01:00Z' });
+  assert.equal(published.at(-1)?.online, false);
+  assert.equal(published.at(-1)?.last_seen, '2026-10-26T12:01:00Z');
+  assert.equal(calls, 1);
+});
+
+test('a presence transition wins over an older HTTP response, then reconnect can resync it', async () => {
+  let complete!: (result: { user: UserProfile }) => void;
+  let current = { ...user, online: false, last_seen: '2026-10-26T12:00:00Z' };
+  let calls = 0;
+  const published: UserProfile[] = [];
+  const directory = new UserDirectory(
+    () =>
+      ++calls === 1
+        ? new Promise((resolve) => {
+            complete = resolve;
+          })
+        : Promise.resolve({ user: current }),
+    (profile) => published.push(profile),
+  );
+  const loading = directory.byUsername('grace');
+  directory.updatePresence({ userId: user.id, online: true, last_seen: '2026-10-26T12:01:00Z' });
+  complete({ user: current });
+  await loading;
+  assert.equal(published.at(-1)?.online, true);
+  assert.equal((await directory.get(user.id)).online, true);
+  current = { ...current, last_seen: '2026-10-26T12:02:00Z' };
+  await directory.refreshKnown(true);
+  assert.equal(published.at(-1)?.online, false);
+  assert.equal(published.at(-1)?.last_seen, current.last_seen);
+});

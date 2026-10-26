@@ -166,7 +166,13 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
               onPress={() => router.push(`/chat/${chat.id}`)}
               style={({ pressed }) => [s.row, selected && s.selected, pressed && { opacity: 0.7 }]}
             >
-              <Avatar name={title(chat)} uri={peer(chat)?.avatarUrl ?? undefined} size={52} />
+              <Avatar
+                name={title(chat)}
+                uri={peer(chat)?.avatarUrl ?? undefined}
+                size={52}
+                online={peer(chat)?.online}
+                badgeBorderColor={selected ? '#E8F3FF' : 'white'}
+              />
               <View style={{ flex: 1, gap: 7 }}>
                 <View style={s.rowLine}>
                   <Text numberOfLines={1} style={[s.chatName, selected && { color: 'white' }]}>

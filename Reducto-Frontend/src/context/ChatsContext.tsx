@@ -7,7 +7,7 @@ import {
   useState,
   type PropsWithChildren,
 } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { io } from 'socket.io-client';
 import type {
   Conversation,
@@ -17,9 +17,11 @@ import type {
   Message,
   MessageUpdatedEvent,
   ProfileUpdatedEvent,
+  PresenceEvent,
   SeenState,
 } from '../api/types';
 import { api, useSession } from './SessionContext';
+import { startPresenceHeartbeat } from '../api/presence';
 import { ConversationList } from '../api/conversation-list';
 import { MessageCache } from '../api/message-cache';
 import { useProfiles } from './ProfilesContext';
@@ -382,7 +384,14 @@ export function ChatsProvider({ children }: PropsWithChildren) {
     };
     // Keep realtime delivery on the selected server alongside cached HTTP history.
     const socket = io(api.baseUrl, { auth: { token }, transports: ['websocket'] });
+    let focused = true;
+    const heartbeat = startPresenceHeartbeat(
+      socket,
+      () => focused && AppState.currentState === 'active',
+    );
+    socket.on('user.presence', (event: PresenceEvent) => directory.updatePresence(event));
     socket.on('connect', () => {
+      heartbeat.resume();
       setConnection('Connected');
       void directory.refreshKnown(true);
       if (connectedOnce || Date.now() - lastRefreshAt.current > 5000) sync(connectedOnce);
@@ -392,6 +401,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
       void directory.refreshUser(event.userId).catch(report);
     });
     socket.on('disconnect', (reason) => {
+      heartbeat.pause();
       setConnection('Reconnecting');
       if (reason === 'io server disconnect')
         void api
@@ -484,13 +494,32 @@ export function ChatsProvider({ children }: PropsWithChildren) {
         },
       );
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') sync(true);
+      if (state === 'active') {
+        heartbeat.resume();
+        sync(true);
+      } else heartbeat.pause();
     });
+    // Android can lose focus (e.g. the notification drawer) while still active.
+    const focusSubscriptions =
+      Platform.OS === 'android'
+        ? [
+            AppState.addEventListener('blur', () => {
+              focused = false;
+              heartbeat.pause();
+            }),
+            AppState.addEventListener('focus', () => {
+              focused = true;
+              heartbeat.resume();
+            }),
+          ]
+        : [];
     sync();
     return () => {
       alive = false;
+      heartbeat.dispose();
       socket.disconnect();
       subscription.remove();
+      for (const listener of focusSubscriptions) listener.remove();
     };
   }, [
     token,

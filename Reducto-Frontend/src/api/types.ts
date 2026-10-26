@@ -1,4 +1,13 @@
-export interface UserProfile {
+export interface UserPresence {
+  online?: boolean;
+  last_seen?: string | null;
+}
+export interface PresenceEvent extends UserPresence {
+  userId: string;
+  online: boolean;
+  last_seen: string | null;
+}
+export interface UserProfile extends UserPresence {
   id: string;
   name: string;
   username: string | null;
@@ -8,7 +17,7 @@ export interface ProfileUpdatedEvent {
   userId: string;
   changedFields: ('name' | 'username' | 'avatar')[];
 }
-export interface User {
+export interface User extends UserPresence {
   id: string;
   email: string;
   name: string;
@@ -43,7 +52,7 @@ export interface SeenState {
   lastSeenMessageId: string | null;
   unreadCount: number;
 }
-export interface Member {
+export interface Member extends UserPresence {
   userId: string;
   conversationId: string;
   role: 'owner' | 'admin' | 'member';

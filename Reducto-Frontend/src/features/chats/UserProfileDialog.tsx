@@ -52,7 +52,12 @@ export function UserProfileDialog({ userId, onClose }: { userId: string; onClose
   return (
     <Dialog visible title="User details" onClose={onClose}>
       <View style={{ alignItems: 'center', gap: 14 }}>
-        <Avatar name={profileName(profile)} uri={profile?.avatarUrl ?? undefined} size={88} />
+        <Avatar
+          name={profileName(profile)}
+          uri={profile?.avatarUrl ?? undefined}
+          size={88}
+          online={profile?.online}
+        />
         <Text style={styles.title}>{profileName(profile)}</Text>
         {profile?.username && (
           <Text selectable style={styles.subtitle}>

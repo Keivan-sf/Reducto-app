@@ -907,18 +907,20 @@ test('existing tab sessions migrate to persistent storage and logout reaches oth
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
 });
 
-async function mockRealtime(page: Page, accessToken = 'access-token') {
+async function mockRealtime(page: Page, accessToken = 'access-token', pingInterval = 25000) {
   let socket: WebSocketRoute | undefined;
   let connections = 0;
+  let heartbeats = 0;
   await page.routeWebSocket(/\/socket\.io\//, (route) => {
     socket = route;
     connections++;
     // Engine.IO open packet, then Socket.IO authenticated namespace handshake.
     route.send(
-      `0${JSON.stringify({ sid: `engine-${connections}`, upgrades: [], pingInterval: 25000, pingTimeout: 20000, maxPayload: 1000000 })}`,
+      `0${JSON.stringify({ sid: `engine-${connections}`, upgrades: [], pingInterval, pingTimeout: 20000, maxPayload: 1000000 })}`,
     );
     route.onMessage((message) => {
       const packet = message.toString();
+      if (packet === '42["p"]') heartbeats++;
       if (packet.startsWith('40')) {
         expect(JSON.parse(packet.slice(2)).token).toBe(accessToken);
         route.send(`40${JSON.stringify({ sid: `socket-${connections}` })}`);
@@ -932,6 +934,7 @@ async function mockRealtime(page: Page, accessToken = 'access-token') {
     },
     disconnect: () => socket!.close(),
     connections: () => connections,
+    heartbeats: () => heartbeats,
     url: () => socket?.url(),
   };
 }
@@ -5561,4 +5564,105 @@ test('message username mentions link by syntax and look up users only when click
   await page.getByRole('link', { name: '@offline_user', exact: true }).click();
   await expect(page.getByTestId('notification')).toHaveText('Server unavailable');
   expect(lookups).toEqual(['username_12', 'missing_user', 'offline_user']);
+});
+
+for (const privateChat of [false, true]) {
+  test(`presence updates ${privateChat ? 'private list, header and profile' : 'group message and member'} avatars live`, async ({
+    page,
+  }) => {
+    await mockApi(page);
+    const realtime = await mockRealtime(page);
+    if (privateChat) {
+      const conversation = { ...chat, type: 'private' };
+      await page.route('**/api/conversations', (route) =>
+        route.fulfill({ json: { conversations: [conversation] } }),
+      );
+      await page.route(`**/api/conversations/${chat.id}`, (route) =>
+        route.fulfill({ json: { conversation } }),
+      );
+    }
+    await page.route('**/api/users/friend', (route) =>
+      route.fulfill({
+        json: { user: { ...friend, online: true, last_seen: '2026-10-26T12:00:00Z' } },
+      }),
+    );
+    await page.goto('/');
+    await page.getByPlaceholder('you@example.com').fill('ada@example.com');
+    await page.getByPlaceholder('Enter your password').fill('goodpassword');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    const row = page.getByRole('button', {
+      name: privateChat ? 'Open Grace Hopper' : 'Open Weekend plans',
+    });
+    await expect(row).toBeVisible();
+    if (privateChat)
+      await expect(row.getByLabel('Grace Hopper online', { exact: true })).toBeVisible();
+    await row.click();
+    if (privateChat) {
+      await expect(page.getByText('online', { exact: true })).toHaveCSS(
+        'color',
+        'rgb(51, 144, 236)',
+      );
+      await page.getByRole('button', { name: 'View conversation details' }).click();
+    } else {
+      await expect(page.getByTestId(`message-${first.id}`)).toBeVisible();
+      await expect(page.getByLabel('Grace Hopper online', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'View conversation details' }).click();
+    }
+    await expect(
+      page.getByText(privateChat ? 'User details' : 'Group details', { exact: true }),
+    ).toBeVisible();
+    await expect.poll(() => realtime.connections()).toBeGreaterThan(0);
+    realtime.emit('user.presence', {
+      userId: friend.id,
+      online: false,
+      last_seen: '2026-10-26T12:01:00Z',
+    });
+    await expect(page.getByLabel('Grace Hopper online', { exact: true })).toHaveCount(0);
+    realtime.emit('user.presence', {
+      userId: friend.id,
+      online: true,
+      last_seen: '2026-10-26T12:02:00Z',
+    });
+    await expect(page.getByLabel('Grace Hopper online', { exact: true }).last()).toBeVisible();
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    realtime.emit('user.presence', {
+      userId: friend.id,
+      online: false,
+      last_seen: '2026-10-26T12:03:00Z',
+    });
+    if (privateChat) {
+      await expect(page.getByText(/^last seen /)).toHaveCSS('color', 'rgb(122, 138, 153)');
+    }
+    await expect(page.getByLabel('Grace Hopper online', { exact: true })).toHaveCount(0);
+  });
+}
+
+test('presence heartbeat pauses in a hidden tab and restarts immediately on return', async ({
+  page,
+}) => {
+  await mockApi(page);
+  const realtime = await mockRealtime(page, 'access-token', 1_000_000);
+  await signIn(page);
+  await expect.poll(() => realtime.heartbeats()).toBe(1);
+  await page.clock.install({ time: new Date('2026-10-26T12:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-10-26T12:00:01Z'));
+  const visibility = async (state: 'hidden' | 'visible') => {
+    await page.evaluate((value) => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, state);
+  };
+  await page.clock.runFor(20000);
+  await visibility('hidden');
+  await page.clock.runFor(65000);
+  expect(realtime.heartbeats()).toBe(1);
+  await visibility('visible');
+  await expect.poll(() => realtime.heartbeats()).toBe(2);
+  await page.clock.runFor(29999);
+  expect(realtime.heartbeats()).toBe(2);
+  await page.clock.runFor(1);
+  await expect.poll(() => realtime.heartbeats()).toBe(3);
+  await visibility('hidden');
+  await page.clock.runFor(60000);
+  expect(realtime.heartbeats()).toBe(3);
 });

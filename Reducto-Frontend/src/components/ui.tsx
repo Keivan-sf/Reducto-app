@@ -62,7 +62,19 @@ export function IconButton({
     </Pressable>
   );
 }
-export function Avatar({ name, uri, size = 48 }: { name: string; uri?: string; size?: number }) {
+export function Avatar({
+  name,
+  uri,
+  size = 48,
+  online = false,
+  badgeBorderColor = 'white',
+}: {
+  name: string;
+  uri?: string;
+  size?: number;
+  online?: boolean;
+  badgeBorderColor?: string;
+}) {
   const [failedUri, setFailedUri] = useState<string>();
   const palette = ['#62A6E9', '#9A83DA', '#E4A55C', '#65B7A3', '#DC8096'];
   const tint = palette[[...name].reduce((sum, c) => sum + c.charCodeAt(0), 0) % palette.length];
@@ -75,20 +87,35 @@ export function Avatar({ name, uri, size = 48 }: { name: string; uri?: string; s
         backgroundColor: tint,
         alignItems: 'center',
         justifyContent: 'center',
-        overflow: 'hidden',
       }}
     >
       {uri && uri !== failedUri ? (
         <Image
           accessibilityLabel={`${name} profile photo`}
           source={{ uri }}
-          style={{ width: size, height: size }}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
           onError={() => setFailedUri(uri)}
         />
       ) : (
         <Text style={{ color: 'white', fontSize: size * 0.34, fontWeight: '600' }}>
           {initials(name)}
         </Text>
+      )}
+      {online && (
+        <View
+          accessibilityLabel={`${name} online`}
+          style={{
+            position: 'absolute',
+            right: 0,
+            bottom: 0,
+            width: Math.max(10, size * 0.23),
+            height: Math.max(10, size * 0.23),
+            borderRadius: size,
+            backgroundColor: colors.blue,
+            borderWidth: 2,
+            borderColor: badgeBorderColor,
+          }}
+        />
       )}
     </View>
   );

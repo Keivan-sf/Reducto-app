@@ -59,7 +59,12 @@ export function GroupDialog({
       onClose={onClose}
     >
       <View style={{ alignItems: 'center', gap: 14 }}>
-        <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={72} />
+        <Avatar
+          name={title}
+          uri={peer?.avatarUrl ?? undefined}
+          size={72}
+          online={chat.type === 'private' && peer?.online}
+        />
         <Text style={styles.title}>{title}</Text>
         {peer?.username && <Text style={styles.subtitle}>@{peer.username}</Text>}
         <Text style={styles.subtitle}>{people.length} members</Text>
@@ -139,6 +144,7 @@ export function GroupDialog({
                     : profileName(profiles[member.userId])
                 }
                 uri={profiles[member.userId]?.avatarUrl ?? undefined}
+                online={profiles[member.userId]?.online}
                 size={36}
               />
               <View style={{ flex: 1 }}>

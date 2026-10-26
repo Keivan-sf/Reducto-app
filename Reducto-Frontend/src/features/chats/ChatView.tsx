@@ -17,6 +17,7 @@ import {
   type ScrollViewProps,
 } from 'react-native';
 import { router, useIsFocused } from 'expo-router';
+import { presenceLabel } from '../../api/presence';
 import { pickUpload } from '../../lib/pick-upload';
 import * as Clipboard from 'expo-clipboard';
 import { api, useSession } from '../../context/SessionContext';
@@ -921,12 +922,13 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
             <Text numberOfLines={1} style={s.headerTitle}>
               {title}
             </Text>
-            <Text style={s.headerSubtitle}>
-              {chat.type === 'group'
-                ? `${members[id]?.length ?? 0} members`
-                : peer?.username
-                  ? `@${peer.username}`
-                  : 'Private conversation'}
+            <Text
+              style={[
+                s.headerSubtitle,
+                chat.type === 'private' && { color: peer?.online ? colors.blue : colors.muted },
+              ]}
+            >
+              {chat.type === 'group' ? `${members[id]?.length ?? 0} members` : presenceLabel(peer)}
             </Text>
           </View>
         </Pressable>
@@ -1198,6 +1200,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                         <Avatar
                           name={profileName(profiles[message.senderId])}
                           uri={profiles[message.senderId]?.avatarUrl ?? undefined}
+                          online={profiles[message.senderId]?.online}
                           size={32}
                         />
                       </Pressable>

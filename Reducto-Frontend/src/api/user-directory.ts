@@ -1,4 +1,4 @@
-import type { UserProfile } from './types';
+import type { PresenceEvent, UserProfile } from './types';
 import { normalizeUsername } from '../lib/usernames';
 
 // Signed avatars expire after 15 minutes. Renew profiles before that deadline.
@@ -8,6 +8,18 @@ export class UserDirectory {
   private pending = new Map<string, Promise<UserProfile>>();
   private knownIds = new Set<string>();
   private revision = 0;
+  private presence = new Map<string, { event: PresenceEvent; revision: number }>();
+
+  updatePresence(event: PresenceEvent) {
+    this.presence.set(event.userId, { event, revision: ++this.revision });
+    const entry = this.entries.get(event.userId);
+    if (entry) {
+      const user = { ...entry.user, online: event.online, last_seen: event.last_seen };
+      this.entries.set(user.id, { ...entry, user });
+      this.publish(user);
+    }
+  }
+
   private invalidatedAt = new Map<string, number>();
   constructor(
     private request: (path: string) => Promise<{ user: UserProfile }>,
@@ -21,6 +33,10 @@ export class UserDirectory {
     const startedAtRevision = this.revision;
     const flight = this.request(path)
       .then(({ user }) => {
+        // A socket transition received during an HTTP request is more recent.
+        const presence = this.presence.get(user.id);
+        if (presence && presence.revision > startedAtRevision)
+          user = { ...user, online: presence.event.online, last_seen: presence.event.last_seen };
         if (
           this.pending.get(path) === flight &&
           (this.invalidatedAt.get(user.id) ?? 0) <= startedAtRevision
