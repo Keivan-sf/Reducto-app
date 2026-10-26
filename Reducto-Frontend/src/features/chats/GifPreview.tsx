@@ -13,10 +13,12 @@ export function GifPreview({
   gifId,
   active = true,
   initialMetadata,
+  fill = false,
 }: {
   gifId: string;
   active?: boolean;
   initialMetadata?: Gif;
+  fill?: boolean;
 }) {
   const cache = useGifs();
   const files = useVideos();
@@ -69,7 +71,7 @@ export function GifPreview({
     source?.id === gifId ? source : initialMetadata?.id === gifId ? initialMetadata : undefined;
   if (local?.mimeType === 'image/gif')
     return (
-      <MediaPreview size={mediaDimensions(metadata)} label="Animated GIF">
+      <MediaPreview fill={fill} size={mediaDimensions(metadata)} label="Animated GIF">
         {active ? (
           <Image
             accessibilityLabel="Uploaded GIF"
@@ -89,6 +91,7 @@ export function GifPreview({
     );
   return local ? (
     <GifPlayer
+      fill={fill}
       uri={local.uri}
       active={active}
       size={mediaDimensions(metadata)}
@@ -98,7 +101,7 @@ export function GifPreview({
       onError={() => files.forget(gifFileKey(gifId), 'GIF unavailable')}
     />
   ) : (
-    <MediaPreview size={mediaDimensions(metadata)} label="GIF preview">
+    <MediaPreview fill={fill} size={mediaDimensions(metadata)} label="GIF preview">
       <ServerThumbnail
         uri={metadata?.thumbnailUrl}
         cacheKey={`gif:${gifId}`}

@@ -43,7 +43,6 @@ import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
 import { ApiError } from '../../api/client';
 import { UserProfileDialog } from './UserProfileDialog';
-import { GifDialog } from './GifDialog';
 import { MessageText } from './MessageText';
 import { MessageBubbleContent } from './MessageBubbleContent';
 import { SwipeToReply } from './SwipeToReply';
@@ -163,7 +162,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     }
   }
 
-  const [gifs, setGifs] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [actionsVisible, setActionsVisible] = useState(false);
   const [forward, setForward] = useState(false);
@@ -174,6 +172,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const viewers = useMediaViewers();
   const mediaMetadata = useMediaMetadata();
   const [visibleMessages, setVisibleMessages] = useState<Set<string>>(new Set());
+  const [gifs, setGifs] = useState(false);
   const [openingHistory, setOpeningHistory] = useState(true);
   const initialReadTarget = useRef<string | null>(null);
   const mentionVisibility = useMentionVisibility({
@@ -1411,20 +1410,20 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
             }}
             onSendVoice={sendVoice}
             onAttach={() => {}}
-            onOpenGifs={() => {}}
             onError={setError}
             onVoiceActive={() => {}}
           />
         )}
         <View style={editing ? { display: 'none' } : undefined}>
           <MessageComposer
-            active={focused}
+            active={focused && !editing}
             busy={busy}
             hasAttachment={false}
             onSend={(text) => send(undefined, text)}
             onSendVoice={sendVoice}
             onAttach={() => void upload().catch((err) => setError(err.message))}
-            onOpenGifs={() => setGifs(true)}
+            onPickerVisibilityChange={setGifs}
+            onSendGif={(gifId) => send(gifId)}
             onError={setError}
             onVoiceActive={(active) => {
               if (active) voicePlayback.pause();
@@ -1449,13 +1448,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           onClose={() => setProfileUserId(null)}
         />
       )}
-      <GifDialog
-        visible={focused && gifs}
-        onClose={() => setGifs(false)}
-        onSend={async (gifId) => {
-          await send(gifId);
-        }}
-      />
       <Dialog visible={focused && forward} title="Forward to…" onClose={() => setForward(false)}>
         {conversations.map((destination) => (
           <Button

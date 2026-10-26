@@ -3778,6 +3778,7 @@ test('GIF library uploads reuse the original local video for preview and sending
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   await page.getByRole('button', { name: 'Open GIF library', exact: true }).click();
   const picker = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Add a new GIF', exact: true }).click();
   await page.getByRole('button', { name: 'Upload GIF or video', exact: true }).click();
   await (await picker).setFiles(path.join(__dirname, '../fixtures/loop.mp4'));
   await expect(page.getByRole('button', { name: 'Send GIF', exact: true })).toBeVisible();
@@ -3792,7 +3793,7 @@ test('GIF library uploads reuse the original local video for preview and sending
     )
     .toBeTruthy();
   await page.getByRole('button', { name: 'Send GIF', exact: true }).click();
-  await expect(page.getByText('Your GIF library', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('media-picker')).toHaveCount(0);
   const message = page.getByTestId('message-44444444-4444-4444-8444-444444444444');
   await expect(message.locator('video')).toHaveAttribute('src', /^blob:/);
   await expect
@@ -6028,4 +6029,58 @@ test('large video upload keeps file handling and progress work away from chattin
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('media picker uses a desktop hover popover and a mobile keyboard panel', async ({
+  page,
+  isMobile,
+}) => {
+  await mockApi(page, []);
+  await page.route('**/api/gifs', (route) => route.fulfill({ json: { gifs: [] } }));
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const input = page.getByRole('textbox', { name: 'Message', exact: true });
+  await input.fill('Hello ');
+  const icon = page.getByRole('button', { name: 'Open GIF library', exact: true });
+  if (isMobile) await icon.click();
+  else await icon.hover();
+  const picker = page.getByTestId(isMobile ? 'media-picker-keyboard' : 'media-picker-popover');
+  await expect(picker).toBeVisible();
+  if (!isMobile) await picker.hover();
+  const panel = await picker.boundingBox();
+  const message = await input.boundingBox();
+  expect(panel).toBeTruthy();
+  expect(message).toBeTruthy();
+  if (isMobile) expect(panel!.y).toBeGreaterThan(message!.y);
+  else expect(panel!.y + panel!.height).toBeLessThanOrEqual(message!.y + 1);
+  await expect(picker.getByRole('button', { name: 'Add a new GIF' })).toBeVisible();
+  await picker.getByRole('tab', { name: 'Sticker', exact: true }).click();
+  await expect(picker.getByText('No sticker packs yet')).toBeVisible();
+  await picker.getByRole('tab', { name: 'Emoji', exact: true }).click();
+  await expect(picker.getByRole('button', { name: 'Frequently used', exact: true })).toBeVisible();
+  await picker.getByRole('textbox', { name: 'Search emoji' }).fill('rocket');
+  await picker.getByRole('button', { name: 'Insert rocket', exact: true }).click();
+  await expect(input).toHaveValue('Hello 🚀');
+  const sent = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/messages'),
+  );
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  expect((await sent).postDataJSON()).toEqual({ text: 'Hello 🚀' });
+});
+
+test('desktop media picker closes on pointer leave and Escape', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop hover behavior');
+  await mockApi(page, []);
+  await page.route('**/api/gifs', (route) => route.fulfill({ json: { gifs: [] } }));
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const icon = page.getByRole('button', { name: 'Open GIF library', exact: true });
+  await icon.hover();
+  await expect(page.getByTestId('media-picker-popover')).toBeVisible();
+  await page.mouse.move(1, 1);
+  await expect(page.getByTestId('media-picker-popover')).toHaveCount(0);
+  await icon.click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('media-picker-popover')).toHaveCount(0);
 });

@@ -43,11 +43,14 @@ function composer(accepted = true) {
   const jsx = (type: unknown, props: Record<string, unknown>) => ({ type, props });
   runInNewContext(outputText, {
     module,
+    clearTimeout,
+    setTimeout,
     exports: module.exports,
     require: (name: string) => {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'Fragment' };
       if (name === 'react')
         return {
+          useEffect: () => {},
           useState: (initial: unknown) => {
             const index = stateIndex++;
             if (!(index in states)) states[index] = initial;
@@ -66,6 +69,8 @@ function composer(accepted = true) {
       if (name === 'react-native')
         return {
           Platform: { OS: 'android' },
+          useWindowDimensions: () => ({ width: 400, height: 800 }),
+          Keyboard: { dismiss: () => {} },
           Pressable: 'Pressable',
           TextInput: 'TextInput',
           View: 'View',
@@ -74,6 +79,7 @@ function composer(accepted = true) {
         };
       if (name.endsWith('components/ui'))
         return { Icon: 'Icon', IconButton: 'IconButton', colors: {} };
+      if (name === './MediaPicker') return { MediaPicker: 'MediaPicker' };
       if (name === './VoiceRecordButton') return { VoiceRecordButton: 'VoiceRecordButton' };
       throw new Error(`Unexpected import ${name}`);
     },
@@ -87,7 +93,7 @@ function composer(accepted = true) {
     },
     onSendVoice: async () => {},
     onAttach: () => {},
-    onOpenGifs: () => {},
+    onSendGif: () => true,
     onError: (error: string) => errors.push(error),
     onVoiceActive: () => {},
   };
@@ -119,6 +125,11 @@ function composer(accepted = true) {
     props,
     render,
     type,
+    emoji: (emoji: string) => {
+      find((node) => node.props?.label === 'Open GIF library')!.props.onPress();
+      render();
+      find((node) => node.type === 'MediaPicker')!.props.onEmoji(emoji);
+    },
     input: () => find((node) => node.type === 'TextInput')!,
     send: () => find((node) => node.props?.accessibilityLabel === 'Send message')!.props.onPress(),
   };
@@ -163,4 +174,16 @@ test('rejected or throwing queue operations preserve the native draft for anothe
     assert.equal(t.sends.at(-1), 'Keep this');
     assert.equal(t.native.value, '');
   }
+});
+
+test('emoji replaces the selected text and sends with the rest of the draft', () => {
+  const t = composer();
+  t.type('Hello world!');
+  t.render();
+  t.input().props.onSelectionChange({ nativeEvent: { selection: { start: 6, end: 11 } } });
+  t.emoji('😀');
+  t.render();
+  assert.equal(t.input().props.value, 'Hello 😀!');
+  t.send();
+  assert.deepEqual(t.sends, ['Hello 😀!']);
 });

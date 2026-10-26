@@ -17,6 +17,7 @@ export function GifPlayer({
   thumbnailCacheKey,
   onError,
   cached = false,
+  fill = false,
 }: GifPlayerProps) {
   const viewers = useMediaViewers();
   const [readyUri, setReadyUri] = useState<string>();
@@ -47,6 +48,7 @@ export function GifPlayer({
 
   return (
     <MediaPreview
+      fill={fill}
       size={size ?? (metadata?.uri === uri ? metadata.size : undefined)}
       label="Animated GIF"
     >

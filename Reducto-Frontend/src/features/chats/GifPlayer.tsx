@@ -18,6 +18,7 @@ export interface GifPlayerProps {
   thumbnailCacheKey: string;
   onError?: () => void;
   cached?: boolean;
+  fill?: boolean;
 }
 
 /** The backend converts GIFs to silent MP4s. Keep their playback inline and automatic. */
@@ -29,6 +30,7 @@ export function GifPlayer({
   thumbnailCacheKey,
   onError,
   cached = false,
+  fill = false,
 }: GifPlayerProps) {
   const [frameUri, setFrameUri] = useState<string>();
   const viewers = useMediaViewers();
@@ -66,7 +68,7 @@ export function GifPlayer({
   );
 
   return (
-    <MediaPreview size={metadataSize ?? size} label="Animated GIF">
+    <MediaPreview fill={fill} size={metadataSize ?? size} label="Animated GIF">
       <VideoView
         player={player}
         onFirstFrameRender={() => setFrameUri(uri)}

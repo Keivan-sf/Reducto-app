@@ -1,8 +1,18 @@
-import { useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  BackHandler,
+  Keyboard,
+  Platform,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { colors, Icon, IconButton } from '../../components/ui';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { VoiceRecordButton } from './VoiceRecordButton';
+import { MediaPicker } from './MediaPicker';
 
 interface Props {
   active?: boolean;
@@ -13,7 +23,8 @@ interface Props {
   onSend: (text: string) => boolean;
   onSendVoice: (voice: RecordedVoice, signal: AbortSignal) => Promise<void>;
   onAttach: () => void;
-  onOpenGifs: () => void;
+  onPickerVisibilityChange?: (open: boolean) => void;
+  onSendGif?: (id: string) => boolean;
   onError: (error: string) => void;
   onVoiceActive: (active: boolean) => void;
 }
@@ -28,7 +39,8 @@ export function MessageComposer({
   onSend,
   onSendVoice,
   onAttach,
-  onOpenGifs,
+  onSendGif,
+  onPickerVisibilityChange,
   onError,
   onVoiceActive,
 }: Props) {
@@ -36,6 +48,64 @@ export function MessageComposer({
   const text = useRef(initialText);
   const input = useRef<TextInput>(null);
   const [recording, setRecording] = useState(false);
+  const { width, height } = useWindowDimensions();
+  const desktop = Platform.OS === 'web' && width >= 768;
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [cursor, setCursor] = useState<{ start: number; end: number }>();
+  const selection = useRef({ start: initialText.length, end: initialText.length });
+  const holdOpen = useRef(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  function cancelClose() {
+    clearTimeout(closeTimer.current);
+  }
+  function closePicker() {
+    cancelClose();
+    setPickerOpen(false);
+  }
+  function openPicker() {
+    if (busy || recording || editing || !active) return;
+    cancelClose();
+    if (Platform.OS === 'web' && !pickerOpen) {
+      const element = input.current as unknown as {
+        selectionStart: number;
+        selectionEnd: number;
+      } | null;
+      if (element && typeof element.selectionStart === 'number') {
+        selection.current = { start: element.selectionStart, end: element.selectionEnd };
+      }
+    }
+    if (!desktop) Keyboard.dismiss();
+    setPickerOpen(true);
+  }
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+  const [wasActive, setWasActive] = useState(active);
+  if (wasActive !== active) {
+    setWasActive(active);
+    if (!active) setPickerOpen(false);
+  }
+  useEffect(() => {
+    onPickerVisibilityChange?.(pickerOpen && active);
+    return () => onPickerVisibilityChange?.(false);
+  }, [pickerOpen, active, onPickerVisibilityChange]);
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const back = BackHandler.addEventListener('hardwareBackPress', () => {
+      setPickerOpen(false);
+      return true;
+    });
+    return () => {
+      back.remove();
+    };
+  }, [pickerOpen]);
+  function insertEmoji(emoji: string) {
+    const { start, end } = selection.current;
+    const value = text.current.slice(0, start) + emoji + text.current.slice(end);
+    if (value.length > 10000) return;
+    text.current = value;
+    setDraft(value);
+    selection.current = { start: start + emoji.length, end: start + emoji.length };
+    setCursor(selection.current);
+  }
   const canSend = !!draft.trim() || hasAttachment;
   function submit() {
     const submitted = text.current;
@@ -53,6 +123,8 @@ export function MessageComposer({
       // blurring the input or waiting for a render/network response.
       input.current?.clear();
       setDraft('');
+      selection.current = { start: 0, end: 0 };
+      setCursor(undefined);
     } catch (error) {
       text.current = submitted;
       onError(error instanceof Error ? error.message : 'Could not send message.');
@@ -68,7 +140,24 @@ export function MessageComposer({
     return true;
   }
   return (
-    <>
+    <View
+      style={{ position: 'relative', zIndex: pickerOpen ? 20 : 0 }}
+      onPointerEnter={cancelClose}
+      onPointerLeave={() => {
+        if (desktop && !holdOpen.current) closeTimer.current = setTimeout(closePicker, 220);
+      }}
+      {...(Platform.OS === 'web'
+        ? {
+            onKeyDown: (event: { key: string; stopPropagation: () => void }) => {
+              if (event.key === 'Escape' && pickerOpen) {
+                event.stopPropagation();
+                closePicker();
+                input.current?.focus();
+              }
+            },
+          }
+        : {})}
+    >
       <View style={s.composer}>
         <View style={recording && s.hidden}>
           <IconButton
@@ -88,7 +177,13 @@ export function MessageComposer({
           placeholder="Write a message…"
           placeholderTextColor="#96A3B0"
           value={draft}
+          selection={cursor}
+          onFocus={closePicker}
+          onSelectionChange={({ nativeEvent }) => {
+            selection.current = nativeEvent.selection;
+          }}
           onChangeText={(value) => {
+            setCursor(undefined);
             text.current = value;
             setDraft(value);
           }}
@@ -105,12 +200,22 @@ export function MessageComposer({
             }
           }}
         />
-        <View style={recording && s.hidden}>
+        <View
+          style={recording && s.hidden}
+          onPointerEnter={(event) => {
+            if (desktop && event.nativeEvent.pointerType === 'mouse') openPicker();
+          }}
+        >
           <IconButton
-            name="happy-outline"
+            name={pickerOpen && !desktop ? 'keypad-outline' : 'happy-outline'}
             label="Open GIF library"
             disabled={busy || recording || editing}
-            onPress={onOpenGifs}
+            onPress={() => {
+              if (!desktop && pickerOpen) {
+                closePicker();
+                input.current?.focus();
+              } else openPicker();
+            }}
           />
         </View>
         {canSend || editing ? (
@@ -131,17 +236,47 @@ export function MessageComposer({
             onSend={onSendVoice}
             onError={onError}
             onActive={(active) => {
+              if (active) closePicker();
               setRecording(active);
               onVoiceActive(active);
             }}
           />
         )}
       </View>
-    </>
+      {pickerOpen && active && !editing && onSendGif && (
+        <View
+          testID={desktop ? 'media-picker-popover' : 'media-picker-keyboard'}
+          style={desktop ? s.popover : undefined}
+        >
+          <MediaPicker
+            height={Math.min(desktop ? 420 : 320, height * (desktop ? 0.65 : 0.45))}
+            onClose={closePicker}
+            onSend={onSendGif}
+            onEmoji={insertEmoji}
+            onHoldOpen={(hold) => {
+              holdOpen.current = hold;
+              cancelClose();
+            }}
+          />
+        </View>
+      )}
+    </View>
   );
 }
 
 const s = StyleSheet.create({
+  popover: {
+    position: 'absolute',
+    bottom: 56,
+    right: 48,
+    width: 368,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'white',
+    boxShadow: '0 4px 28px #17212B33',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   hidden: { display: 'none' },
   composer: {
     flexDirection: 'row',

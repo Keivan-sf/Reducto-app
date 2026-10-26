@@ -6,9 +6,17 @@ export function MediaPreview({
   children,
   size,
   label,
-}: PropsWithChildren<{ size?: MediaSize; label: string }>) {
+  fill = false,
+}: PropsWithChildren<{ size?: MediaSize; label: string; fill?: boolean }>) {
   return (
-    <View accessibilityLabel={label} pointerEvents="none" style={[s.frame, mediaPreviewSize(size)]}>
+    <View
+      accessibilityLabel={label}
+      pointerEvents="none"
+      style={[
+        s.frame,
+        fill ? { width: '100%', height: '100%', borderRadius: 0 } : mediaPreviewSize(size),
+      ]}
+    >
       {children}
     </View>
   );
