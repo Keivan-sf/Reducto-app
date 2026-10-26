@@ -17,7 +17,7 @@ import {
   type ScrollViewProps,
 } from 'react-native';
 import { router, useIsFocused } from 'expo-router';
-import { presenceLabel } from '../../api/presence';
+import { usePresenceLabel } from './usePresenceLabel';
 import { pickUpload } from '../../lib/pick-upload';
 import * as Clipboard from 'expo-clipboard';
 import { api, useSession } from '../../context/SessionContext';
@@ -324,6 +324,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     ? members[id]?.find((member) => member.userId !== session!.user.id)?.userId
     : undefined;
   const peer = chat?.type === 'private' && peerId ? profiles[peerId] : undefined;
+  const peerPresence = usePresenceLabel(peer);
   const title = chat ? conversationName(chat, peer) : '';
   useEffect(() => {
     if (!focused || !id) return;
@@ -928,7 +929,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                 chat.type === 'private' && { color: peer?.online ? colors.blue : colors.muted },
               ]}
             >
-              {chat.type === 'group' ? `${members[id]?.length ?? 0} members` : presenceLabel(peer)}
+              {chat.type === 'group' ? `${members[id]?.length ?? 0} members` : peerPresence}
             </Text>
           </View>
         </Pressable>

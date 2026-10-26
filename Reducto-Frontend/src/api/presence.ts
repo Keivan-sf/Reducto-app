@@ -36,10 +36,19 @@ export function startPresenceHeartbeat(
   };
 }
 
-export function presenceLabel(presence?: UserPresence) {
+export function presenceLabel(presence?: UserPresence, now = Date.now()) {
   if (presence?.online) return 'online';
   if (!presence?.last_seen) return 'last seen a long time ago';
   const date = new Date(presence.last_seen);
   if (!Number.isFinite(date.getTime())) return 'last seen a long time ago';
-  return `last seen ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} at ${date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+  const minutes = Math.floor(Math.max(0, now - date.getTime()) / 60_000);
+  if (minutes < 1) return 'last seen just now';
+  if (minutes < 60) return `last seen ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+  if (minutes < 12 * 60) {
+    const hours = Math.floor(minutes / 60);
+    return `last seen ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  }
+  const pad = (value: number) => String(value).padStart(2, '0');
+  if (minutes < 24 * 60) return `last seen at ${date.getHours()}:${pad(date.getMinutes())}`;
+  return `last seen ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
