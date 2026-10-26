@@ -1,62 +1,75 @@
-export const emojiCategories = [
+import catalogue from '../data/emojis.json';
+
+export interface PickerEmoji {
+  emoji: string;
+  name: string;
+}
+const categories = [
   {
     name: 'Smileys & People',
     icon: 'happy-outline',
-    entries:
-      '😀:grinning face|😃:smiley happy|😄:smile happy|😁:grin teeth|😆:laughing|😅:sweat smile|🤣:rolling laughing|😂:tears joy laugh|🙂:slightly smiling|🙃:upside down|🫠:melting|😉:wink|😊:blush happy|😇:angel|🥰:love hearts|😍:heart eyes|🤩:star eyes|😘:kiss heart|😗:kissing|☺️:smiling|😚:kiss closed eyes|😙:kiss smile|🥲:smile tear|😋:delicious tongue|😛:tongue|😜:wink tongue|🤪:zany crazy|😝:squint tongue|🤑:money face|🤗:hug|🤭:giggle hand mouth|🤫:shush quiet|🤔:thinking|🫡:salute|🤐:zipper mouth|🤨:raised eyebrow|😐:neutral|😑:expressionless|😶:no mouth|😏:smirk|😒:unamused|🙄:eye roll|😬:grimace|😌:relieved|😔:sad pensive|😴:sleep|😷:mask sick|🤒:fever|🤕:hurt|🤢:nauseous|🤮:vomit|🥵:hot|🥶:cold|🥴:woozy|😵:dizzy|🤯:mind blown|🥳:party|😎:cool sunglasses|🥸:disguise|😕:confused|🥺:pleading|😢:cry|😭:sob crying|😤:huff|😡:angry|🤬:swear|😱:scream|😳:flushed|🤡:clown|👻:ghost|💀:skull|💩:poop|👍:thumbs up like|👎:thumbs down|👏:clap|🙌:celebrate hands|🫶:heart hands|🙏:pray thanks|👋:wave hello|🤝:handshake|✌️:peace victory|💪:strong muscle|👀:eyes|🧠:brain|👶:baby|🧑:person|👩:woman|👨:man|👪:family',
+    groups: ['Smileys & Emotion', 'People & Body', 'Component'],
   },
-  {
-    name: 'Animals & Nature',
-    icon: 'paw-outline',
-    entries:
-      '🐶:dog|🐱:cat|🐭:mouse|🐹:hamster|🐰:rabbit|🦊:fox|🐻:bear|🐼:panda|🐨:koala|🐯:tiger|🦁:lion|🐮:cow|🐷:pig|🐸:frog|🐵:monkey|🐔:chicken|🐧:penguin|🐦:bird|🦋:butterfly|🐝:bee|🐢:turtle|🐬:dolphin|🐳:whale|🌸:flower blossom|🌹:rose flower|🌻:sunflower|🌲:tree|🌴:palm tree|🍀:clover luck|🌈:rainbow|☀️:sun|🌙:moon|⭐:star|❄️:snowflake|🔥:fire|🌊:wave water',
-  },
-  {
-    name: 'Food & Drink',
-    icon: 'nutrition-outline',
-    entries:
-      '🍏:green apple|🍎:red apple|🍐:pear|🍊:orange|🍋:lemon|🍌:banana|🍉:watermelon|🍇:grapes|🍓:strawberry|🍒:cherry|🍑:peach|🥭:mango|🍍:pineapple|🥑:avocado|🍆:eggplant|🥕:carrot|🌽:corn|🌶️:pepper|🥐:croissant|🍞:bread|🧀:cheese|🍳:egg breakfast|🍔:burger|🍟:fries|🍕:pizza|🌭:hot dog|🌮:taco|🍣:sushi|🍜:noodles|🍚:rice|🍰:cake|🎂:birthday cake|🍫:chocolate|🍿:popcorn|🍩:donut|🍪:cookie|🍦:ice cream|☕:coffee|🍵:tea|🧃:juice|🍺:beer|🥂:cheers',
-  },
-  {
-    name: 'Activity',
-    icon: 'football-outline',
-    entries:
-      '⚽:football soccer|🏀:basketball|🏈:football|⚾:baseball|🎾:tennis|🏐:volleyball|🏓:ping pong|🏸:badminton|🥊:boxing|🏊:swimming|🚴:cycling|🏆:trophy winner|🥇:gold medal|🎮:game controller|🎲:dice|🎯:target|🎨:art painting|🎸:guitar|🎹:piano|🎤:microphone karaoke|🎧:headphones|🎭:theater|🎬:movie',
-  },
-  {
-    name: 'Travel & Places',
-    icon: 'car-outline',
-    entries:
-      '🚗:car|🚕:taxi|🚌:bus|🚎:trolleybus|🏎️:racing car|🚓:police|🚑:ambulance|🚒:fire engine|🚲:bicycle|🏍️:motorcycle|🚂:train|🚀:rocket|✈️:airplane|🚁:helicopter|⛵:sailboat|🚢:ship|🏠:house home|🏢:office|🏥:hospital|🏫:school|🏖️:beach|🏝️:island|🏔️:mountain|🗽:statue liberty|🗼:tokyo tower|🌍:earth globe|🌎:world|🌏:asia',
-  },
-  {
-    name: 'Objects',
-    icon: 'bulb-outline',
-    entries:
-      '💡:light bulb idea|📱:phone|💻:computer laptop|⌚:watch|📷:camera|📺:television|📻:radio|📞:telephone|🔋:battery|🔌:plug|🔍:search magnifying glass|📚:books|📖:book|✏️:pencil|📝:memo note|📎:paperclip|✂️:scissors|🔒:lock|🔑:key|🔨:hammer|🛠️:tools|🎁:gift present|🎈:balloon|🎉:party celebration|💌:love letter|📦:package|💰:money|💎:diamond',
-  },
-  {
-    name: 'Symbols',
-    icon: 'heart-outline',
-    entries:
-      '❤️:red heart love|🧡:orange heart|💛:yellow heart|💚:green heart|💙:blue heart|💜:purple heart|🖤:black heart|🤍:white heart|🤎:brown heart|💔:broken heart|💕:two hearts|💖:sparkle heart|💯:hundred|💢:anger|💥:boom explosion|💫:dizzy star|💦:sweat drops|💤:sleep zzz|✅:check mark|❌:cross no|❓:question|❗:exclamation|⚠️:warning|🚫:prohibited|♻️:recycle|➕:plus|➖:minus|♾️:infinity|🔴:red circle|🟢:green circle|🔵:blue circle',
-  },
-  {
-    name: 'Flags',
-    icon: 'flag-outline',
-    entries:
-      '🏳️:white flag|🏴:black flag|🏁:checkered flag|🚩:red flag|🏳️‍🌈:rainbow pride flag|🇮🇷:iran flag|🇺🇸:usa united states flag|🇬🇧:uk united kingdom flag|🇨🇦:canada flag|🇩🇪:germany flag|🇫🇷:france flag|🇮🇹:italy flag|🇪🇸:spain flag|🇧🇷:brazil flag|🇦🇺:australia flag|🇯🇵:japan flag|🇰🇷:korea flag|🇨🇳:china flag|🇮🇳:india flag|🇹🇷:turkey flag|🇦🇪:uae emirates flag|🇷🇺:russia flag|🇺🇦:ukraine flag|🇵🇸:palestine flag',
-  },
+  { name: 'Animals & Nature', icon: 'paw-outline', groups: ['Animals & Nature'] },
+  { name: 'Food & Drink', icon: 'nutrition-outline', groups: ['Food & Drink'] },
+  { name: 'Activity', icon: 'football-outline', groups: ['Activities'] },
+  { name: 'Travel & Places', icon: 'car-outline', groups: ['Travel & Places'] },
+  { name: 'Objects', icon: 'bulb-outline', groups: ['Objects'] },
+  { name: 'Symbols', icon: 'heart-outline', groups: ['Symbols'] },
+  { name: 'Flags', icon: 'flag-outline', groups: ['Flags'] },
 ] as const;
-
-export const emojiGroups = emojiCategories.map((category) => ({
-  ...category,
-  emojis: category.entries.split('|').map((entry) => {
-    const [emoji, name] = entry.split(':');
-    return { emoji, name };
-  }),
+const allEmojis = catalogue.flatMap((group) => group.emojis);
+export const emojiByValue = new Map(allEmojis.map((entry) => [entry.emoji, entry]));
+const hasSkinTone = (emoji: string) => /[\u{1F3FB}-\u{1F3FF}]/u.test(emoji);
+const normalizedSequence = (emoji: string) => emoji.replace(/[\u{1F3FB}-\u{1F3FF}\uFE0F]/gu, '');
+const defaults = allEmojis.filter((entry) => !hasSkinTone(entry.emoji));
+const defaultBySequence = new Map(
+  defaults.map((entry) => [normalizedSequence(entry.emoji), entry]),
+);
+const defaultByName = new Map(defaults.map((entry) => [entry.name, entry]));
+const baseByValue = new Map<string, PickerEmoji>();
+const variantsByValue = new Map<string, PickerEmoji[]>();
+for (const entry of allEmojis) {
+  const name = entry.name
+    .replace(/(?:,? )?(?:light|medium-light|medium|medium-dark|dark) skin tone/g, '')
+    .replace(/:$/, '')
+    .trim();
+  const base =
+    defaultBySequence.get(normalizedSequence(entry.emoji)) ??
+    defaultByName.get(name) ??
+    defaultByName.get(name.replace(': person, person', ''));
+  if (!base) continue; // Standalone skin-tone swatches are options, rather than grid entries.
+  baseByValue.set(entry.emoji, base);
+  if (hasSkinTone(entry.emoji)) {
+    const variants = variantsByValue.get(base.emoji) ?? [base];
+    variants.push(entry);
+    variantsByValue.set(base.emoji, variants);
+  }
+}
+export const defaultEmoji = (emoji: string) => baseByValue.get(emoji);
+export const emojiVariants = (emoji: string) =>
+  variantsByValue.get(defaultEmoji(emoji)?.emoji ?? emoji) ?? [];
+export const emojiGroups = categories.map(({ name, icon, groups }) => ({
+  name,
+  icon,
+  emojis: catalogue
+    .filter((group) => (groups as readonly string[]).includes(group.name))
+    .flatMap((group) => group.emojis)
+    .filter((entry) => !hasSkinTone(entry.emoji)),
 }));
-export const defaultRecentEmojis = ['👍', '😀', '😘', '😍', '😆', '😜', '😅', '😂'];
-export function rememberEmoji(recent: string[], emoji: string) {
-  return [emoji, ...recent.filter((item) => item !== emoji)].slice(0, 32);
+
+export function searchEmojis(query: string) {
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/);
+  return emojiGroups
+    .map((group) => ({
+      ...group,
+      emojis: group.emojis.filter((entry) => {
+        const text = [entry, ...emojiVariants(entry.emoji)]
+          .map((variant) => `${variant.name} ${variant.emoji}`)
+          .join(' ')
+          .toLocaleLowerCase();
+        return terms.every((term) => text.includes(term));
+      }),
+    }))
+    .filter((group) => group.emojis.length);
 }

@@ -6084,3 +6084,121 @@ test('desktop media picker closes on pointer leave and Escape', async ({ page, i
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('media-picker-popover')).toHaveCount(0);
 });
+
+test('emoji usage is ranked by frequency and persists across picker reopen and page reload', async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  await page.route('**/api/gifs', (route) => route.fulfill({ json: { gifs: [] } }));
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const open = async () => {
+    await page.getByRole('button', { name: 'Open GIF library', exact: true }).click();
+    await page.getByRole('tab', { name: 'Emoji', exact: true }).click();
+  };
+  await open();
+  await expect(page.getByText('Your most used emojis will appear here.')).toBeVisible();
+  expect(await page.getByTestId('emoji-list').getByRole('button').count()).toBeLessThan(200);
+  const search = page.getByRole('textbox', { name: 'Search emoji' });
+  await search.fill('rocket');
+  await page.getByRole('button', { name: 'Insert rocket', exact: true }).click({ clickCount: 3 });
+  await search.fill('flag zimbabwe');
+  await page.getByRole('button', { name: 'Insert flag: Zimbabwe', exact: true }).click();
+  await page.getByRole('button', { name: 'Frequently used', exact: true }).click();
+  const frequent = page.getByTestId('frequent-emoji-row').getByRole('button');
+  await expect(frequent).toHaveCount(2);
+  await expect(frequent.nth(0)).toHaveAccessibleName('Insert rocket');
+  await expect(frequent.nth(1)).toHaveAccessibleName('Insert flag: Zimbabwe');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (key) => JSON.parse(localStorage.getItem(key) ?? '{}')['🚀']?.count,
+        `reducto.emoji-usage.v1.${user.id}`,
+      ),
+    )
+    .toBe(3);
+  await page.getByRole('textbox', { name: 'Message', exact: true }).focus();
+  await open();
+  await expect(frequent.nth(0)).toHaveAccessibleName('Insert rocket');
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  await open();
+  await expect(frequent).toHaveCount(2);
+  await expect(frequent.nth(0)).toHaveAccessibleName('Insert rocket');
+  await expect(frequent.nth(1)).toHaveAccessibleName('Insert flag: Zimbabwe');
+});
+
+test('emoji grid stays aligned while scrolling and a hold opens skin tones without inserting', async ({
+  page,
+  isMobile,
+}) => {
+  await mockApi(page, []);
+  await page.route('**/api/gifs', (route) => route.fulfill({ json: { gifs: [] } }));
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Open GIF library', exact: true }).click();
+  await page.getByRole('tab', { name: 'Emoji', exact: true }).click();
+  const list = page.getByTestId('emoji-list');
+  // A scrollbar or a fractional viewport width must not wrap the final cell onto a second line.
+  for (const offset of [0, 350, 800]) {
+    await list.evaluate((node, y) => {
+      node.scrollTop = y;
+      node.dispatchEvent(new Event('scroll'));
+    }, offset);
+    await expect.poll(async () => list.getByRole('button').count()).toBeGreaterThan(0);
+    const cells = await list.getByRole('button').evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          y: rect.y,
+          height: rect.height,
+          bottom: rect.bottom,
+          parentBottom: node.parentElement!.getBoundingClientRect().bottom,
+        };
+      }),
+    );
+    for (const cell of cells) {
+      expect(cell.height).toBe(44);
+      expect(cell.bottom).toBeLessThanOrEqual(cell.parentBottom + 1);
+    }
+    const rows = [...new Set(cells.map((cell) => cell.y))].sort((a, b) => a - b);
+    for (let index = 1; index < rows.length; index++)
+      expect(rows[index] - rows[index - 1]).toBeGreaterThanOrEqual(44);
+  }
+  const search = page.getByRole('textbox', { name: 'Search emoji' });
+  await search.fill('thumbs up');
+  await expect(list.getByRole('button')).toHaveCount(1);
+  const base = list.getByRole('button', { name: 'Insert thumbs up', exact: true });
+  const rect = (await base.boundingBox())!;
+  const point = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  if (isMobile) {
+    const touch = await page.context().newCDPSession(page);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+    await page.waitForTimeout(450);
+    await expect(page.getByTestId('emoji-tone-menu')).toBeVisible();
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await touch.detach();
+  } else {
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.down();
+    await page.waitForTimeout(450);
+    await page.mouse.up();
+  }
+  const tones = page.getByTestId('emoji-tone-menu');
+  await expect(tones).toBeVisible();
+  await expect(tones.getByRole('button')).toHaveCount(6);
+  const input = page.getByRole('textbox', { name: 'Message', exact: true });
+  await expect(input).toHaveValue('');
+  const chosenTone = tones.getByRole('button', {
+    name: 'Insert thumbs up: medium-dark skin tone',
+    exact: true,
+  });
+  if (isMobile) await chosenTone.tap();
+  else await chosenTone.click();
+  await expect(input).toHaveValue('👍🏾');
+  await expect(tones).toHaveCount(0);
+  await page.getByRole('button', { name: 'Frequently used', exact: true }).click();
+  await expect(page.getByTestId('frequent-emoji-row').getByRole('button')).toHaveAccessibleName(
+    'Insert thumbs up',
+  );
+});
