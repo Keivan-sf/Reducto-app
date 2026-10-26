@@ -12,7 +12,7 @@ import type { VideoFile } from '../../api/video-cache';
 import { useGifs } from '../../context/GifsContext';
 import { EmojiPanel } from './EmojiPanel';
 
-type Tab = 'GIF' | 'Sticker' | 'Emoji';
+type Tab = 'GIF' | 'Emoji';
 export function MediaPicker({
   onClose,
   onSend,
@@ -109,83 +109,75 @@ export function MediaPicker({
       ) : (
         <>
           <View style={s.header}>
-            <Text style={s.heading}>{tab === 'GIF' ? 'GIFs' : 'Stickers'}</Text>
+            <Text style={s.heading}>GIFs</Text>
             <IconButton name="close-outline" label="Close media picker" onPress={onClose} />
           </View>
-          {tab === 'GIF' ? (
-            <View style={{ flex: 1 }}>
-              {loading ? (
-                <ActivityIndicator style={s.empty} color={colors.blue} />
-              ) : (
-                <FlatList
-                  data={gifs}
-                  numColumns={3}
-                  keyExtractor={(gif) => gif.id}
-                  contentContainerStyle={{ padding: 8, paddingBottom: 64, flexGrow: 1 }}
-                  columnWrapperStyle={{ gap: 2 }}
-                  ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
-                  onViewableItemsChanged={viewability}
-                  viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
-                  initialNumToRender={12}
-                  windowSize={3}
-                  keyboardShouldPersistTaps="handled"
-                  ListEmptyComponent={
-                    <View style={s.empty}>
-                      <Icon name="images-outline" size={40} />
-                      <Text style={s.emptyTitle}>Your GIF collection</Text>
-                      <Text style={s.emptyText}>Tap + to add a GIF or video.</Text>
-                    </View>
-                  }
-                  renderItem={({ item }) => (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Send GIF"
-                      accessibilityHint="Immediately sends this GIF to the chat"
-                      disabled={busy}
-                      onPress={() => {
-                        try {
-                          if (onSend(item.id)) onClose();
-                        } catch (err) {
-                          setError((err as Error).message);
-                        }
-                      }}
-                      onLongPress={() => {
-                        setGifId(item.id);
-                        showAdd(true);
-                      }}
-                      style={({ pressed }) => [s.tile, { opacity: pressed || busy ? 0.6 : 1 }]}
-                    >
-                      <GifPreview
-                        gifId={item.id}
-                        initialMetadata={item}
-                        active={tab === 'GIF' && visibleIds.has(item.id)}
-                        fill
-                      />
-                    </Pressable>
-                  )}
-                />
-              )}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add a new GIF"
-                onPress={() => showAdd(true)}
-                style={s.add}
-              >
-                <Icon name="add" size={28} color="white" />
-              </Pressable>
-            </View>
-          ) : (
-            <View style={s.empty}>
-              <Icon name="albums-outline" size={40} />
-              <Text style={s.emptyTitle}>No sticker packs yet</Text>
-              <Text style={s.emptyText}>Sticker packs aren’t available yet.</Text>
-            </View>
-          )}
+          <View style={{ flex: 1 }}>
+            {loading ? (
+              <ActivityIndicator style={s.empty} color={colors.blue} />
+            ) : (
+              <FlatList
+                data={gifs}
+                numColumns={3}
+                keyExtractor={(gif) => gif.id}
+                contentContainerStyle={{ padding: 8, paddingBottom: 64, flexGrow: 1 }}
+                columnWrapperStyle={{ gap: 2 }}
+                ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
+                onViewableItemsChanged={viewability}
+                viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
+                initialNumToRender={12}
+                windowSize={3}
+                keyboardShouldPersistTaps="handled"
+                ListEmptyComponent={
+                  <View style={s.empty}>
+                    <Icon name="images-outline" size={40} />
+                    <Text style={s.emptyTitle}>Your GIF collection</Text>
+                    <Text style={s.emptyText}>Tap + to add a GIF or video.</Text>
+                  </View>
+                }
+                renderItem={({ item }) => (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Send GIF"
+                    accessibilityHint="Immediately sends this GIF to the chat"
+                    disabled={busy}
+                    onPress={() => {
+                      try {
+                        if (onSend(item.id)) onClose();
+                      } catch (err) {
+                        setError((err as Error).message);
+                      }
+                    }}
+                    onLongPress={() => {
+                      setGifId(item.id);
+                      showAdd(true);
+                    }}
+                    style={({ pressed }) => [s.tile, { opacity: pressed || busy ? 0.6 : 1 }]}
+                  >
+                    <GifPreview
+                      gifId={item.id}
+                      initialMetadata={item}
+                      active={tab === 'GIF' && visibleIds.has(item.id)}
+                      fill
+                    />
+                  </Pressable>
+                )}
+              />
+            )}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add a new GIF"
+              onPress={() => showAdd(true)}
+              style={s.add}
+            >
+              <Icon name="add" size={28} color="white" />
+            </Pressable>
+          </View>
         </>
       )}
       <Notice text={error} onDismiss={() => setError('')} />
       <View accessibilityRole="tablist" style={s.tabs}>
-        {(['GIF', 'Sticker', 'Emoji'] as const).map((value) => (
+        {(['GIF', 'Emoji'] as const).map((value) => (
           <Pressable
             key={value}
             accessibilityRole="tab"

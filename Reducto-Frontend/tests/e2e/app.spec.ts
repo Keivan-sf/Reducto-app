@@ -6054,8 +6054,7 @@ test('media picker uses a desktop hover popover and a mobile keyboard panel', as
   if (isMobile) expect(panel!.y).toBeGreaterThan(message!.y);
   else expect(panel!.y + panel!.height).toBeLessThanOrEqual(message!.y + 1);
   await expect(picker.getByRole('button', { name: 'Add a new GIF' })).toBeVisible();
-  await picker.getByRole('tab', { name: 'Sticker', exact: true }).click();
-  await expect(picker.getByText('No sticker packs yet')).toBeVisible();
+  await expect(picker.getByRole('tab')).toHaveCount(2);
   await picker.getByRole('tab', { name: 'Emoji', exact: true }).click();
   await expect(picker.getByRole('button', { name: 'Frequently used', exact: true })).toBeVisible();
   await picker.getByRole('textbox', { name: 'Search emoji' }).fill('rocket');
