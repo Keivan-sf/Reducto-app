@@ -7,6 +7,8 @@ import { Platform } from 'react-native';
 export function pickUpload(type: DocumentPicker.DocumentPickerOptions['type'] = '*/*') {
   return DocumentPicker.getDocumentAsync({
     type,
+    // Keep large browser files as File objects; base64 adds a full-size JS string.
+    base64: false,
     copyToCacheDirectory: Platform.OS !== 'android',
   });
 }

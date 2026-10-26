@@ -3508,6 +3508,7 @@ for (const selection of [
       expect(route.request().method()).toBe('POST');
       const multipart = route.request().postDataBuffer()!.toString();
       if (kind === 'document') expect(multipart).toContain('name="kind"\r\n\r\ndocument');
+      else if (kind === 'audio') expect(multipart).toContain('name="kind"\r\n\r\nmusic');
       else expect(multipart).not.toContain('name="kind"');
       const form = await new Response(new Uint8Array(route.request().postDataBuffer()!), {
         headers: { 'Content-Type': route.request().headers()['content-type'] },
@@ -3554,8 +3555,6 @@ for (const selection of [
     const picker = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
     await (await picker).setFiles({ name, mimeType, buffer });
-    await expect(page.getByText(uploadName, { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Send message', exact: true }).click();
     const message = page.getByTestId('message-44444444-4444-4444-8444-444444444444');
     await expect(message).toBeVisible();
     if (kind === 'image') {
@@ -3665,8 +3664,6 @@ test('uploaded GIFs preview from local bytes instead of fetching the converted s
     mimeType: 'image/gif',
     buffer: Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'),
   });
-  await expect(page.getByText('animated.gif', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const image = page.getByRole('img', { name: 'Uploaded GIF', exact: true });
   await expect(image).toHaveAttribute('src', /^blob:/);
   await expect
@@ -3991,6 +3988,21 @@ test('hold-to-record releases, uploads kind=voice, sends a reply and reuses the 
   await mockApi(page, [
     { ...first, text: null, attachment: { type: 'voice', mediaId: 'reply-voice' } },
   ]);
+  await page.route('**/api/conversations/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    return route.fulfill({
+      json: {
+        message: {
+          ...first,
+          text: null,
+          ...route.request().postDataJSON(),
+          id: '44444444-4444-4444-8444-444444444444',
+          senderId: user.id,
+          createdAt: '2026-10-18T12:02:00Z',
+        },
+      },
+    });
+  });
   await mockMicrophone(page);
   await page.route('**/api/conversations/*/attachments/reply-voice', (route) =>
     route.fulfill({
@@ -3998,14 +4010,18 @@ test('hold-to-record releases, uploads kind=voice, sends a reply and reuses the 
       contentType: 'audio/ogg',
     }),
   );
+  let finishUpload: (() => void) | undefined;
   let uploads = 0;
   let downloads = 0;
-  await page.route('**/api/conversations/*/attachments', (route) => {
+  await page.route('**/api/conversations/*/attachments', async (route) => {
     uploads++;
     const body = route.request().postDataBuffer()!.toString('latin1');
     expect(body).toContain('name="kind"\r\n\r\nvoice');
     expect(body).toContain('name="file"');
     expect(body).toContain('audio/webm');
+    await new Promise<void>((resolve) => {
+      finishUpload = resolve;
+    });
     return route.fulfill({
       status: 201,
       json: {
@@ -4040,12 +4056,32 @@ test('hold-to-record releases, uploads kind=voice, sends a reply and reuses the 
   );
   await page.mouse.move(box.x - 120, box.y - 70);
   await page.mouse.up();
+  const uploading = page.getByTestId('upload-file');
+  await expect(uploading).toBeVisible();
+  const uploadSize = (await uploading.boundingBox())!;
+  const uploadBubbleSize = (await uploading.locator('..').boundingBox())!;
+  const uploadSeekSize = (await uploading
+    .getByLabel('Voice message progress', { exact: true })
+    .boundingBox())!;
+  await expect.poll(() => !!finishUpload).toBe(true);
+  finishUpload!();
   expect((await sent).postDataJSON()).toEqual({
     attachment: { type: 'voice', mediaId: 'recorded-voice' },
     replyToMessageId: first.id,
   });
   const voice = page.getByTestId('voice-player').last();
   await expect(voice).toBeVisible();
+  const completedSize = (await voice.boundingBox())!;
+  const completedBubbleSize = (await voice.locator('..').boundingBox())!;
+  const completedSeekSize = (await voice
+    .getByLabel('Voice message progress', { exact: true })
+    .boundingBox())!;
+  expect(uploadSize.width).toBeCloseTo(completedSize.width, 0);
+  expect(uploadSize.height).toBeCloseTo(completedSize.height, 0);
+  expect(uploadBubbleSize.width).toBeCloseTo(completedBubbleSize.width, 0);
+  expect(uploadBubbleSize.height).toBeCloseTo(completedBubbleSize.height, 0);
+  expect(uploadSeekSize.width).toBeCloseTo(completedSeekSize.width, 0);
+  expect(uploadSeekSize.y - uploadSize.y).toBeCloseTo(completedSeekSize.y - completedSize.y, 0);
   await voice.getByRole('button', { name: 'Play voice message', exact: true }).click();
   await expect(
     voice.getByRole('button', { name: 'Pause voice message', exact: true }),
@@ -5665,4 +5701,254 @@ test('presence heartbeat pauses in a hidden tab and restarts immediately on retu
   await visibility('hidden');
   await page.clock.runFor(60000);
   expect(realtime.heartbeats()).toBe(3);
+});
+
+test('concurrent uploads keep their bubbles and destinations while both chats remain usable', async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  const other = { ...chat, id: '77777777-7777-4777-8777-777777777777', name: 'Another chat' };
+  await page.route('**/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [chat, other] } }),
+  );
+  await page.route(`**/api/conversations/${other.id}`, (route) =>
+    route.fulfill({ json: { conversation: other } }),
+  );
+  const sent: { conversationId: string; text?: string; attachment?: object }[] = [];
+  await page.route('**/api/conversations/*/messages', async (route) => {
+    if (route.request().method() !== 'POST')
+      return route.fulfill({ json: { messages: [], nextCursor: null } });
+    const conversationId = new URL(route.request().url()).pathname.split('/')[3];
+    const payload = route.request().postDataJSON();
+    sent.push({ conversationId, ...payload });
+    return route.fulfill({
+      json: {
+        message: {
+          ...first,
+          ...payload,
+          conversationId,
+          senderId: user.id,
+          id: `sent-${sent.length}`,
+          createdAt: new Date().toISOString(),
+        },
+      },
+    });
+  });
+  const uploads: { conversationId: string; release: () => void }[] = [];
+  await page.route('**/api/conversations/*/attachments', async (route) => {
+    const conversationId = new URL(route.request().url()).pathname.split('/')[3];
+    await new Promise<void>((resolve) => uploads.push({ conversationId, release: resolve }));
+    await route.fulfill({
+      status: 201,
+      json: {
+        attachment: {
+          id: `file-${conversationId}`,
+          type: 'document',
+          fileName: 'report.pdf',
+          contentType: 'application/pdf',
+          fileSize: 100,
+        },
+      },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  async function attach(name: string) {
+    const picker = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+    await (await picker).setFiles({ name, mimeType: 'application/pdf', buffer: Buffer.alloc(100) });
+  }
+  async function back() {
+    const button = page.getByRole('button', { name: 'Back to chats', exact: true });
+    if (await button.isVisible()) await button.click();
+  }
+  await attach('first.pdf');
+  await expect(page.getByTestId('upload-file')).toBeVisible();
+  await expect(page.getByRole('progressbar', { name: 'Upload progress' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('During first upload');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect
+    .poll(() => sent.some((message) => message.text === 'During first upload'))
+    .toBe(true);
+  await back();
+  await page.getByRole('button', { name: 'Open Another chat' }).click();
+  await attach('second.pdf');
+  await expect(page.getByText('second.pdf', { exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('During second upload');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect.poll(() => uploads.length).toBe(2);
+  expect(uploads.map((upload) => upload.conversationId)).toEqual([chat.id, other.id]);
+  await back();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByText('first.pdf', { exact: true })).toBeVisible();
+  uploads[1].release();
+  await expect.poll(() => sent.filter((message) => message.attachment).length).toBe(1);
+  expect(sent.find((message) => message.attachment)?.conversationId).toBe(other.id);
+  await page.getByRole('button', { name: 'Cancel document upload', exact: true }).click();
+  await expect(page.getByTestId('upload-file')).toHaveCount(0);
+  uploads[0].release();
+  await expect.poll(() => sent.filter((message) => message.attachment).length).toBe(1);
+  expect(sent.filter((message) => message.text).map((message) => message.conversationId)).toEqual([
+    chat.id,
+    other.id,
+  ]);
+});
+
+for (const kind of ['image', 'video', 'music'] as const) {
+  test(`uploaded pending ${kind} attachments show cancellable progress inside their own bubble`, async ({
+    page,
+  }) => {
+    await mockApi(page, []);
+    let release: (() => void) | undefined;
+    await page.route('**/api/conversations/*/attachments', async (route) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await route.fulfill({ status: 500, json: { error: 'Cancelled test upload' } });
+    });
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const picker = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+    const fixture = kind === 'image' ? 'portrait.png' : kind === 'video' ? 'loop.mp4' : null;
+    await (
+      await picker
+    ).setFiles(
+      fixture
+        ? path.join(__dirname, '../fixtures', fixture)
+        : {
+            name: 'song.mp3',
+            mimeType: 'audio/mpeg',
+            buffer: Buffer.alloc(1024),
+          },
+    );
+    const bubble = page.getByTestId(kind === 'music' ? 'upload-file' : 'upload-media');
+    await expect(bubble).toBeVisible();
+    await expect(bubble.getByRole('progressbar', { name: 'Upload progress' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEditable();
+    await expect(page.getByRole('button', { name: 'Attach a file', exact: true })).toBeEnabled();
+    if (kind === 'image') {
+      await expect(bubble.getByText(/\//)).toHaveCount(0);
+      await expect
+        .poll(() => bubble.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth))
+        .toBeGreaterThan(0);
+    } else if (kind === 'video') {
+      await expect
+        .poll(() => bubble.locator('video').evaluate((video: HTMLVideoElement) => video.videoWidth))
+        .toBeGreaterThan(0);
+    } else await expect(bubble.getByText('song.mp3', { exact: true })).toBeVisible();
+    await expect.poll(() => !!release).toBe(true);
+    await page.getByRole('button', { name: `Cancel ${kind} upload`, exact: true }).click();
+    await expect(bubble).toHaveCount(0);
+    release!();
+  });
+}
+
+test('large video upload keeps file handling and progress work away from chatting', async ({
+  page,
+}, testInfo) => {
+  const { mkdtempSync, copyFileSync, truncateSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const directory = mkdtempSync(path.join(tmpdir(), 'reducto-large-upload-'));
+  const videoPath = path.join(directory, 'large.mp4');
+  copyFileSync(path.join(__dirname, '../fixtures/loop.mp4'), videoPath);
+  truncateSync(videoPath, 45 * 1024 * 1024);
+  await mockApi(
+    page,
+    Array.from({ length: 80 }, (_, index) => ({
+      ...first,
+      id: `history-${index}`,
+      text: `History ${index}`,
+    })),
+  );
+  await page.addInitScript(() => {
+    const diagnostics = {
+      base64Reads: 0,
+      blobFetches: 0,
+      longTasks: [] as number[],
+      progress: null as (() => void) | null,
+    };
+    (window as any).__uploadDiagnostics = diagnostics;
+    const read = FileReader.prototype.readAsDataURL;
+    FileReader.prototype.readAsDataURL = function (blob) {
+      diagnostics.base64Reads++;
+      return read.call(this, blob);
+    };
+    const fetchFile = window.fetch;
+    window.fetch = function (...args) {
+      if (String(args[0]).startsWith('blob:')) diagnostics.blobFetches++;
+      return fetchFile(args[0] as RequestInfo, args[1]);
+    };
+    const send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (body) {
+      if (body instanceof FormData && body.get('file') instanceof Blob) {
+        const xhr = this;
+        let loaded = 0;
+        diagnostics.progress = () => {
+          loaded += 50000;
+          xhr.upload.dispatchEvent(
+            new ProgressEvent('progress', {
+              loaded,
+              total: 45 * 1024 * 1024,
+              lengthComputable: true,
+            }),
+          );
+        };
+      }
+      return send.call(this, body);
+    };
+    new PerformanceObserver((list) => {
+      diagnostics.longTasks.push(...list.getEntries().map((entry) => entry.duration));
+    }).observe({ type: 'longtask', buffered: false });
+  });
+  let release: (() => void) | undefined;
+  await page.route('**/api/conversations/*/attachments', async (route) => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await route.fulfill({ status: 500, json: { error: 'Cancelled test upload' } });
+  });
+  try {
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await page.evaluate(() => {
+      (window as any).__uploadDiagnostics.longTasks = [];
+    });
+    const picker = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+    await (await picker).setFiles(videoPath);
+    await expect(
+      page.getByRole('button', { name: 'Cancel video upload', exact: true }),
+    ).toBeVisible();
+    await expect.poll(() => !!release, { timeout: 20000 }).toBe(true);
+    await page.evaluate(() => {
+      const diagnostics = (window as any).__uploadDiagnostics;
+      (window as any).__progressTimer = setInterval(() => diagnostics.progress?.(), 16);
+    });
+    const text = 'Typing a message while a large video uploads smoothly.';
+    const started = Date.now();
+    await page
+      .getByRole('textbox', { name: 'Message', exact: true })
+      .pressSequentially(text, { delay: 15 });
+    const typingMs = Date.now() - started;
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue(text);
+    await page.evaluate(() => clearInterval((window as any).__progressTimer));
+    const diagnostics = await page.evaluate(() => {
+      const d = (window as any).__uploadDiagnostics;
+      return { base64Reads: d.base64Reads, blobFetches: d.blobFetches, longTasks: d.longTasks };
+    });
+    console.log('Large upload diagnostics', testInfo.project.name, { ...diagnostics, typingMs });
+    expect(diagnostics.base64Reads).toBe(0);
+    expect(diagnostics.blobFetches).toBe(0);
+    const sent = page.waitForRequest(
+      (request) => request.url().endsWith('/messages') && request.method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    expect((await sent).postDataJSON()).toEqual({ text });
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue('');
+    await page.getByRole('button', { name: 'Cancel video upload', exact: true }).click();
+    release!();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

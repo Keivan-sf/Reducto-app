@@ -1,11 +1,21 @@
-import type { Attachment, Message } from './types';
+import type { Attachment, Message, PendingUpload } from './types';
 
 export interface OutgoingPayload {
   text?: string;
   attachment?: Attachment;
   replyToMessageId?: string;
 }
+export interface UploadJob {
+  initial: PendingUpload;
+  prepare: (
+    signal: AbortSignal,
+    progress: (update: Partial<PendingUpload>) => void,
+  ) => Promise<Attachment>;
+  dispose: () => void;
+}
 interface Entry {
+  upload?: UploadJob;
+  progress?: PendingUpload;
   localId: string;
   message: Message;
   payload: OutgoingPayload;
@@ -17,6 +27,7 @@ interface Entry {
 
 /** Session-owned optimistic sends survive conversation navigation. */
 export class MessageOutbox {
+  private uploadListeners = new Map<string, Set<() => void>>();
   private entries = new Map<string, Entry>();
   private observed = new Set<string>();
   private sequence = 0;
@@ -33,6 +44,19 @@ export class MessageOutbox {
     private readonly accept: (message: Message) => void,
     private readonly publish: (messages: Record<string, Message[]>) => void,
   ) {}
+  /** Progress has its own subscription so bytes sent never rerender chat history. */
+  getUpload(id: string) {
+    return this.entries.get(id)?.progress;
+  }
+  subscribeUpload(id: string, listener: () => void) {
+    const listeners = this.uploadListeners.get(id) ?? new Set();
+    listeners.add(listener);
+    this.uploadListeners.set(id, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (!listeners.size) this.uploadListeners.delete(id);
+    };
+  }
   private emit() {
     if (this.disposed) return;
     const result: Record<string, Message[]> = {};
@@ -42,12 +66,14 @@ export class MessageOutbox {
     }
     this.publish(result);
   }
-  enqueue(id: string, payload: OutgoingPayload) {
+  enqueue(id: string, payload: OutgoingPayload, upload?: UploadJob) {
     if (this.disposed) throw new Error('Your session changed.');
     const localId = `${this.prefix}-${++this.sequence}`;
     this.timestamp = Math.max(Date.now(), this.timestamp + 1);
     const entry: Entry = {
       localId,
+      upload,
+      progress: upload?.initial,
       payload: { ...payload },
       message: {
         id: localId,
@@ -61,6 +87,7 @@ export class MessageOutbox {
         isEdited: false,
         createdAt: new Date(this.timestamp).toISOString(),
         delivery: 'sending',
+        upload: upload?.initial,
       },
       confirmed: false,
       visible: true,
@@ -74,8 +101,31 @@ export class MessageOutbox {
   }
   private async send(entry: Entry) {
     entry.inflight = true;
-    const timeout = setTimeout(() => entry.controller.abort(), 20000);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
+      if (entry.upload && !entry.payload.attachment) {
+        timeout = setTimeout(() => entry.controller.abort(), 120000);
+        const attachment = await entry.upload.prepare(entry.controller.signal, (update) => {
+          if (
+            this.disposed ||
+            this.entries.get(entry.localId) !== entry ||
+            entry.controller.signal.aborted
+          )
+            return;
+          entry.progress = { ...entry.progress!, ...update };
+          for (const listener of this.uploadListeners.get(entry.localId) ?? []) listener();
+        });
+        if (
+          this.disposed ||
+          this.entries.get(entry.localId) !== entry ||
+          entry.controller.signal.aborted
+        )
+          return;
+        entry.payload = { ...entry.payload, attachment };
+        entry.message = { ...entry.message, attachment };
+        clearTimeout(timeout);
+      }
+      timeout = setTimeout(() => entry.controller.abort(), 20000);
       const message = await this.post(
         entry.message.conversationId,
         entry.payload,
@@ -84,6 +134,9 @@ export class MessageOutbox {
       if (this.disposed || this.entries.get(entry.localId) !== entry) return;
       entry.confirmed = true;
       entry.message = message;
+      entry.upload?.dispose();
+      entry.upload = undefined;
+      entry.progress = undefined;
       this.observed.add(message.id);
       this.accept(message);
     } catch (error) {
@@ -110,6 +163,7 @@ export class MessageOutbox {
     const entry = [...this.entries.values()].find(
       (entry) =>
         !entry.confirmed &&
+        (!entry.upload || !!entry.payload.attachment) &&
         entry.message.conversationId === message.conversationId &&
         (entry.payload.text ?? null) === message.text &&
         (entry.payload.replyToMessageId ?? null) === (message.replyToMessageId ?? null) &&
@@ -119,6 +173,9 @@ export class MessageOutbox {
     if (!entry) return;
     entry.confirmed = true;
     entry.message = message;
+    entry.upload?.dispose();
+    entry.upload = undefined;
+    entry.progress = undefined;
     this.emit();
   }
   reconcile(histories: Record<string, Message[]>) {
@@ -147,6 +204,15 @@ export class MessageOutbox {
     const entry = this.entries.get(id);
     if (!entry || entry.inflight || entry.message.delivery !== 'failed') return;
     this.entries.delete(id);
+    entry.upload?.dispose();
+    this.emit();
+  }
+  cancel(id: string) {
+    const entry = this.entries.get(id);
+    if (!entry?.upload || entry.confirmed) return;
+    this.entries.delete(id);
+    entry.controller.abort();
+    entry.upload.dispose();
     this.emit();
   }
   prune(allowed: Set<string>) {
@@ -154,13 +220,18 @@ export class MessageOutbox {
       if (!allowed.has(entry.message.conversationId)) {
         this.entries.delete(id);
         entry.controller.abort();
+        entry.upload?.dispose();
       }
     this.emit();
   }
   dispose() {
     this.disposed = true;
-    for (const entry of this.entries.values()) entry.controller.abort();
+    for (const entry of this.entries.values()) {
+      entry.controller.abort();
+      entry.upload?.dispose();
+    }
     this.entries.clear();
+    this.uploadListeners.clear();
     this.observed.clear();
   }
 }

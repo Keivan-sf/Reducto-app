@@ -159,3 +159,184 @@ test('removed conversations and disposed sessions abort sends and ignore late re
     t.box.dispose();
   }
 });
+
+test('uploads reserve bubbles immediately and let text and other conversations send independently', async () => {
+  const t = setup();
+  const jobs: {
+    signal: AbortSignal;
+    progress: (update: { sent: number }) => void;
+    resolve: (attachment: { type: 'video'; mediaId: string }) => void;
+  }[] = [];
+  let disposed = 0;
+  const upload = () => ({
+    initial: { type: 'video' as const, name: 'clip.mp4', total: 100, sent: 0 },
+    prepare: (signal: AbortSignal, progress: (update: { sent: number }) => void) =>
+      new Promise<{ type: 'video'; mediaId: string }>((resolve) =>
+        jobs.push({ signal, progress, resolve }),
+      ),
+    dispose: () => {
+      disposed++;
+    },
+  });
+  const first = t.box.enqueue('chat', { replyToMessageId: 'reply' }, upload());
+  const second = t.box.enqueue('other', {}, upload());
+  assert.equal(t.snapshot()[0].localId, first);
+  assert.equal(t.snapshot()[0].upload?.sent, 0);
+  assert.equal(t.requests.length, 0, 'attachment messages wait for their own upload only');
+  jobs[0].progress({ sent: 40 });
+  assert.equal(t.box.getUpload(first)?.sent, 40);
+  t.box.enqueue('chat', { text: 'While uploading' });
+  assert.equal(t.requests.length, 1);
+  jobs[1].resolve({ type: 'video', mediaId: 'second-file' });
+  await tick();
+  assert.equal(t.requests.length, 2);
+  assert.deepEqual(t.requests[1].payload.attachment, { type: 'video', mediaId: 'second-file' });
+  t.box.cancel(first);
+  assert.equal(jobs[0].signal.aborted, true);
+  assert.equal(
+    t.snapshot().some((message) => message.localId === first),
+    false,
+  );
+  jobs[0].resolve({ type: 'video', mediaId: 'cancelled-file' });
+  await tick();
+  assert.equal(t.requests.length, 2, 'a cancelled upload must never send a message');
+  t.box.cancel(second);
+  assert.equal(t.requests[1].signal.aborted, true);
+  assert.equal(disposed, 2);
+  t.requests[0].resolve(t.confirmed(0));
+  t.requests[1].reject(new Error('Cancelled'));
+  await tick();
+  t.box.dispose();
+});
+
+test('failed uploads retry in the same bubble and message retries reuse completed uploads', async () => {
+  const t = setup();
+  let attempts = 0;
+  let disposed = 0;
+  const id = t.box.enqueue(
+    'chat',
+    { text: 'Caption', replyToMessageId: 'reply' },
+    {
+      initial: { type: 'image', name: 'photo.jpg', total: 42, sent: 0 },
+      prepare: async (_signal, progress) => {
+        attempts++;
+        if (attempts === 1) throw new Error('Upload offline');
+        progress({ sent: 42 });
+        return { type: 'image', mediaId: 'uploaded' };
+      },
+      dispose: () => {
+        disposed++;
+      },
+    },
+  );
+  await tick();
+  assert.equal(t.snapshot()[0].delivery, 'failed');
+  assert.equal(t.requests.length, 0);
+  t.box.retry(id);
+  await tick();
+  assert.equal(t.snapshot()[0].id, id);
+  assert.equal(t.box.getUpload(id)?.sent, 42);
+  assert.deepEqual(t.requests[0].payload, {
+    text: 'Caption',
+    replyToMessageId: 'reply',
+    attachment: { type: 'image', mediaId: 'uploaded' },
+  });
+  t.requests[0].reject(new Error('Send offline'));
+  await tick();
+  t.box.retry(id);
+  await tick();
+  assert.equal(attempts, 2, 'a message failure must not upload the file again');
+  t.requests[1].resolve(t.confirmed(1));
+  await tick();
+  assert.equal(t.snapshot()[0].upload, undefined);
+  assert.equal(disposed, 1);
+  t.box.dispose();
+});
+
+test('session disposal aborts and cleans unfinished uploads without accepting late progress', async () => {
+  const t = setup();
+  let signal: AbortSignal | undefined;
+  let progress: ((update: { sent: number }) => void) | undefined;
+  let complete: ((attachment: { type: 'document'; mediaId: string }) => void) | undefined;
+  let disposed = false;
+  t.box.enqueue(
+    'chat',
+    {},
+    {
+      initial: { type: 'document', name: 'report.pdf', total: 100, sent: 0 },
+      prepare: async (s, p) => {
+        signal = s;
+        progress = p;
+        return new Promise((resolve) => {
+          complete = resolve;
+        });
+      },
+      dispose: () => {
+        disposed = true;
+      },
+    },
+  );
+  t.box.dispose();
+  assert.equal(signal?.aborted, true);
+  assert.equal(disposed, true);
+  progress!({ sent: 90 });
+  complete!({ type: 'document', mediaId: 'late' });
+  await tick();
+  assert.equal(t.requests.length, 0);
+  assert.equal(t.accepted.length, 0);
+});
+
+test('frequent upload progress updates notify only that bubble, without publishing chat state', async () => {
+  let publications = 0;
+  let changes = 0;
+  let otherChanges = 0;
+  let update: ((progress: { sent: number }) => void) | undefined;
+  let finish: ((attachment: { type: 'video'; mediaId: string }) => void) | undefined;
+  const box = new MessageOutbox(
+    'me',
+    async () => {
+      throw new Error('Cancelled');
+    },
+    () => {},
+    () => {
+      publications++;
+    },
+  );
+  const id = box.enqueue(
+    'chat',
+    {},
+    {
+      initial: { type: 'video', name: 'large.mp4', sent: 0, total: 50_000_000 },
+      prepare: async (_signal, progress) => {
+        update = progress;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      },
+      dispose: () => {},
+    },
+  );
+  const unsubscribe = box.subscribeUpload(id, () => {
+    changes++;
+  });
+  const unsubscribeOther = box.subscribeUpload('another-upload', () => {
+    otherChanges++;
+  });
+  const initial = box.getUpload(id);
+  for (let sent = 1; sent <= 1000; sent++) update!({ sent });
+  assert.equal(publications, 1, 'only adding the message should update shared chat context');
+  assert.equal(changes, 1000);
+  assert.equal(otherChanges, 0);
+  assert.equal(initial?.sent, 0, 'external-store snapshots must be immutable');
+  assert.equal(box.getUpload(id)?.sent, 1000);
+  unsubscribe();
+  update!({ sent: 2000 });
+  assert.equal(changes, 1000, 'offscreen bubbles can unsubscribe from progress');
+  unsubscribeOther();
+  box.cancel(id);
+  update!({ sent: 3000 });
+  assert.equal(box.getUpload(id), undefined);
+  finish!({ type: 'video', mediaId: 'cancelled' });
+  await tick();
+  box.dispose();
+});

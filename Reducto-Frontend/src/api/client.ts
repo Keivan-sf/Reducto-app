@@ -1,3 +1,4 @@
+import { uploadRequest } from './upload-request';
 import type { Session, Tokens } from './types';
 
 export class ApiError extends Error {
@@ -101,6 +102,7 @@ export class ApiClient {
     options: RequestInit = {},
     authenticated = true,
     retry = true,
+    onUploadProgress?: (sent: number, total: number) => void,
   ): Promise<T> {
     const requestBaseUrl = this.baseUrl;
     if (!requestBaseUrl) throw new ApiError(0, 'Choose a server URL before signing in.');
@@ -114,14 +116,17 @@ export class ApiClient {
       headers.set('Authorization', `Bearer ${this.session.accessToken}`);
     let response: Response;
     try {
-      response = await fetch(`${requestBaseUrl}${path}`, {
+      const transport = onUploadProgress
+        ? (url: string, init: RequestInit) => uploadRequest(url, init, onUploadProgress)
+        : fetch;
+      response = await transport(`${requestBaseUrl}${path}`, {
         ...options,
         headers,
         signal: options.signal ?? AbortSignal.timeout(20000),
       });
     } catch (error) {
       if (options.signal?.aborted) throw error;
-      console.log("could not reach reducto error", error);
+      console.log('could not reach reducto error', error);
       throw new ApiError(0, 'Could not reach Reducto. Check your connection and server address.');
     }
     if (this.baseUrl !== requestBaseUrl)
@@ -133,7 +138,7 @@ export class ApiClient {
       if (this.session.accessToken === requestSession.accessToken) await this.refresh();
       if (this.baseUrl !== requestBaseUrl)
         throw new ApiError(0, 'The server changed. Please try again.');
-      return this.request<T>(path, options, authenticated, false);
+      return this.request<T>(path, options, authenticated, false, onUploadProgress);
     }
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));

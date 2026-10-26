@@ -105,3 +105,22 @@ test('web uploads keep using the selected browser file', async () => {
   assert.equal(await uploaded.text(), 'browser-image');
   assert.deepEqual(opened, []);
 });
+
+test('native progress uploads supply URI parts to React Native XHR without reading binary bytes', async () => {
+  const { fileForm, reads, opened } = uploadHelper('android');
+  const form = await fileForm(
+    'file',
+    {
+      uri: 'file:///cache/clip.mp4',
+      name: 'clip.mp4',
+      mimeType: 'video/mp4',
+    },
+    'xhr',
+  );
+  const part = form.get('file') as unknown as { uri: string; name: string; type: string };
+  assert.equal(part.uri, 'file:///cache/clip.mp4');
+  assert.equal(part.name, 'clip.mp4');
+  assert.equal(part.type, 'video/mp4');
+  assert.equal(reads(), 0);
+  assert.deepEqual(opened, []);
+});

@@ -68,11 +68,20 @@ export interface Reaction {
   emoji: Emoji;
   messageId: string;
 }
+export interface PendingUpload {
+  type: Attachment['type'];
+  name: string;
+  uri?: string;
+  total: number;
+  sent: number;
+  duration?: number;
+}
 export interface Message {
   /** Persisted by the server after a message text edit. */
   isEdited: boolean;
   /** Local outbox state; never sent to the backend or used as a read watermark. */
   delivery?: 'sending' | 'failed';
+  upload?: PendingUpload;
   localId?: string;
   sendError?: string;
   replyToMessageId?: string | null;

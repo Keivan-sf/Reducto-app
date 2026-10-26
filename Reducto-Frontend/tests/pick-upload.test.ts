@@ -11,7 +11,7 @@ const { outputText } = ts.transpileModule(
 for (const platform of ['android', 'ios', 'web']) {
   test(`${platform} picks attachments and GIFs with compatible cache handling and preserves cancellation`, async () => {
     let cancelled = false;
-    const calls: { type: string | string[]; copyToCacheDirectory: boolean }[] = [];
+    const calls: { type: string | string[]; copyToCacheDirectory: boolean; base64: boolean }[] = [];
     const asset = { uri: 'content://picker/photo', name: 'photo.jpg', mimeType: 'image/jpeg' };
     const module = { exports: {} as typeof import('../src/lib/pick-upload') };
     runInNewContext(outputText, {
@@ -37,6 +37,11 @@ for (const platform of ['android', 'ios', 'web']) {
     assert.equal(calls[0].type, '*/*');
     assert.deepEqual(calls[1].type, ['image/gif', 'video/*']);
     for (const call of calls) {
+      assert.equal(
+        call.base64,
+        false,
+        'large browser files must not be converted into base64 strings',
+      );
       assert.equal(
         call.copyToCacheDirectory,
         platform !== 'android',

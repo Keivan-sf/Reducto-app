@@ -1,5 +1,7 @@
 export interface VideoFile {
   uri: string;
+  /** Browser-owned bytes; reuse directly when building multipart uploads. */
+  blob?: Blob;
   bytes: number;
   name?: string;
   mimeType?: string;

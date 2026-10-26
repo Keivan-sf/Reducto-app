@@ -32,19 +32,12 @@ import {
   Notice,
   styles,
 } from '../../components/ui';
-import {
-  EMOJIS,
-  type Attachment,
-  type AttachmentMetadata,
-  type Emoji,
-  type Gif,
-  type Message,
-} from '../../api/types';
+import { EMOJIS, type Emoji, type Message } from '../../api/types';
 import { conversationName, profileName, timeLabel, mergeMessages } from '../../lib/messages';
 import { useProfiles } from '../../context/ProfilesContext';
 import { retainUpload, saveLocalFile } from '../../lib/local-attachments';
-import type { VideoFile } from '../../api/video-cache';
-import { fileForm } from '../../lib/uploads';
+import { messageUpload } from '../../lib/message-upload';
+import { UploadMessage } from './UploadMessage';
 import { downloadAttachment } from '../../lib/download';
 import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
@@ -58,21 +51,13 @@ import { useGifs } from '../../context/GifsContext';
 import { ReplyPreview, ReplyQuote } from './ReplyPreview';
 import { VoiceMessage } from './VoiceMessage';
 import { DocumentMessage } from './DocumentMessage';
-import { uploadKind } from '../../lib/upload-kind';
-import { compressImageUpload } from '../../lib/compress-image-upload';
 import { MessageComposer } from './MessageComposer';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { useVoicePlayback } from '../../context/VoicePlaybackContext';
 import { VoiceMiniPlayer } from './VoiceMiniPlayer';
 import { VideoCard } from './VideoCard';
 import { useMediaViewers } from './MediaViewers';
-import {
-  useVideos,
-  videoKey,
-  gifFileKey,
-  voiceFileKey,
-  documentFileKey,
-} from '../../context/VideosContext';
+import { useVideos, videoKey, voiceFileKey, documentFileKey } from '../../context/VideosContext';
 import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
 import { MessageMenu, type MessageMenuAction } from './MessageMenu';
@@ -182,8 +167,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const [actionsVisible, setActionsVisible] = useState(false);
   const [forward, setForward] = useState(false);
   const [actionAnchor, setActionAnchor] = useState<{ x: number; y: number } | null>(null);
-  const [attachment, setAttachment] = useState<Attachment | undefined>();
-  const [attachmentName, setAttachmentName] = useState('');
   const [search, setSearch] = useState<string | null>(null);
   const gifCache = useGifs();
   const videoCache = useVideos();
@@ -599,112 +582,61 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     }
   }
   function send(gifId?: string, text = ''): boolean {
-    if (!id || busy || (!text.trim() && !attachment && !gifId)) return false;
+    if (!id || busy || (!text.trim() && !gifId)) return false;
     setError('');
     outbox.enqueue(id, {
       ...(text.trim() && !gifId ? { text: text.trim() } : {}),
       ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
-      ...(gifId || attachment ? { attachment: gifId ? { type: 'gif', gifId } : attachment } : {}),
+      ...(gifId ? { attachment: { type: 'gif', gifId } as const } : {}),
     });
     setReplyTo(null);
-    if (!gifId) {
-      setAttachment(undefined);
-      setAttachmentName('');
-    }
     void showLatest();
     return true;
   }
   async function upload() {
     if (!id || busy) return;
+    // Capture the destination and reply before opening the asynchronous picker.
+    const conversationId = id;
+    const replyToMessageId = replyTo?.id;
     const picked = await pickUpload();
     if (picked.canceled) return;
     const file = picked.assets[0];
     if ((file.size ?? 0) > 50 * 1024 * 1024) return setError('Choose a file smaller than 50 MB.');
-    setBusy(true);
-    setError('');
-    let local: VideoFile | undefined;
-    try {
-      local = await retainUpload(file);
-      const kind = uploadKind(file.mimeType ?? local.mimeType, file.name);
-      if (kind === 'media' && local.mimeType?.toLowerCase().startsWith('image/')) {
-        const compressed = await compressImageUpload(local);
-        local.dispose();
-        local = compressed;
-      }
-      const uploadName = local.name ?? file.name;
-      if (kind === 'gif') {
-        const body = await fileForm('gif', { ...file, uri: local.uri });
-        const { gif } = await api.request<{ gif: Gif }>('/api/gifs', {
-          method: 'POST',
-          body,
-          signal: AbortSignal.timeout(120000),
-        });
-        gifCache.remember(gif);
-        videoCache.remember(gifFileKey(gif.id), local);
-        local = undefined;
-        setAttachment({ type: 'gif', gifId: gif.id });
-      } else {
-        const body = await fileForm('file', {
-          uri: local.uri,
-          name: uploadName,
-          mimeType: local.mimeType,
-        });
-        if (kind === 'document') body.append('kind', 'document');
-        else if (local.mimeType?.toLowerCase().startsWith('audio/')) body.append('kind', 'music');
-        const { attachment: media } = await api.request<{
-          attachment: AttachmentMetadata;
-        }>(`/api/conversations/${id}/attachments`, {
-          method: 'POST',
-          body,
-          signal: AbortSignal.timeout(120000),
-        });
-        mediaMetadata.remember(id, media);
-        videoCache.remember(
-          ['document', 'music', 'audio'].includes(media.type)
-            ? documentFileKey(id, media.id)
-            : videoKey(id, media.id),
-          local,
-        );
-        local = undefined;
-        setAttachment({ type: media.type, mediaId: media.id });
-      }
-      setAttachmentName(uploadName);
-    } catch (err) {
-      local?.dispose();
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    outbox.enqueue(
+      conversationId,
+      { ...(replyToMessageId ? { replyToMessageId } : {}) },
+      messageUpload(conversationId, file, {
+        api,
+        media: mediaMetadata,
+        gifs: gifCache,
+        files: videoCache,
+      }),
+    );
+    setReplyTo(null);
+    void showLatest();
   }
   async function sendVoice(voice: RecordedVoice, signal: AbortSignal) {
-    if (!id) return;
-    setBusy(true);
-    setError('');
-    let local: VideoFile | undefined;
-    try {
-      local = await retainUpload(voice.asset);
-      if (local.bytes > 50 * 1024 * 1024)
-        throw new Error('Voice messages must be smaller than 50 MB.');
-      const body = await fileForm('file', { ...voice.asset, uri: local.uri });
-      body.append('kind', 'voice');
-      const { attachment: media } = await api.request<{ attachment: AttachmentMetadata }>(
-        `/api/conversations/${id}/attachments`,
-        { method: 'POST', body, signal },
-      );
-      if (signal.aborted) return;
-      mediaMetadata.remember(id, media);
-      videoCache.remember(voiceFileKey(id, media.id), { ...local, duration: voice.duration });
-      local = undefined;
-      outbox.enqueue(id, {
-        attachment: { type: 'voice', mediaId: media.id },
-        ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
-      });
-      setReplyTo(null);
-      void showLatest();
-    } finally {
-      local?.dispose();
-      setBusy(false);
+    if (!id || signal.aborted) return;
+    const conversationId = id;
+    const replyToMessageId = replyTo?.id;
+    // The recorder disposes its source as soon as we return; give the job its own copy.
+    const local = await retainUpload(voice.asset);
+    if (signal.aborted) {
+      local.dispose();
+      return;
     }
+    outbox.enqueue(
+      conversationId,
+      { ...(replyToMessageId ? { replyToMessageId } : {}) },
+      messageUpload(
+        conversationId,
+        voice.asset,
+        { api, media: mediaMetadata, gifs: gifCache, files: videoCache },
+        { file: local, duration: voice.duration },
+      ),
+    );
+    setReplyTo(null);
+    void showLatest();
   }
   function openMessageMenu(message: Message, event: GestureResponderEvent) {
     event.stopPropagation();
@@ -1077,8 +1009,9 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
               const mine = message.senderId === session!.user.id;
               const mediaMetadata = messageMedia(message);
               const gifMetadata = messageGif(message);
-              const visualMedia =
-                !!message.attachment && ['image', 'gif', 'video'].includes(message.attachment.type);
+              const visualMedia = ['image', 'gif', 'video'].includes(
+                message.upload?.type ?? message.attachment?.type ?? '',
+              );
               const hasMediaHeader =
                 (!mine && chat.type === 'group') ||
                 !!message.forwardedFrom ||
@@ -1282,9 +1215,18 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                           )
                         }
                       >
-                        {message.attachment?.type === 'voice' ||
-                        message.attachment?.type === 'music' ||
-                        message.attachment?.type === 'audio' ? (
+                        {message.upload ? (
+                          <UploadMessage
+                            upload={message.upload}
+                            outbox={outbox}
+                            localId={message.localId!}
+                            failed={message.delivery === 'failed'}
+                            onCancel={() => outbox.cancel(message.localId!)}
+                            onRetry={() => outbox.retry(message.localId!)}
+                          />
+                        ) : message.attachment?.type === 'voice' ||
+                          message.attachment?.type === 'music' ||
+                          message.attachment?.type === 'audio' ? (
                           <VoiceMessage
                             kind={message.attachment.type}
                             onSeekingChange={onVoiceSeekingChange}
@@ -1444,22 +1386,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
             <IconButton name="close" label="Cancel reply" onPress={() => setReplyTo(null)} />
           </View>
         )}
-        {!editing && attachment && (
-          <View style={s.pending}>
-            <Icon name="attach-outline" color={colors.blue} />
-            <Text numberOfLines={1} style={{ flex: 1, color: colors.dark }}>
-              {attachmentName}
-            </Text>
-            <IconButton
-              name="close"
-              label="Remove attachment"
-              onPress={() => {
-                setAttachment(undefined);
-                setAttachmentName('');
-              }}
-            />
-          </View>
-        )}
         {editing && (
           <MessageComposer
             key={editing.id}
@@ -1483,7 +1409,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           <MessageComposer
             active={focused}
             busy={busy}
-            hasAttachment={!!attachment}
+            hasAttachment={false}
             onSend={(text) => send(undefined, text)}
             onSendVoice={sendVoice}
             onAttach={() => void upload().catch((err) => setError(err.message))}

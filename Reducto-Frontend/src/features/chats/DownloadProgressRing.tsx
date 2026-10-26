@@ -15,7 +15,13 @@ const radius = 18;
 const circumference = 2 * Math.PI * radius;
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-export function DownloadProgressRing({ progress }: { progress: number }) {
+export function DownloadProgressRing({
+  progress,
+  label = 'Voice download progress',
+}: {
+  progress: number;
+  label?: string;
+}) {
   const fraction = Number.isFinite(progress) ? Math.max(0.01, Math.min(1, progress)) : 0.01;
   const percent = Math.floor(fraction * 100);
   const displayedProgress = useSharedValue(0.01);
@@ -41,7 +47,7 @@ export function DownloadProgressRing({ progress }: { progress: number }) {
     <Animated.View
       pointerEvents="none"
       accessibilityRole="progressbar"
-      accessibilityLabel="Voice download progress"
+      accessibilityLabel={label}
       accessibilityValue={{ min: 0, max: 100, now: percent }}
       aria-valuemin={0}
       aria-valuemax={100}

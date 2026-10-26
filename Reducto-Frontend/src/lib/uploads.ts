@@ -1,13 +1,23 @@
 import { File as NativeFile } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-export type UploadAsset = { uri: string; name: string; mimeType?: string; file?: File };
+export type UploadAsset = { uri: string; name: string; mimeType?: string; file?: Blob };
 
-export async function fileForm(field: string, file: UploadAsset) {
+export async function fileForm(
+  field: string,
+  file: UploadAsset,
+  transport: 'fetch' | 'xhr' = 'fetch',
+) {
   const form = new FormData();
   if (Platform.OS === 'web') {
     const blob = file.file ?? (await (await fetch(file.uri)).blob());
     form.append(field, blob, file.name);
+  } else if (transport === 'xhr') {
+    form.append(field, {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType || 'application/octet-stream',
+    } as unknown as Blob);
   } else {
     const source = new NativeFile(file.uri);
     // Expo fetch accepts file parts with bytes(). Keep the picker metadata and

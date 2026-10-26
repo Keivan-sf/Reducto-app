@@ -7,6 +7,7 @@ export async function retainUpload(asset: UploadAsset): Promise<VideoFile> {
   let exists = true;
   return {
     uri,
+    blob,
     bytes: blob.size,
     name: asset.name,
     mimeType: asset.mimeType || blob.type,
