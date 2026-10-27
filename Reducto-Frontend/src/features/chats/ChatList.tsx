@@ -246,7 +246,14 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
         }}
       />
       <View style={s.footer}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${connection}. Refresh conversations`}
+          accessibilityState={{ busy: refreshing, disabled: refreshing }}
+          disabled={refreshing}
+          onPress={() => void reload()}
+          style={s.connectionStatus}
+        >
           <View
             style={{
               width: 6,
@@ -256,21 +263,21 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
             }}
           />
           <Text style={{ color: colors.muted, fontSize: 11 }}>{connection}</Text>
-        </View>
-        <IconButton
-          name="refresh-outline"
-          label="Refresh conversations"
-          onPress={() => void reload()}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="New conversation"
-          onPress={() => setCreating(true)}
-          style={s.compose}
-        >
-          <Icon name="create-outline" color="white" />
+          {refreshing ? (
+            <ActivityIndicator size={14} color={colors.muted} />
+          ) : (
+            <Icon name="refresh-outline" size={14} color={colors.muted} />
+          )}
         </Pressable>
       </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="New conversation"
+        onPress={() => setCreating(true)}
+        style={s.compose}
+      >
+        <Icon name="create-outline" color="white" />
+      </Pressable>
       <NewChatDialog visible={creating} onClose={() => setCreating(false)} />
     </View>
   );
@@ -347,10 +354,19 @@ const useStyles = createThemedStyles((colors) => ({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
   },
+  connectionStatus: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
   compose: {
+    position: 'absolute',
+    right: 20,
+    bottom: 34,
     width: 44,
     height: 44,
-    borderRadius: 15,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.blue,
