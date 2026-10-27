@@ -613,6 +613,118 @@ async function signIn(page: Page) {
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 }
 
+test('conversation search submits on mobile, debounces on desktop, and jumps through paginated results', async ({
+  page,
+}, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile';
+  const recent = {
+    ...first,
+    id: 'search-recent',
+    text: 'A needle in recent history',
+    createdAt: '2026-10-18T12:02:00Z',
+  };
+  const old = {
+    ...first,
+    id: 'search-old',
+    text: 'An older needle outside loaded history',
+    createdAt: '2026-01-01T12:00:00Z',
+  };
+  await mockApi(page, [first, recent]);
+  const queries: string[] = [];
+  await page.route('**/api/conversations/*/messages/search?*', async (route) => {
+    const url = new URL(route.request().url());
+    expect(url.pathname).toBe(`/api/conversations/${chat.id}/messages/search`);
+    expect(route.request().headers().authorization).toBe('Bearer access-token');
+    queries.push(url.searchParams.get('q')!);
+    return route.fulfill({
+      json: url.searchParams.has('before')
+        ? { messages: [old], nextCursor: null }
+        : { messages: [recent], nextCursor: recent.id },
+    });
+  });
+  let contextCalls = 0;
+  await page.route(`**/messages/${old.id}/around?*`, (route) => {
+    contextCalls++;
+    return route.fulfill({
+      json: {
+        message: old,
+        before: [],
+        after: [first, recent],
+        hasMoreBefore: false,
+        hasMoreAfter: false,
+      },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page.getByTestId(`message-${first.id}`)).toBeVisible();
+  await page.getByRole('button', { name: 'Search messages', exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'Search in this conversation', exact: true });
+  await input.fill('nee');
+  await page.waitForTimeout(200);
+  await input.fill('needle');
+  if (mobile) {
+    await page.waitForTimeout(650);
+    expect(queries).toEqual([]);
+    await input.press('Enter');
+    await expect(page.getByTestId('search-navigation')).toContainText('1 of 1+');
+    await expect(page.getByTestId(`message-${recent.id}`)).toBeInViewport();
+    await page.getByRole('button', { name: 'Older search result', exact: true }).click();
+    await expect(page.getByTestId('search-navigation')).toContainText('2 of 2');
+    await expect(page.getByTestId(`message-${old.id}`)).toBeInViewport();
+    await page.getByRole('button', { name: 'Newer search result', exact: true }).click();
+    await expect(page.getByTestId('search-navigation')).toContainText('1 of 2');
+    await page.screenshot({ path: testInfo.outputPath('search-chat.png') });
+    await page.getByRole('button', { name: 'Show as List', exact: true }).click();
+  } else {
+    await expect(page.getByTestId('desktop-message-search')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Weekend plans' })).not.toBeVisible();
+    // Opening search keeps the full chat and composer visible.
+    await expect(page.getByTestId(`message-${first.id}`)).toBeVisible();
+    await expect(page.getByTestId('search-navigation')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Load more search results', exact: true }).click();
+  }
+  await expect(page.getByTestId(`search-result-${old.id}`)).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('search-list.png') });
+  await page.getByTestId(`search-result-${old.id}`).click();
+  await expect(page.getByTestId(`message-${old.id}`)).toBeInViewport();
+  expect(contextCalls).toBe(1);
+  expect(queries).toEqual(['needle', 'needle']);
+  if (mobile) {
+    await expect(page.getByTestId('message-search-results')).toHaveCount(0);
+    await expect(page.getByTestId('search-navigation')).toContainText('2 of 2');
+  } else await expect(page.getByTestId('desktop-message-search')).toBeVisible();
+  await page.getByRole('button', { name: 'Close search', exact: true }).click();
+  await expect(
+    page.getByRole('textbox', { name: 'Search in this conversation', exact: true }),
+  ).toHaveCount(0);
+  if (!mobile) await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
+});
+
+test('conversation search displays empty results and retries a failed request', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page);
+  let calls = 0;
+  await page.route('**/api/conversations/*/messages/search?*', (route) => {
+    calls++;
+    return calls === 1
+      ? route.fulfill({ status: 503, json: { error: 'Search unavailable.' } })
+      : route.fulfill({ json: { messages: [], nextCursor: null } });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Search messages', exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'Search in this conversation', exact: true });
+  await input.fill('absent');
+  if (testInfo.project.name === 'mobile') await input.press('Enter');
+  await page.getByText('Search unavailable. Tap to retry.', { exact: true }).click();
+  if (testInfo.project.name === 'mobile')
+    await expect(page.getByTestId('search-navigation')).toContainText('No results');
+  else await expect(page.getByText('No matching messages.', { exact: true })).toBeVisible();
+  expect(calls).toBe(2);
+});
+
 test('unseen mentions jump oldest first, mark only visible targets, and disappear when exhausted', async ({
   page,
 }) => {

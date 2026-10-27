@@ -1,5 +1,13 @@
 import { useTheme, createThemedStyles } from '../../context/ThemeContext';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -10,7 +18,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
   type ViewToken,
@@ -63,10 +70,20 @@ import { ChatTailFollow } from '../../lib/chat-tail-follow';
 import { ScrollToLatestButton } from './ScrollToLatestButton';
 import { oldestMention } from '../../api/mentions';
 import { useMentionVisibility } from './useMentionVisibility';
+import { ConversationSearch, SEARCH_DELAY } from '../../api/conversation-search';
+import { SearchInput, SearchResults, SearchNavigation } from './ConversationSearch';
 
 const readViewabilityConfig = { minimumViewTime: 350, viewAreaCoveragePercentThreshold: 60 };
 
-export default function ChatView({ id, active }: { id?: string; active: boolean }) {
+export default function ChatView({
+  id,
+  active,
+  onSearchVisibilityChange,
+}: {
+  id?: string;
+  active: boolean;
+  onSearchVisibilityChange?: (open: boolean) => void;
+}) {
   const { colors } = useTheme();
   const s = useStyles();
   const styles = useUIStyles();
@@ -163,6 +180,14 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const [forward, setForward] = useState(false);
   const [actionAnchor, setActionAnchor] = useState<{ x: number; y: number } | null>(null);
   const [search, setSearch] = useState<string | null>(null);
+  const [searchList, setSearchList] = useState(false);
+  const [searchIndex, setSearchIndex] = useState(0);
+  const searchStore = useMemo(() => new ConversationSearch(api, id ?? ''), [id]);
+  const searchState = useSyncExternalStore(searchStore.subscribe, searchStore.snapshot);
+  const searchOpen = search !== null;
+  const wide = useWindowDimensions().width >= 850;
+  const mobileSearchList = !wide && searchOpen && searchList;
+  useEffect(() => () => searchStore.reset(), [searchStore]);
   const gifCache = useGifs();
   const videoCache = useVideos();
   const viewers = useMediaViewers();
@@ -181,7 +206,8 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
       !details &&
       !profileUserId &&
       !gifs &&
-      !actionsVisible,
+      !actionsVisible &&
+      !mobileSearchList,
     mentions: chat?.unseenMentions,
     markSeen: (messageId) => markMentionSeen(id!, messageId),
     onError: setError,
@@ -198,6 +224,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         gifs ||
         viewers.isOpen() ||
         actionsVisible ||
+        mobileSearchList ||
         AppState.currentState !== 'active'
       )
         return;
@@ -227,6 +254,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     gifs,
     viewers,
     actionsVisible,
+    mobileSearchList,
     readVisible,
     history,
     visibleMessages,
@@ -299,7 +327,73 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     ),
     [cancelPositioning],
   );
-  const wide = useWindowDimensions().width >= 850;
+  useEffect(() => {
+    if (active) onSearchVisibilityChange?.(searchOpen);
+  }, [active, searchOpen, onSearchVisibilityChange]);
+  const searchActions = useRef({ run: () => {} });
+  useEffect(() => {
+    if (!wide || Platform.OS !== 'web' || !focused || search === null || !search.trim()) return;
+    const timer = setTimeout(() => searchActions.current.run(), SEARCH_DELAY);
+    return () => clearTimeout(timer);
+  }, [search, wide, focused]);
+  function changeSearch(value: string | null, cancelJump = true) {
+    searchStore.reset();
+    if (
+      cancelJump &&
+      searchOpen &&
+      (jumping ||
+        (scrollTarget.current && scrollTarget.current.id === searchState.messages[searchIndex]?.id))
+    ) {
+      jumpSequence.current++;
+      setJumping(false);
+      cancelPositioning();
+    }
+    setSearch(value);
+    setSearchIndex(0);
+    setSearchList(false);
+  }
+  async function selectSearchResult(message: Message, index: number) {
+    setSearchIndex(index);
+    setSearchList(false);
+    Keyboard.dismiss();
+    await jumpToMessage(message.id, true);
+  }
+  async function runSearch() {
+    if (search === null) return;
+    const current = searchStore.snapshot();
+    if (current.submitted && current.query === search.trim()) return;
+    Keyboard.dismiss();
+    setSearchIndex(0);
+    const results = await searchStore.search(search);
+    if (!wide && results?.[0]) await selectSearchResult(results[0], 0);
+  }
+  searchActions.current.run = () => {
+    void runSearch();
+  };
+  async function olderSearchResult() {
+    const next = searchIndex + 1;
+    const results =
+      next < searchState.messages.length ? searchState.messages : await searchStore.load();
+    if (results?.[next]) await selectSearchResult(results[next], next);
+  }
+  async function retrySearch() {
+    const firstPage = !searchState.messages.length;
+    const results = await searchStore.load();
+    if (!wide && firstPage && results?.[0]) await selectSearchResult(results[0], 0);
+  }
+  const searchResults = (
+    <SearchResults
+      state={searchState}
+      selectedId={searchState.messages[searchIndex]?.id}
+      userId={session!.user.id}
+      onSelect={(message, index) => {
+        void selectSearchResult(message, index);
+      }}
+      onMore={() => {
+        void searchStore.load();
+      }}
+    />
+  );
   const peerId = id
     ? members[id]?.find((member) => member.userId !== session!.user.id)?.userId
     : undefined;
@@ -342,14 +436,8 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     };
   }, [id, loadMessages, getReadState, messageCache]);
   const shown = useMemo(
-    () =>
-      mergeMessages(history, outgoing[id ?? ''] ?? [])
-        .filter(
-          (message) =>
-            search === null || (message.text ?? '').toLowerCase().includes(search.toLowerCase()),
-        )
-        .reverse(),
-    [history, search, outgoing, id],
+    () => mergeMessages(history, outgoing[id ?? ''] ?? []).reverse(),
+    [history, outgoing, id],
   );
   useLayoutEffect(() => {
     tailFollow.layout();
@@ -376,7 +464,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     },
     [],
   );
-  async function jumpToMessage(messageId: string) {
+  async function jumpToMessage(messageId: string, keepSearch = false) {
     if (!id) return;
     tailFollow.stop();
     initialReadTarget.current = null;
@@ -396,7 +484,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         });
       }
       if (sequence !== jumpSequence.current) return;
-      setSearch(null);
+      if (!keepSearch && !wide) changeSearch(null, false);
       setJumpTarget(messageId);
       setHighlighted(messageId);
       clearTimeout(highlightTimer.current);
@@ -460,7 +548,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     clearTimeout(scrollTimer.current);
     clearTimeout(highlightTimer.current);
     setHighlighted(null);
-    setSearch(null);
+    if (!wide) changeSearch(null, false);
     try {
       if (id && messageCache.hasNewer(id)) await messageCache.page(id, false, true);
       if (sequence === jumpSequence.current) tailFollow.layout();
@@ -474,7 +562,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
   const edgeFailures = useRef(new Map<string, number>());
   const expandWindow = useCallback(
     async (older: boolean) => {
-      if (!id || openingHistory || jumping || jumpTarget || !focused || search !== null) return;
+      if (!id || openingHistory || jumping || jumpTarget || !focused) return;
       const more = jumpWindow
         ? older
           ? jumpWindow.hasMoreBefore
@@ -531,7 +619,6 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
       jumping,
       jumpTarget,
       focused,
-      search,
       jumpWindow,
       history,
       messageCache,
@@ -835,674 +922,756 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
       </View>
     );
   return (
-    <KeyboardAvoidingView style={s.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={s.header}>
-        {!wide && (
-          <IconButton name="arrow-back" label="Back to chats" onPress={() => router.replace('/')} />
-        )}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="View conversation details"
-          disabled={chat.type === 'private' && !peerId}
-          onPress={() => {
-            if (chat.type === 'private') {
-              if (peerId) setProfileUserId(peerId);
-            } else setDetails(true);
-          }}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}
-        >
-          <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={40} />
-          <View style={{ flex: 1 }}>
-            <Text numberOfLines={1} style={s.headerTitle}>
-              {title}
-            </Text>
-            <Text
-              style={[
-                s.headerSubtitle,
-                chat.type === 'private' && { color: peer?.online ? colors.blue : colors.muted },
-              ]}
-            >
-              {chat.type === 'group' ? `${members[id]?.length ?? 0} members` : peerPresence}
-            </Text>
-          </View>
-        </Pressable>
-        <IconButton
-          name="search-outline"
-          label="Search messages"
-          onPress={() => setSearch(search === null ? '' : null)}
-        />
-        <IconButton
-          name="ellipsis-vertical"
-          label="Conversation details"
-          disabled={chat.type === 'private' && !peerId}
-          onPress={() => {
-            if (chat.type === 'private') {
-              if (peerId) setProfileUserId(peerId);
-            } else setDetails(true);
-          }}
-        />
-      </View>
-      {active && <VoiceMiniPlayer />}
-      {search !== null && (
-        <View style={s.search}>
-          <TextInput
-            accessibilityLabel="Search messages"
-            autoFocus
-            placeholder="Search in this conversation"
-            value={search}
-            onChangeText={setSearch}
-            style={{ flex: 1, padding: 12, fontSize: 15, color: colors.dark }}
-          />
-          <IconButton name="close" label="Close search" onPress={() => setSearch(null)} />
-        </View>
-      )}
-      {jumping && (
-        <ActivityIndicator
-          accessibilityLabel="Loading replied message"
-          color={colors.blue}
-          style={{ padding: 8 }}
-        />
-      )}
-      <View style={{ flex: 1, minHeight: 0 }}>
-        <View
-          ref={(view) => mentionVisibility.setViewport(view)}
-          collapsable={false}
-          testID="positioned-chat-history"
-          style={[s.historyViewport, { opacity: openingHistory ? 0 : 1 }]}
-          pointerEvents={openingHistory ? 'none' : 'auto'}
-          accessibilityElementsHidden={openingHistory}
-          importantForAccessibility={openingHistory ? 'no-hide-descendants' : 'auto'}
-        >
-          <FlatList
-            ref={list}
-            renderScrollComponent={renderChatHistoryScroll}
-            testID="chat-history"
-            scrollEnabled={!seekingVoice}
-            style={{ flex: 1 }}
-            contentContainerStyle={s.history}
-            inverted
-            data={shown}
-            keyExtractor={(message) => outbox.messageKey(message)}
-            keyboardShouldPersistTaps="handled"
-            onScrollBeginDrag={cancelPositioning}
-            onLayout={() => {
-              tailFollow.layout();
-              mentionVisibility.schedule();
-            }}
-            scrollEventThrottle={16}
-            onViewableItemsChanged={onViewableItemsChanged}
-            viewabilityConfig={readViewabilityConfig}
-            maintainVisibleContentPosition={{
-              minIndexForVisible: 0,
-              // Inverted history has its live bottom at offset zero. Let Android
-              // check the offset before anchoring the old bubble after insertion.
-              ...(Platform.OS === 'android' &&
-              focused &&
-              !openingHistory &&
-              !jumpTarget &&
-              !seekingVoice &&
-              search === null &&
-              !(jumpWindow?.hasMoreAfter ?? hasNewer(id ?? ''))
-                ? { autoscrollToTopThreshold: 1 }
-                : {}),
-            }}
-            onEndReached={() => void expandWindow(true)}
-            onEndReachedThreshold={0.5}
-            onStartReached={() => void expandWindow(false)}
-            onStartReachedThreshold={0.5}
-            onScroll={({ nativeEvent }) => {
-              mentionVisibility.schedule();
-              const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-              historyMetrics.current = {
-                offset: contentOffset.y,
-                height: contentSize.height,
-                viewport: layoutMeasurement.height,
-              };
-              // Hide as soon as the user reaches the bottom area, without
-              // waiting for the last pixels of Android's momentum to settle.
-              // A wider reveal threshold also avoids flicker near the bottom.
-              setAwayFromBottom((away) => contentOffset.y > (away ? 24 : 72));
-              loadVisibleEdges();
-            }}
-            onContentSizeChange={(_width, height) => {
-              mentionVisibility.schedule();
-              historyMetrics.current.height = height;
-              tailFollow.layout();
-              loadVisibleEdges();
-            }}
-            onScrollToIndexFailed={({ index, averageItemLength }) => {
-              const target = scrollTarget.current;
-              if (!target || target.index !== index) return;
-              list.current?.scrollToOffset({ offset: averageItemLength * index, animated: false });
-              clearTimeout(scrollTimer.current);
-              if (++target.attempts <= 12)
-                scrollTimer.current = setTimeout(() => {
-                  if (scrollTarget.current === target)
-                    list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
-                }, 150);
-              else {
-                scrollTarget.current = null;
-                setJumpTarget(null);
-                initialReadTarget.current = null;
-                setOpeningHistory(false);
-                setError('Could not scroll to the message. Tap the reply to try again.');
-              }
-            }}
-            ListFooterComponent={
-              <View style={{ alignItems: 'center', padding: 14, gap: 10 }}>
-                {loadingHistory && (
-                  <ActivityIndicator
-                    accessibilityLabel="Loading more messages"
-                    color={colors.blue}
-                  />
-                )}
-                {!history.length && (
-                  <Text style={s.emptyText}>
-                    Say hello. This is the start of your conversation.
-                  </Text>
-                )}
-                {search !== null && !shown.length && (
-                  <Text style={s.emptyText}>No matching messages.</Text>
-                )}
-              </View>
-            }
-            renderItem={({ item: message, index }) => {
-              const mine = message.senderId === session!.user.id;
-              const mediaMetadata = messageMedia(message);
-              const gifMetadata = messageGif(message);
-              const visualMedia = ['image', 'gif', 'video'].includes(
-                message.upload?.type ?? message.attachment?.type ?? '',
-              );
-              const hasMediaHeader =
-                (!mine && chat.type === 'group') ||
-                !!message.forwardedFrom ||
-                !!message.replyToMessageId;
-              const older = shown[index + 1];
-              const dateStart =
-                !older ||
-                new Date(older.createdAt).toDateString() !==
-                  new Date(message.createdAt).toDateString();
-              const reactions = EMOJIS.map((emoji) => ({
-                emoji,
-                selected: message.reactions?.some(
-                  (reaction) => reaction.emoji === emoji && reaction.userId === session!.user.id,
-                ),
-                count:
-                  message.reactions?.filter((reaction) => reaction.emoji === emoji).length ?? 0,
-              })).filter((entry) => entry.count);
-              const messageMeta = (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Message actions"
-                  testID={`message-meta-${message.id}`}
-                  onPress={(event) => openMessageMenu(message, event)}
-                  onLongPress={(event) => openMessageMenu(message, event)}
-                  style={visualMedia && s.mediaMeta}
-                >
-                  <View style={[s.meta, visualMedia && { marginTop: 0 }]}>
-                    <Text style={[s.time, visualMedia && s.mediaTime]}>
-                      {message.isEdited ? 'edited ' : ''}
-                      {timeLabel(message.createdAt)}
-                    </Text>
-                    {mine && (
-                      <View
-                        testID={`message-status-${message.id}`}
-                        accessible
-                        accessibilityLabel={
-                          message.delivery === 'sending'
-                            ? 'Sending message'
-                            : message.delivery === 'failed'
-                              ? 'Message failed to send'
-                              : seenByAnotherMember(message, session!.user.id, receiptPositions)
-                                ? 'Message seen'
-                                : 'Message sent'
-                        }
-                      >
-                        {message.delivery === 'failed' ? (
-                          <Text style={{ color: '#E53935', fontWeight: '800', fontSize: 15 }}>
-                            !
-                          </Text>
-                        ) : (
-                          <Icon
-                            name={
-                              message.delivery === 'sending'
-                                ? 'time-outline'
-                                : seenByAnotherMember(message, session!.user.id, receiptPositions)
-                                  ? 'checkmark-done'
-                                  : 'checkmark'
-                            }
-                            size={15}
-                            color={
-                              visualMedia
-                                ? 'white'
-                                : message.delivery === 'sending'
-                                  ? colors.muted
-                                  : colors.outgoingMeta
-                            }
-                          />
-                        )}
-                      </View>
-                    )}
-                  </View>
-                </Pressable>
-              );
-              return (
-                <View>
-                  {dateStart && (
-                    <View style={s.date}>
-                      <Text style={s.dateText}>
-                        {new Date(message.createdAt).toLocaleDateString([], {
-                          month: 'long',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
-                      </Text>
-                    </View>
-                  )}
-                  <SwipeToReply
-                    messageId={message.id}
-                    disabled={!!message.delivery || voiceActive || !focused}
-                    onReply={() => {
-                      setEditing(null);
-                      setReplyTo(message);
-                      setActionsVisible(false);
-                    }}
-                  >
-                    <Pressable
-                      accessible={false}
-                      ref={(view) => mentionVisibility.register(message.id, view)}
-                      testID={`message-row-${message.id}`}
-                      onPress={(event) => openMessageMenu(message, event)}
-                      onLongPress={(event) => openMessageMenu(message, event)}
-                      {...(Platform.OS === 'web'
-                        ? {
-                            onContextMenu: (event: GestureResponderEvent) => {
-                              event.preventDefault();
-                              openMessageMenu(message, event);
-                            },
-                          }
-                        : {})}
-                      style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}
-                    >
-                      {!mine && chat.type === 'group' && (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`View ${profileName(profiles[message.senderId])} profile`}
-                          onPress={(event) => {
-                            event.stopPropagation();
-                            setProfileUserId(message.senderId);
-                          }}
-                          style={{
-                            marginRight: 8,
-                            alignSelf: 'flex-end',
-                            minWidth: 44,
-                            minHeight: 44,
-                            justifyContent: 'flex-end',
-                            alignItems: 'center',
-                          }}
-                        >
-                          <Avatar
-                            name={profileName(profiles[message.senderId])}
-                            uri={profiles[message.senderId]?.avatarUrl ?? undefined}
-                            online={profiles[message.senderId]?.online}
-                            size={32}
-                          />
-                        </Pressable>
-                      )}
-                      <View
-                        testID={`message-${message.id}`}
-                        style={[
-                          s.bubble,
-                          mine ? s.outgoing : s.incoming,
-                          visualMedia && s.mediaBubble,
-                          highlighted === message.id && { backgroundColor: colors.highlight },
-                        ]}
-                      >
-                        <MessageBubbleContent
-                          visualMedia={visualMedia}
-                          meta={messageMeta}
-                          header={
-                            hasMediaHeader && (
-                              <>
-                                {!mine && chat.type === 'group' && (
-                                  <Text style={s.sender}>
-                                    {profileName(profiles[message.senderId])}
-                                  </Text>
-                                )}
-                                {!!message.forwardedFrom && (
-                                  <Text style={s.forwarded}>
-                                    Forwarded from{' '}
-                                    {profileName(profiles[message.forwardedFrom.senderId])}
-                                  </Text>
-                                )}
-                                {!!message.replyToMessageId && (
-                                  <ReplyPreview
-                                    conversationId={id}
-                                    messageId={message.replyToMessageId}
-                                    onJump={(target) => void jumpToMessage(target)}
-                                  />
-                                )}
-                              </>
-                            )
-                          }
-                          caption={
-                            !!message.text && (
-                              <MessageText
-                                text={message.text}
-                                style={s.messageText}
-                                onError={setError}
-                                onOpenUsername={(username) => void openUsername(username)}
-                                onMessagePress={(event) => openMessageMenu(message, event)}
-                              />
-                            )
-                          }
-                          reactions={
-                            !!reactions.length && (
-                              <View style={s.reactions}>
-                                {reactions.map((reaction) => (
-                                  <Pressable
-                                    key={reaction.emoji}
-                                    accessibilityRole="button"
-                                    accessibilityLabel={`${reaction.selected ? 'Remove' : 'Add'} ${reaction.emoji} reaction`}
-                                    aria-selected={!!reaction.selected}
-                                    accessibilityState={{
-                                      selected: !!reaction.selected,
-                                      disabled: busy,
-                                    }}
-                                    disabled={busy}
-                                    onPress={(event) => {
-                                      event.stopPropagation();
-                                      void react(message, reaction.emoji);
-                                    }}
-                                    style={[s.reaction, reaction.selected && s.reactionSelected]}
-                                  >
-                                    <Text style={s.reactionText}>
-                                      {reaction.emoji} {reaction.count}
-                                    </Text>
-                                  </Pressable>
-                                ))}
-                              </View>
-                            )
-                          }
-                        >
-                          {message.upload ? (
-                            <UploadMessage
-                              upload={message.upload}
-                              outbox={outbox}
-                              localId={message.localId!}
-                              failed={message.delivery === 'failed'}
-                              onCancel={() => outbox.cancel(message.localId!)}
-                              onRetry={() => outbox.retry(message.localId!)}
-                            />
-                          ) : message.attachment?.type === 'voice' ||
-                            message.attachment?.type === 'music' ||
-                            message.attachment?.type === 'audio' ? (
-                            <VoiceMessage
-                              kind={message.attachment.type}
-                              onSeekingChange={onVoiceSeekingChange}
-                              conversationId={id}
-                              senderId={message.senderId}
-                              mediaId={message.attachment.mediaId}
-                              metadata={mediaMetadata}
-                              active={
-                                focused &&
-                                !voiceActive &&
-                                !gifs &&
-                                visibleMessages.has(outbox.messageKey(message))
-                              }
-                              onOptions={(event) => openMessageMenu(message, event)}
-                              onError={setError}
-                            />
-                          ) : message.attachment?.type === 'document' ? (
-                            <DocumentMessage
-                              conversationId={id}
-                              mediaId={message.attachment.mediaId}
-                              initialMetadata={mediaMetadata}
-                              active={focused && visibleMessages.has(outbox.messageKey(message))}
-                              onOptions={(event) => openMessageMenu(message, event)}
-                              onError={setError}
-                            />
-                          ) : message.attachment?.type === 'video' ? (
-                            <VideoCard
-                              conversationId={id}
-                              mediaId={message.attachment.mediaId}
-                              initialMetadata={mediaMetadata}
-                              active={focused && visibleMessages.has(outbox.messageKey(message))}
-                              onPlay={() => {
-                                if (message.attachment?.type !== 'video') return;
-                                voicePlayback.pause();
-                                viewers.openVideo({
-                                  conversationId: id,
-                                  mediaId: message.attachment.mediaId,
-                                  title,
-                                });
-                              }}
-                              onOptions={(event) => openMessageMenu(message, event)}
-                              onError={setError}
-                            />
-                          ) : message.attachment ? (
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel={`Open ${message.attachment.type} attachment`}
-                              onPress={(event) => {
-                                if (message.attachment?.type === 'image') {
-                                  event.stopPropagation();
-                                  viewers.openImage({
-                                    conversationId: id,
-                                    mediaId: message.attachment.mediaId,
-                                    title: profileName(profiles[message.senderId]),
-                                    createdAt: message.createdAt,
-                                    caption: message.text,
-                                    onForward: () => {
-                                      setActionMessage(message);
-                                      setForward(true);
-                                    },
-                                  });
-                                } else if (message.attachment?.type === 'gif') {
-                                  event.stopPropagation();
-                                  viewers.openGif({
-                                    gifId: message.attachment.gifId,
-                                    title: profileName(profiles[message.senderId]),
-                                    createdAt: message.createdAt,
-                                    caption: message.text,
-                                    onForward: () => {
-                                      setActionMessage(message);
-                                      setForward(true);
-                                    },
-                                  });
-                                } else openMessageMenu(message, event);
-                              }}
-                              onLongPress={(event) => openMessageMenu(message, event)}
-                              style={s.attachment}
-                            >
-                              {message.attachment.type === 'image' && (
-                                <AttachmentImage
-                                  conversationId={id}
-                                  mediaId={message.attachment.mediaId}
-                                  initialMetadata={mediaMetadata}
-                                />
-                              )}
-                              {message.attachment.type === 'gif' && (
-                                <GifPreview
-                                  gifId={message.attachment.gifId}
-                                  initialMetadata={gifMetadata}
-                                  active={
-                                    focused &&
-                                    !gifs &&
-                                    visibleMessages.has(outbox.messageKey(message))
-                                  }
-                                />
-                              )}
-                            </Pressable>
-                          ) : null}
-                        </MessageBubbleContent>
-                      </View>
-                    </Pressable>
-                  </SwipeToReply>
-                </View>
-              );
-            }}
-          />
-        </View>
-        {openingHistory && (
-          <View
-            style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}
-          >
-            <ActivityIndicator
-              testID="chat-history-loading"
-              accessibilityLabel="Loading conversation"
-              color={colors.blue}
+    <KeyboardAvoidingView
+      style={[s.root, { flexDirection: 'row' }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={s.header}>
+          {!wide && (
+            <IconButton
+              name="arrow-back"
+              label="Back to chats"
+              onPress={() => router.replace('/')}
             />
-          </View>
-        )}
-        <ScrollToLatestButton
-          mention
-          raised
-          visible={!openingHistory && search === null && !!chat?.unseenMentions?.length}
-          unreadCount={chat?.unseenMentions?.length ?? 0}
-          disabled={jumping || seekingVoice || mentionBusy}
-          onPress={() => void jumpToMention()}
-        />
-        <ScrollToLatestButton
-          visible={
-            !openingHistory &&
-            search === null &&
-            (awayFromBottom || (jumpWindow?.hasMoreAfter ?? hasNewer(id ?? '')))
-          }
-          unreadCount={unread[id ?? ''] ?? 0}
-          disabled={jumping || seekingVoice || mentionBusy}
-          onPressIn={scrollLoadedLatest}
-          onPress={() => void showLatest()}
-        />
-      </View>
-      <View style={s.composerWrap}>
-        <Notice text={error} onDismiss={() => setError('')} />
-        {editing && (
-          <View style={s.pending} testID="edit-composer">
-            <Icon name="create-outline" color={colors.blue} />
+          )}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="View conversation details"
+            disabled={chat.type === 'private' && !peerId}
+            onPress={() => {
+              if (chat.type === 'private') {
+                if (peerId) setProfileUserId(peerId);
+              } else setDetails(true);
+            }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}
+          >
+            <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={40} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.blue, fontWeight: '600' }}>Edit message</Text>
-              <Text numberOfLines={1} style={{ color: colors.dark }}>
-                {editing.text || 'Attachment caption'}
+              <Text numberOfLines={1} style={s.headerTitle}>
+                {title}
+              </Text>
+              <Text
+                style={[
+                  s.headerSubtitle,
+                  chat.type === 'private' && { color: peer?.online ? colors.blue : colors.muted },
+                ]}
+              >
+                {chat.type === 'group' ? `${members[id]?.length ?? 0} members` : peerPresence}
               </Text>
             </View>
-            <IconButton
-              name="close"
-              label="Cancel edit"
-              disabled={busy}
-              onPress={() => setEditing(null)}
-            />
-          </View>
-        )}
-        {!editing && replyTo && (
-          <View style={s.pending} testID="reply-composer">
-            <View style={{ flex: 1 }}>
-              <ReplyQuote
-                message={messageCache.peek(replyTo.conversationId, replyTo.id) ?? replyTo}
-              />
-            </View>
-            <IconButton name="close" label="Cancel reply" onPress={() => setReplyTo(null)} />
-          </View>
-        )}
-        {editing && (
-          <MessageComposer
-            key={editing.id}
-            initialText={editing.text ?? ''}
-            editing
-            active={focused}
-            busy={busy}
-            hasAttachment={false}
-            onSend={(text) => {
-              void saveEdit(text);
-              return false;
-            }}
-            onSendVoice={sendVoice}
-            onAttach={() => {}}
-            onError={setError}
-            onVoiceActive={() => {}}
+          </Pressable>
+          <IconButton
+            name="search-outline"
+            label="Search messages"
+            onPress={() => changeSearch(search === null ? '' : null)}
           />
-        )}
-        <View style={editing ? { display: 'none' } : undefined}>
-          <MessageComposer
-            active={focused && !editing}
-            busy={busy}
-            hasAttachment={false}
-            onSend={(text) => send(undefined, text)}
-            onSendVoice={sendVoice}
-            onAttach={() => void upload().catch((err) => setError(err.message))}
-            onPickerVisibilityChange={setGifs}
-            onSendGif={(gifId) => send(gifId)}
-            onError={setError}
-            onVoiceActive={(active) => {
-              if (active) voicePlayback.pause();
-              setVoiceActive(active);
+          <IconButton
+            name="ellipsis-vertical"
+            label="Conversation details"
+            disabled={chat.type === 'private' && !peerId}
+            onPress={() => {
+              if (chat.type === 'private') {
+                if (peerId) setProfileUserId(peerId);
+              } else setDetails(true);
             }}
           />
         </View>
-      </View>
-      <GroupDialog
-        chat={chat}
-        visible={focused && details}
-        onClose={() => setDetails(false)}
-        onViewUser={(userId) => {
-          setDetails(false);
-          setProfileUserId(userId);
-        }}
-      />
-      {focused && profileUserId && (
-        <UserProfileDialog
-          key={profileUserId}
-          userId={profileUserId}
-          onClose={() => setProfileUserId(null)}
-        />
-      )}
-      <Dialog visible={focused && forward} title="Forward to…" onClose={() => setForward(false)}>
-        {conversations.map((destination) => (
-          <Button
-            key={destination.id}
-            title={conversationName(
-              destination,
-              profiles[
-                members[destination.id]?.find((member) => member.userId !== session!.user.id)
-                  ?.userId ?? ''
-              ],
-            )}
-            secondary
-            disabled={busy}
-            onPress={() => {
-              setBusy(true);
-              void api
-                .post<{ message: Message }>(`/api/conversations/${destination.id}/forward`, {
-                  messageId: actionMessage!.id,
-                })
-                .then(({ message }) => {
-                  acceptMessage(message);
-                  setForward(false);
-                  router.push(`/chat/${destination.id}`);
-                })
-                .catch((err) => {
-                  setError(err.message);
-                  setForward(false);
-                })
-                .finally(() => setBusy(false));
+        {active && <VoiceMiniPlayer />}
+        {!wide && searchOpen && <Notice text={error} onDismiss={() => setError('')} />}
+        {!wide && searchOpen && (
+          <SearchInput
+            value={search}
+            onChange={changeSearch}
+            onSubmit={() => {
+              void runSearch();
+            }}
+            onClose={() => changeSearch(null)}
+          />
+        )}
+        {jumping && (
+          <ActivityIndicator
+            accessibilityLabel="Loading replied message"
+            color={colors.blue}
+            style={{ padding: 8 }}
+          />
+        )}
+        <View style={{ flex: 1, minHeight: 0 }}>
+          <View
+            ref={(view) => mentionVisibility.setViewport(view)}
+            collapsable={false}
+            testID="positioned-chat-history"
+            style={[s.historyViewport, { opacity: openingHistory || mobileSearchList ? 0 : 1 }]}
+            pointerEvents={openingHistory || mobileSearchList ? 'none' : 'auto'}
+            accessibilityElementsHidden={openingHistory || mobileSearchList}
+            importantForAccessibility={
+              openingHistory || mobileSearchList ? 'no-hide-descendants' : 'auto'
+            }
+          >
+            <FlatList
+              ref={list}
+              renderScrollComponent={renderChatHistoryScroll}
+              testID="chat-history"
+              scrollEnabled={!seekingVoice}
+              style={{ flex: 1 }}
+              contentContainerStyle={s.history}
+              inverted
+              data={shown}
+              keyExtractor={(message) => outbox.messageKey(message)}
+              keyboardShouldPersistTaps="handled"
+              onScrollBeginDrag={cancelPositioning}
+              onLayout={() => {
+                tailFollow.layout();
+                mentionVisibility.schedule();
+              }}
+              scrollEventThrottle={16}
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={readViewabilityConfig}
+              maintainVisibleContentPosition={{
+                minIndexForVisible: 0,
+                // Inverted history has its live bottom at offset zero. Let Android
+                // check the offset before anchoring the old bubble after insertion.
+                ...(Platform.OS === 'android' &&
+                focused &&
+                !openingHistory &&
+                !jumpTarget &&
+                !seekingVoice &&
+                search === null &&
+                !(jumpWindow?.hasMoreAfter ?? hasNewer(id ?? ''))
+                  ? { autoscrollToTopThreshold: 1 }
+                  : {}),
+              }}
+              onEndReached={() => void expandWindow(true)}
+              onEndReachedThreshold={0.5}
+              onStartReached={() => void expandWindow(false)}
+              onStartReachedThreshold={0.5}
+              onScroll={({ nativeEvent }) => {
+                mentionVisibility.schedule();
+                const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+                historyMetrics.current = {
+                  offset: contentOffset.y,
+                  height: contentSize.height,
+                  viewport: layoutMeasurement.height,
+                };
+                // Hide as soon as the user reaches the bottom area, without
+                // waiting for the last pixels of Android's momentum to settle.
+                // A wider reveal threshold also avoids flicker near the bottom.
+                setAwayFromBottom((away) => contentOffset.y > (away ? 24 : 72));
+                loadVisibleEdges();
+              }}
+              onContentSizeChange={(_width, height) => {
+                mentionVisibility.schedule();
+                historyMetrics.current.height = height;
+                tailFollow.layout();
+                loadVisibleEdges();
+              }}
+              onScrollToIndexFailed={({ index, averageItemLength }) => {
+                const target = scrollTarget.current;
+                if (!target || target.index !== index) return;
+                list.current?.scrollToOffset({
+                  offset: averageItemLength * index,
+                  animated: false,
+                });
+                clearTimeout(scrollTimer.current);
+                if (++target.attempts <= 12)
+                  scrollTimer.current = setTimeout(() => {
+                    if (scrollTarget.current === target)
+                      list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
+                  }, 150);
+                else {
+                  scrollTarget.current = null;
+                  setJumpTarget(null);
+                  initialReadTarget.current = null;
+                  setOpeningHistory(false);
+                  setError('Could not scroll to the message. Tap the reply to try again.');
+                }
+              }}
+              ListFooterComponent={
+                <View style={{ alignItems: 'center', padding: 14, gap: 10 }}>
+                  {loadingHistory && (
+                    <ActivityIndicator
+                      accessibilityLabel="Loading more messages"
+                      color={colors.blue}
+                    />
+                  )}
+                  {!history.length && (
+                    <Text style={s.emptyText}>
+                      Say hello. This is the start of your conversation.
+                    </Text>
+                  )}
+                </View>
+              }
+              renderItem={({ item: message, index }) => {
+                const mine = message.senderId === session!.user.id;
+                const mediaMetadata = messageMedia(message);
+                const gifMetadata = messageGif(message);
+                const visualMedia = ['image', 'gif', 'video'].includes(
+                  message.upload?.type ?? message.attachment?.type ?? '',
+                );
+                const hasMediaHeader =
+                  (!mine && chat.type === 'group') ||
+                  !!message.forwardedFrom ||
+                  !!message.replyToMessageId;
+                const older = shown[index + 1];
+                const dateStart =
+                  !older ||
+                  new Date(older.createdAt).toDateString() !==
+                    new Date(message.createdAt).toDateString();
+                const reactions = EMOJIS.map((emoji) => ({
+                  emoji,
+                  selected: message.reactions?.some(
+                    (reaction) => reaction.emoji === emoji && reaction.userId === session!.user.id,
+                  ),
+                  count:
+                    message.reactions?.filter((reaction) => reaction.emoji === emoji).length ?? 0,
+                })).filter((entry) => entry.count);
+                const messageMeta = (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Message actions"
+                    testID={`message-meta-${message.id}`}
+                    onPress={(event) => openMessageMenu(message, event)}
+                    onLongPress={(event) => openMessageMenu(message, event)}
+                    style={visualMedia && s.mediaMeta}
+                  >
+                    <View style={[s.meta, visualMedia && { marginTop: 0 }]}>
+                      <Text style={[s.time, visualMedia && s.mediaTime]}>
+                        {message.isEdited ? 'edited ' : ''}
+                        {timeLabel(message.createdAt)}
+                      </Text>
+                      {mine && (
+                        <View
+                          testID={`message-status-${message.id}`}
+                          accessible
+                          accessibilityLabel={
+                            message.delivery === 'sending'
+                              ? 'Sending message'
+                              : message.delivery === 'failed'
+                                ? 'Message failed to send'
+                                : seenByAnotherMember(message, session!.user.id, receiptPositions)
+                                  ? 'Message seen'
+                                  : 'Message sent'
+                          }
+                        >
+                          {message.delivery === 'failed' ? (
+                            <Text style={{ color: '#E53935', fontWeight: '800', fontSize: 15 }}>
+                              !
+                            </Text>
+                          ) : (
+                            <Icon
+                              name={
+                                message.delivery === 'sending'
+                                  ? 'time-outline'
+                                  : seenByAnotherMember(message, session!.user.id, receiptPositions)
+                                    ? 'checkmark-done'
+                                    : 'checkmark'
+                              }
+                              size={15}
+                              color={
+                                visualMedia
+                                  ? 'white'
+                                  : message.delivery === 'sending'
+                                    ? colors.muted
+                                    : colors.outgoingMeta
+                              }
+                            />
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  </Pressable>
+                );
+                return (
+                  <View>
+                    {dateStart && (
+                      <View style={s.date}>
+                        <Text style={s.dateText}>
+                          {new Date(message.createdAt).toLocaleDateString([], {
+                            month: 'long',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </View>
+                    )}
+                    <SwipeToReply
+                      messageId={message.id}
+                      disabled={!!message.delivery || voiceActive || !focused}
+                      onReply={() => {
+                        setEditing(null);
+                        setReplyTo(message);
+                        setActionsVisible(false);
+                      }}
+                    >
+                      <Pressable
+                        accessible={false}
+                        ref={(view) => mentionVisibility.register(message.id, view)}
+                        testID={`message-row-${message.id}`}
+                        onPress={(event) => openMessageMenu(message, event)}
+                        onLongPress={(event) => openMessageMenu(message, event)}
+                        {...(Platform.OS === 'web'
+                          ? {
+                              onContextMenu: (event: GestureResponderEvent) => {
+                                event.preventDefault();
+                                openMessageMenu(message, event);
+                              },
+                            }
+                          : {})}
+                        style={[s.messageRow, mine && { justifyContent: 'flex-end' }]}
+                      >
+                        {!mine && chat.type === 'group' && (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`View ${profileName(profiles[message.senderId])} profile`}
+                            onPress={(event) => {
+                              event.stopPropagation();
+                              setProfileUserId(message.senderId);
+                            }}
+                            style={{
+                              marginRight: 8,
+                              alignSelf: 'flex-end',
+                              minWidth: 44,
+                              minHeight: 44,
+                              justifyContent: 'flex-end',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Avatar
+                              name={profileName(profiles[message.senderId])}
+                              uri={profiles[message.senderId]?.avatarUrl ?? undefined}
+                              online={profiles[message.senderId]?.online}
+                              size={32}
+                            />
+                          </Pressable>
+                        )}
+                        <View
+                          testID={`message-${message.id}`}
+                          style={[
+                            s.bubble,
+                            mine ? s.outgoing : s.incoming,
+                            visualMedia && s.mediaBubble,
+                            (highlighted === message.id ||
+                              (!wide &&
+                                searchOpen &&
+                                searchState.messages[searchIndex]?.id === message.id)) && {
+                              backgroundColor: colors.highlight,
+                            },
+                          ]}
+                        >
+                          <MessageBubbleContent
+                            visualMedia={visualMedia}
+                            meta={messageMeta}
+                            header={
+                              hasMediaHeader && (
+                                <>
+                                  {!mine && chat.type === 'group' && (
+                                    <Text style={s.sender}>
+                                      {profileName(profiles[message.senderId])}
+                                    </Text>
+                                  )}
+                                  {!!message.forwardedFrom && (
+                                    <Text style={s.forwarded}>
+                                      Forwarded from{' '}
+                                      {profileName(profiles[message.forwardedFrom.senderId])}
+                                    </Text>
+                                  )}
+                                  {!!message.replyToMessageId && (
+                                    <ReplyPreview
+                                      conversationId={id}
+                                      messageId={message.replyToMessageId}
+                                      onJump={(target) => void jumpToMessage(target)}
+                                    />
+                                  )}
+                                </>
+                              )
+                            }
+                            caption={
+                              !!message.text && (
+                                <MessageText
+                                  text={message.text}
+                                  style={s.messageText}
+                                  onError={setError}
+                                  onOpenUsername={(username) => void openUsername(username)}
+                                  onMessagePress={(event) => openMessageMenu(message, event)}
+                                />
+                              )
+                            }
+                            reactions={
+                              !!reactions.length && (
+                                <View style={s.reactions}>
+                                  {reactions.map((reaction) => (
+                                    <Pressable
+                                      key={reaction.emoji}
+                                      accessibilityRole="button"
+                                      accessibilityLabel={`${reaction.selected ? 'Remove' : 'Add'} ${reaction.emoji} reaction`}
+                                      aria-selected={!!reaction.selected}
+                                      accessibilityState={{
+                                        selected: !!reaction.selected,
+                                        disabled: busy,
+                                      }}
+                                      disabled={busy}
+                                      onPress={(event) => {
+                                        event.stopPropagation();
+                                        void react(message, reaction.emoji);
+                                      }}
+                                      style={[s.reaction, reaction.selected && s.reactionSelected]}
+                                    >
+                                      <Text style={s.reactionText}>
+                                        {reaction.emoji} {reaction.count}
+                                      </Text>
+                                    </Pressable>
+                                  ))}
+                                </View>
+                              )
+                            }
+                          >
+                            {message.upload ? (
+                              <UploadMessage
+                                upload={message.upload}
+                                outbox={outbox}
+                                localId={message.localId!}
+                                failed={message.delivery === 'failed'}
+                                onCancel={() => outbox.cancel(message.localId!)}
+                                onRetry={() => outbox.retry(message.localId!)}
+                              />
+                            ) : message.attachment?.type === 'voice' ||
+                              message.attachment?.type === 'music' ||
+                              message.attachment?.type === 'audio' ? (
+                              <VoiceMessage
+                                kind={message.attachment.type}
+                                onSeekingChange={onVoiceSeekingChange}
+                                conversationId={id}
+                                senderId={message.senderId}
+                                mediaId={message.attachment.mediaId}
+                                metadata={mediaMetadata}
+                                active={
+                                  focused &&
+                                  !mobileSearchList &&
+                                  !voiceActive &&
+                                  !gifs &&
+                                  visibleMessages.has(outbox.messageKey(message))
+                                }
+                                onOptions={(event) => openMessageMenu(message, event)}
+                                onError={setError}
+                              />
+                            ) : message.attachment?.type === 'document' ? (
+                              <DocumentMessage
+                                conversationId={id}
+                                mediaId={message.attachment.mediaId}
+                                initialMetadata={mediaMetadata}
+                                active={
+                                  focused &&
+                                  !mobileSearchList &&
+                                  visibleMessages.has(outbox.messageKey(message))
+                                }
+                                onOptions={(event) => openMessageMenu(message, event)}
+                                onError={setError}
+                              />
+                            ) : message.attachment?.type === 'video' ? (
+                              <VideoCard
+                                conversationId={id}
+                                mediaId={message.attachment.mediaId}
+                                initialMetadata={mediaMetadata}
+                                active={
+                                  focused &&
+                                  !mobileSearchList &&
+                                  visibleMessages.has(outbox.messageKey(message))
+                                }
+                                onPlay={() => {
+                                  if (message.attachment?.type !== 'video') return;
+                                  voicePlayback.pause();
+                                  viewers.openVideo({
+                                    conversationId: id,
+                                    mediaId: message.attachment.mediaId,
+                                    title,
+                                  });
+                                }}
+                                onOptions={(event) => openMessageMenu(message, event)}
+                                onError={setError}
+                              />
+                            ) : message.attachment ? (
+                              <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel={`Open ${message.attachment.type} attachment`}
+                                onPress={(event) => {
+                                  if (message.attachment?.type === 'image') {
+                                    event.stopPropagation();
+                                    viewers.openImage({
+                                      conversationId: id,
+                                      mediaId: message.attachment.mediaId,
+                                      title: profileName(profiles[message.senderId]),
+                                      createdAt: message.createdAt,
+                                      caption: message.text,
+                                      onForward: () => {
+                                        setActionMessage(message);
+                                        setForward(true);
+                                      },
+                                    });
+                                  } else if (message.attachment?.type === 'gif') {
+                                    event.stopPropagation();
+                                    viewers.openGif({
+                                      gifId: message.attachment.gifId,
+                                      title: profileName(profiles[message.senderId]),
+                                      createdAt: message.createdAt,
+                                      caption: message.text,
+                                      onForward: () => {
+                                        setActionMessage(message);
+                                        setForward(true);
+                                      },
+                                    });
+                                  } else openMessageMenu(message, event);
+                                }}
+                                onLongPress={(event) => openMessageMenu(message, event)}
+                                style={s.attachment}
+                              >
+                                {message.attachment.type === 'image' && (
+                                  <AttachmentImage
+                                    conversationId={id}
+                                    mediaId={message.attachment.mediaId}
+                                    initialMetadata={mediaMetadata}
+                                  />
+                                )}
+                                {message.attachment.type === 'gif' && (
+                                  <GifPreview
+                                    gifId={message.attachment.gifId}
+                                    initialMetadata={gifMetadata}
+                                    active={
+                                      focused &&
+                                      !mobileSearchList &&
+                                      !gifs &&
+                                      visibleMessages.has(outbox.messageKey(message))
+                                    }
+                                  />
+                                )}
+                              </Pressable>
+                            ) : null}
+                          </MessageBubbleContent>
+                        </View>
+                      </Pressable>
+                    </SwipeToReply>
+                  </View>
+                );
+              }}
+            />
+          </View>
+          {mobileSearchList && <View style={StyleSheet.absoluteFill}>{searchResults}</View>}
+          {openingHistory && !mobileSearchList && (
+            <View
+              style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}
+            >
+              <ActivityIndicator
+                testID="chat-history-loading"
+                accessibilityLabel="Loading conversation"
+                color={colors.blue}
+              />
+            </View>
+          )}
+          <ScrollToLatestButton
+            mention
+            raised
+            visible={
+              !openingHistory &&
+              !mobileSearchList &&
+              (wide || !searchOpen) &&
+              !!chat?.unseenMentions?.length
+            }
+            unreadCount={chat?.unseenMentions?.length ?? 0}
+            disabled={jumping || seekingVoice || mentionBusy}
+            onPress={() => void jumpToMention()}
+          />
+          <ScrollToLatestButton
+            visible={
+              !openingHistory &&
+              (wide || !searchOpen) &&
+              (awayFromBottom || (jumpWindow?.hasMoreAfter ?? hasNewer(id ?? '')))
+            }
+            unreadCount={unread[id ?? ''] ?? 0}
+            disabled={jumping || seekingVoice || mentionBusy}
+            onPressIn={scrollLoadedLatest}
+            onPress={() => void showLatest()}
+          />
+        </View>
+        {!wide && searchOpen && (
+          <SearchNavigation
+            state={searchState}
+            index={searchIndex}
+            list={searchList}
+            busy={jumping}
+            onList={() => {
+              if (searchList && searchState.messages[searchIndex])
+                void selectSearchResult(searchState.messages[searchIndex], searchIndex);
+              else setSearchList(true);
+            }}
+            onOlder={() => {
+              void olderSearchResult();
+            }}
+            onNewer={() => {
+              if (searchState.messages[searchIndex - 1])
+                void selectSearchResult(searchState.messages[searchIndex - 1], searchIndex - 1);
+            }}
+            onRetry={() => {
+              void retrySearch();
             }}
           />
-        ))}
-      </Dialog>
-      <MessageMenu
-        anchor={focused && actionsVisible ? actionAnchor : null}
-        actions={messageActions}
-        selected={EMOJIS.filter((emoji) =>
-          actionMessage?.reactions?.some(
-            (reaction) => reaction.userId === session!.user.id && reaction.emoji === emoji,
-          ),
         )}
-        busy={busy}
-        onReact={(emoji) => {
-          if (actionsVisible && actionMessage) void react(actionMessage, emoji);
-        }}
-        onClose={() => setActionsVisible(false)}
-      />
+        <View style={[s.composerWrap, !wide && searchOpen && { display: 'none' }]}>
+          <Notice text={error} onDismiss={() => setError('')} />
+          {editing && (
+            <View style={s.pending} testID="edit-composer">
+              <Icon name="create-outline" color={colors.blue} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.blue, fontWeight: '600' }}>Edit message</Text>
+                <Text numberOfLines={1} style={{ color: colors.dark }}>
+                  {editing.text || 'Attachment caption'}
+                </Text>
+              </View>
+              <IconButton
+                name="close"
+                label="Cancel edit"
+                disabled={busy}
+                onPress={() => setEditing(null)}
+              />
+            </View>
+          )}
+          {!editing && replyTo && (
+            <View style={s.pending} testID="reply-composer">
+              <View style={{ flex: 1 }}>
+                <ReplyQuote
+                  message={messageCache.peek(replyTo.conversationId, replyTo.id) ?? replyTo}
+                />
+              </View>
+              <IconButton name="close" label="Cancel reply" onPress={() => setReplyTo(null)} />
+            </View>
+          )}
+          {editing && (
+            <MessageComposer
+              key={editing.id}
+              initialText={editing.text ?? ''}
+              editing
+              active={focused && (wide || !searchOpen)}
+              busy={busy}
+              hasAttachment={false}
+              onSend={(text) => {
+                void saveEdit(text);
+                return false;
+              }}
+              onSendVoice={sendVoice}
+              onAttach={() => {}}
+              onError={setError}
+              onVoiceActive={() => {}}
+            />
+          )}
+          <View style={editing ? { display: 'none' } : undefined}>
+            <MessageComposer
+              active={focused && !editing && (wide || !searchOpen)}
+              busy={busy}
+              hasAttachment={false}
+              onSend={(text) => send(undefined, text)}
+              onSendVoice={sendVoice}
+              onAttach={() => void upload().catch((err) => setError(err.message))}
+              onPickerVisibilityChange={setGifs}
+              onSendGif={(gifId) => send(gifId)}
+              onError={setError}
+              onVoiceActive={(active) => {
+                if (active) voicePlayback.pause();
+                setVoiceActive(active);
+              }}
+            />
+          </View>
+        </View>
+        <GroupDialog
+          chat={chat}
+          visible={focused && details}
+          onClose={() => setDetails(false)}
+          onViewUser={(userId) => {
+            setDetails(false);
+            setProfileUserId(userId);
+          }}
+        />
+        {focused && profileUserId && (
+          <UserProfileDialog
+            key={profileUserId}
+            userId={profileUserId}
+            onClose={() => setProfileUserId(null)}
+          />
+        )}
+        <Dialog visible={focused && forward} title="Forward to…" onClose={() => setForward(false)}>
+          {conversations.map((destination) => (
+            <Button
+              key={destination.id}
+              title={conversationName(
+                destination,
+                profiles[
+                  members[destination.id]?.find((member) => member.userId !== session!.user.id)
+                    ?.userId ?? ''
+                ],
+              )}
+              secondary
+              disabled={busy}
+              onPress={() => {
+                setBusy(true);
+                void api
+                  .post<{ message: Message }>(`/api/conversations/${destination.id}/forward`, {
+                    messageId: actionMessage!.id,
+                  })
+                  .then(({ message }) => {
+                    acceptMessage(message);
+                    setForward(false);
+                    router.push(`/chat/${destination.id}`);
+                  })
+                  .catch((err) => {
+                    setError(err.message);
+                    setForward(false);
+                  })
+                  .finally(() => setBusy(false));
+              }}
+            />
+          ))}
+        </Dialog>
+        <MessageMenu
+          anchor={focused && actionsVisible ? actionAnchor : null}
+          actions={messageActions}
+          selected={EMOJIS.filter((emoji) =>
+            actionMessage?.reactions?.some(
+              (reaction) => reaction.userId === session!.user.id && reaction.emoji === emoji,
+            ),
+          )}
+          busy={busy}
+          onReact={(emoji) => {
+            if (actionsVisible && actionMessage) void react(actionMessage, emoji);
+          }}
+          onClose={() => setActionsVisible(false)}
+        />
+      </View>
+      {wide && searchOpen && (
+        <View
+          testID="desktop-message-search"
+          style={{
+            width: 360,
+            borderLeftWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.surface,
+          }}
+        >
+          <View style={s.header}>
+            <IconButton
+              name="arrow-back"
+              label="Close message search"
+              onPress={() => changeSearch(null)}
+            />
+            <Text style={s.headerTitle}>Message Search</Text>
+          </View>
+          <SearchInput
+            value={search}
+            onChange={changeSearch}
+            onSubmit={() => {
+              void runSearch();
+            }}
+            onClose={() => changeSearch(null)}
+          />
+          {searchResults}
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -1555,12 +1724,6 @@ const useStyles = createThemedStyles((colors) => ({
   },
   headerTitle: { color: colors.dark, fontSize: 16, fontWeight: '600' },
   headerSubtitle: { color: colors.muted, fontSize: 12, marginTop: 2 },
-  search: {
-    backgroundColor: colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
   // Inverted rows create transformed layers; clip them below the header border.
   historyViewport: { flex: 1, minHeight: 0, overflow: 'hidden' },
   history: { paddingHorizontal: 20, paddingVertical: 14 },

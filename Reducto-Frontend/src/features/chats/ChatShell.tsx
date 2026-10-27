@@ -10,12 +10,14 @@ export default function ChatShell({ id, active }: { id?: string; active: boolean
   const { colors } = useTheme();
   const wide = useWindowDimensions().width >= 850;
   const { conversations } = useChats();
+  const [searchConversation, setSearchConversation] = useState<string | null>(null);
+  const sidebarVisible = wide && searchConversation !== id;
   const [visited, setVisited] = useState<string[]>([]);
   if (id && !visited.includes(id)) setVisited([...visited, id]);
   return (
     <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.surface }}>
       <RetainedLayer
-        active={active && (wide || !id)}
+        active={active && (sidebarVisible || !id)}
         style={
           wide
             ? {
@@ -29,7 +31,7 @@ export default function ChatShell({ id, active }: { id?: string; active: boolean
       >
         <ChatList showVoicePlayer={!id} />
       </RetainedLayer>
-      <View style={{ flex: 1, marginLeft: wide ? 360 : 0 }}>
+      <View style={{ flex: 1, marginLeft: sidebarVisible ? 360 : 0 }}>
         <RetainedLayer active={active && wide && !id}>
           <ChatView active={false} />
         </RetainedLayer>
@@ -41,7 +43,15 @@ export default function ChatShell({ id, active }: { id?: string; active: boolean
               testID={`conversation-${chatId}`}
               active={active && id === chatId}
             >
-              <ChatView id={chatId} active={active && id === chatId} />
+              <ChatView
+                id={chatId}
+                active={active && id === chatId}
+                onSearchVisibilityChange={(open) =>
+                  setSearchConversation((current) =>
+                    open ? chatId : current === chatId ? null : current,
+                  )
+                }
+              />
             </RetainedLayer>
           ))}
       </View>
