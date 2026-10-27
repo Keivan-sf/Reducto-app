@@ -40,6 +40,8 @@ export function ViewerLayer({
   return (
     <Modal
       visible={visible}
+      // The layer owns the black backdrop and fades over the chat, not Modal's default white.
+      transparent
       animationType="none"
       onRequestClose={onClose}
       statusBarTranslucent

@@ -5489,6 +5489,83 @@ test('image viewer recovers from a failed download using Retry image', async ({ 
   await expect(viewer.getByRole('img', { name: 'Full screen image' })).toBeVisible();
 });
 
+for (const kind of ['image', 'gif'] as const) {
+  test(`${kind} viewer fades over the dark chat without a white modal backdrop`, async ({
+    page,
+  }) => {
+    const mediaId = 'dark-viewer-media';
+    await page.addInitScript(() => localStorage.setItem('reducto-theme', 'dark'));
+    await mockApi(page, [
+      {
+        ...first,
+        attachment: kind === 'image' ? { type: kind, mediaId } : { type: kind, gifId: mediaId },
+      },
+    ]);
+    await page.route(`**/api/conversations/*/attachments/${mediaId}`, (route) =>
+      route.fulfill({
+        path: path.join(__dirname, '../fixtures/portrait.png'),
+        contentType: 'image/png',
+      }),
+    );
+    await page.route(`**/api/gifs/${mediaId}`, (route) =>
+      route.fulfill({
+        json: {
+          gif: {
+            id: mediaId,
+            width: 360,
+            height: 640,
+            fileSize: 1000,
+            playbackUrl: 'https://media.example/dark-viewer.mp4',
+          },
+        },
+      }),
+    );
+    await page.route('https://media.example/dark-viewer.mp4', (route) =>
+      route.fulfill({
+        path: path.join(__dirname, '../fixtures/portrait.mp4'),
+        contentType: 'video/mp4',
+      }),
+    );
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    const sampleTransition = () =>
+      page.evaluate(
+        () =>
+          new Promise<{ opacity: number; backdrop: string }[]>((resolve) => {
+            const samples: { opacity: number; backdrop: string }[] = [];
+            let seen = false;
+            const sample = () => {
+              const layer = document.querySelector('[data-testid="media-viewer-layer"]');
+              if (layer) {
+                seen = true;
+                const modal = layer.closest('[aria-modal="true"]')!;
+                samples.push({
+                  opacity: Number(getComputedStyle(layer).opacity),
+                  backdrop: getComputedStyle(modal).backgroundColor,
+                });
+              } else if (seen) {
+                resolve(samples);
+                return;
+              }
+              requestAnimationFrame(sample);
+            };
+            requestAnimationFrame(sample);
+          }),
+      );
+    // Observe every painted frame from mounting through dismissal, including both fades.
+    const transition = sampleTransition();
+    await page.getByRole('button', { name: `Open ${kind} attachment`, exact: true }).click();
+    await expect(page.getByTestId('media-viewer-layer')).toHaveCSS('opacity', '1');
+    await page.getByRole('button', { name: 'Back to conversation' }).click();
+    const samples = await transition;
+    const opaque = samples.findIndex(({ opacity }) => opacity === 1);
+    expect(samples.slice(0, opaque).some(({ opacity }) => opacity > 0 && opacity < 1)).toBe(true);
+    expect(samples.slice(opaque).some(({ opacity }) => opacity > 0 && opacity < 1)).toBe(true);
+    expect([...new Set(samples.map(({ backdrop }) => backdrop))]).toEqual(['rgba(0, 0, 0, 0)']);
+    await expect(page.locator('html')).toHaveCSS('background-color', 'rgb(23, 33, 43)');
+  });
+}
+
 test('image viewer fades in and out while keeping the underlying chat mounted', async ({
   page,
 }) => {
