@@ -208,7 +208,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         return;
       readVisible(
         id,
-        history.filter((message) => visibleMessages.has(message.id)),
+        history.filter((message) => visibleMessages.has(outbox.messageKey(message))),
         history,
         jumpWindow?.hasMoreBefore ?? hasOlder(id),
         jumpWindow?.hasMoreAfter ?? hasNewer(id),
@@ -235,13 +235,14 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     readVisible,
     history,
     visibleMessages,
+    outbox,
     jumpWindow,
     hasOlder,
     hasNewer,
   ]);
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<Message>[] }) => {
-      setVisibleMessages(new Set(viewableItems.map(({ item }) => item.id)));
+      setVisibleMessages(new Set(viewableItems.map(({ item }) => outbox.messageKey(item))));
       if (
         initialReadTarget.current &&
         viewableItems.some(({ item }) => item.id === initialReadTarget.current)
@@ -259,7 +260,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
         highlightTimer.current = setTimeout(() => setHighlighted(null), 2500);
       }
     },
-    [setJumpTarget, setHighlighted, setOpeningHistory],
+    [setJumpTarget, setHighlighted, setOpeningHistory, outbox],
   );
   const list = useRef<FlatList<Message>>(null);
   const [tailFollow] = useState(() => new ChatTailFollow());
@@ -926,7 +927,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
             contentContainerStyle={s.history}
             inverted
             data={shown}
-            keyExtractor={(message) => message.id}
+            keyExtractor={(message) => outbox.messageKey(message)}
             keyboardShouldPersistTaps="handled"
             onScrollBeginDrag={cancelPositioning}
             onLayout={() => {
@@ -1249,7 +1250,10 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                               mediaId={message.attachment.mediaId}
                               metadata={mediaMetadata}
                               active={
-                                focused && !voiceActive && !gifs && visibleMessages.has(message.id)
+                                focused &&
+                                !voiceActive &&
+                                !gifs &&
+                                visibleMessages.has(outbox.messageKey(message))
                               }
                               onOptions={(event) => openMessageMenu(message, event)}
                               onError={setError}
@@ -1259,7 +1263,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                               conversationId={id}
                               mediaId={message.attachment.mediaId}
                               initialMetadata={mediaMetadata}
-                              active={focused && visibleMessages.has(message.id)}
+                              active={focused && visibleMessages.has(outbox.messageKey(message))}
                               onOptions={(event) => openMessageMenu(message, event)}
                               onError={setError}
                             />
@@ -1268,7 +1272,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                               conversationId={id}
                               mediaId={message.attachment.mediaId}
                               initialMetadata={mediaMetadata}
-                              active={focused && visibleMessages.has(message.id)}
+                              active={focused && visibleMessages.has(outbox.messageKey(message))}
                               onPlay={() => {
                                 if (message.attachment?.type !== 'video') return;
                                 voicePlayback.pause();
@@ -1327,7 +1331,11 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                                 <GifPreview
                                   gifId={message.attachment.gifId}
                                   initialMetadata={gifMetadata}
-                                  active={focused && !gifs && visibleMessages.has(message.id)}
+                                  active={
+                                    focused &&
+                                    !gifs &&
+                                    visibleMessages.has(outbox.messageKey(message))
+                                  }
                                 />
                               )}
                             </Pressable>

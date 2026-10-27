@@ -51,6 +51,7 @@ function composer(accepted = true) {
       if (name === 'react')
         return {
           useEffect: () => {},
+          useLayoutEffect: () => {},
           useState: (initial: unknown) => {
             const index = stateIndex++;
             if (!(index in states)) states[index] = initial;

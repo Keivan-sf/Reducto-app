@@ -3416,6 +3416,123 @@ test('video thumbnail URLs renew from cached metadata without downloading the vi
   expect(thumbnailDownloads).toBe(1);
 });
 
+test('confirming a sent GIF preserves its playing video element', async ({ page }) => {
+  await mockApi(page, []);
+  const gif = {
+    id: 'stable-sent-gif',
+    width: 160,
+    height: 120,
+    fileSize: 4000,
+    playbackUrl: 'https://media.example/stable-sent.mp4',
+  };
+  await page.route('**/api/gifs', (route) => route.fulfill({ json: { gifs: [gif] } }));
+  await page.route('**/api/gifs/stable-sent-gif', (route) => route.fulfill({ json: { gif } }));
+  await page.route(gif.playbackUrl, (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/loop.mp4'),
+      contentType: 'video/mp4',
+    }),
+  );
+  let confirm!: () => void;
+  const confirmation = new Promise<void>((resolve) => {
+    confirm = resolve;
+  });
+  await page.route('**/api/conversations/*/messages', async (route) => {
+    if (route.request().method() === 'POST') await confirmation;
+    await route.fallback();
+  });
+  try {
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await page.getByRole('button', { name: 'Open GIF library', exact: true }).click();
+    await page.getByRole('button', { name: 'Send GIF', exact: true }).click();
+    await expect(page.getByTestId('media-picker')).toHaveCount(0);
+    const video = page.locator('video');
+    await expect
+      .poll(() =>
+        video.evaluate((element: HTMLVideoElement) => !element.paused && element.readyState >= 2),
+      )
+      .toBe(true);
+    await expect(video).toHaveCSS('opacity', '1');
+    const original = await video.elementHandle();
+    confirm();
+    const sentVideo = page
+      .getByTestId('message-44444444-4444-4444-8444-444444444444')
+      .locator('video');
+    await expect(sentVideo).toHaveCount(1);
+    expect(await sentVideo.evaluate((element, previous) => element === previous, original)).toBe(
+      true,
+    );
+    await expect(sentVideo).toHaveCSS('opacity', '1');
+    await expect
+      .poll(() => sentVideo.evaluate((element: HTMLVideoElement) => !element.paused))
+      .toBe(true);
+  } finally {
+    confirm();
+  }
+});
+
+test('GIF thumbnail stays visible until the first video frame is presented', async ({ page }) => {
+  await page.addInitScript(() => {
+    const browser = window as typeof window & { presentGifFrames: (() => void)[] };
+    browser.presentGifFrames = [];
+    const requestFrame = HTMLVideoElement.prototype.requestVideoFrameCallback;
+    HTMLVideoElement.prototype.requestVideoFrameCallback = function (callback) {
+      return requestFrame.call(this, (now, metadata) => {
+        browser.presentGifFrames.push(() => callback(now, metadata));
+      });
+    };
+  });
+  const gifId = 'first-frame-handoff';
+  await mockApi(page, [{ ...first, text: null, attachment: { type: 'gif', gifId } }]);
+  await page.route(`**/api/gifs/${gifId}`, (route) =>
+    route.fulfill({
+      json: {
+        gif: {
+          id: gifId,
+          width: 160,
+          height: 120,
+          fileSize: 4000,
+          playbackUrl: 'https://media.example/first-frame.mp4',
+          thumbnailUrl: 'https://media.example/first-frame.png',
+        },
+      },
+    }),
+  );
+  await page.route('https://media.example/first-frame.mp4', (route) =>
+    route.fulfill({ path: path.join(__dirname, '../fixtures/loop.mp4'), contentType: 'video/mp4' }),
+  );
+  await page.route('https://media.example/first-frame.png', (route) =>
+    route.fulfill({
+      path: path.join(__dirname, '../fixtures/portrait.png'),
+      contentType: 'image/png',
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const video = page.locator('video');
+  const thumbnail = page.getByRole('img', { name: 'GIF thumbnail', exact: true });
+  await expect
+    .poll(() => video.evaluate((element: HTMLVideoElement) => element.readyState))
+    .toBeGreaterThanOrEqual(2);
+  await expect(thumbnail).toBeVisible();
+  await expect(video).toHaveCSS('opacity', '0');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as typeof window & { presentGifFrames: (() => void)[] }).presentGifFrames.length,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const browser = window as typeof window & { presentGifFrames: (() => void)[] };
+    browser.presentGifFrames.splice(0).forEach((present) => present());
+  });
+  await expect(video).toHaveCSS('opacity', '1');
+  await expect(thumbnail).toHaveCount(0);
+});
+
 test('GIF thumbnails reuse cached bytes after returning to the chat', async ({
   page,
 }, testInfo) => {
@@ -6082,6 +6199,50 @@ test('desktop media picker closes on pointer leave and Escape', async ({ page, i
   await icon.click();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('media-picker-popover')).toHaveCount(0);
+});
+
+test('GIF sending and the media picker exit do not wait for each other', async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, 'Desktop popover animation');
+  await mockApi(page, []);
+  const gif = {
+    id: 'quick-send-gif',
+    width: 160,
+    height: 120,
+    fileSize: 4000,
+    objectKey: 'gifs/quick-send.mp4',
+    playbackUrl: 'https://media.example/quick-send.mp4',
+  };
+  await page.route('**/api/gifs', (route) => route.fulfill({ json: { gifs: [gif] } }));
+  await page.route('**/api/gifs/quick-send-gif', (route) => route.fulfill({ json: { gif } }));
+  await page.route(gif.playbackUrl, (route) => route.fulfill({ status: 503 }));
+  let finishSend!: () => void;
+  const pendingSend = new Promise<void>((resolve) => {
+    finishSend = resolve;
+  });
+  await page.route('**/api/conversations/*/messages', async (route) => {
+    if (route.request().method() === 'POST') await pendingSend;
+    await route.fallback();
+  });
+  try {
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await page.getByRole('button', { name: 'Open GIF library', exact: true }).hover();
+    const sent = page.waitForRequest(
+      (request) => request.method() === 'POST' && request.url().endsWith('/messages'),
+    );
+    await page.getByRole('button', { name: 'Send GIF', exact: true }).click();
+    expect((await sent).postDataJSON()).toEqual({
+      attachment: { type: 'gif', gifId: gif.id },
+    });
+    // The menu must finish closing even while the send response is held open.
+    await expect(page.getByTestId('media-picker-popover')).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEditable();
+  } finally {
+    finishSend();
+  }
 });
 
 test('emoji usage is ranked by frequency and persists across picker reopen and page reload', async ({

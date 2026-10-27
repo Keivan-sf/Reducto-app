@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  Animated,
   BackHandler,
-  Easing,
   Keyboard,
   Platform,
   Pressable,
@@ -54,21 +52,35 @@ export function MessageComposer({
   const desktop = Platform.OS === 'web' && width >= 768;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMounted, setPickerMounted] = useState(false);
-  const [pickerAnimation] = useState(() => new Animated.Value(0));
-  useEffect(() => {
-    const animation = Animated.timing(pickerAnimation, {
-      toValue: pickerOpen ? 1 : 0,
-      duration: desktop ? (pickerOpen ? 160 : 120) : 0,
-      easing: pickerOpen ? Easing.out(Easing.cubic) : Easing.in(Easing.quad),
-      useNativeDriver: false,
-      isInteraction: false,
-    });
-    animation.start(({ finished }) => {
-      // Interrupted exits must not unmount a picker that has reopened.
-      if (finished && !pickerOpen) setPickerMounted(false);
-    });
-    return () => animation.stop();
-  }, [desktop, pickerOpen, pickerAnimation]);
+  const pickerElement = useRef<View>(null);
+  useLayoutEffect(() => {
+    if (!desktop) return;
+    const element = pickerElement.current as unknown as HTMLElement | null;
+    if (!element) return;
+    const current = getComputedStyle(element);
+    // Opacity/transform run in the browser compositor, independently of the
+    // JavaScript work that queues a GIF and renders its message in the chat.
+    const animation = element.animate(
+      [
+        { opacity: current.opacity, transform: current.transform },
+        { opacity: pickerOpen ? 1 : 0, transform: `scale(${pickerOpen ? 1 : 0.96})` },
+      ],
+      {
+        duration: pickerOpen ? 160 : 80,
+        easing: 'cubic-bezier(0.2, 0, 0, 1)',
+        fill: 'forwards',
+      },
+    );
+    animation.onfinish = () => {
+      if (!pickerOpen) setPickerMounted(false);
+    };
+    return () => {
+      animation.onfinish = null;
+      // Preserve the current frame when a hover reverses an unfinished exit.
+      if (element.isConnected) animation.commitStyles();
+      animation.cancel();
+    };
+  }, [desktop, pickerOpen]);
   const [cursor, setCursor] = useState<{ start: number; end: number }>();
   const selection = useRef({ start: initialText.length, end: initialText.length });
   const holdOpen = useRef(false);
@@ -263,27 +275,11 @@ export function MessageComposer({
         )}
       </View>
       {(pickerOpen || (desktop && pickerMounted)) && active && !editing && onSendGif && (
-        <Animated.View
+        <View
+          ref={pickerElement}
           testID={desktop ? 'media-picker-popover' : 'media-picker-keyboard'}
           pointerEvents={pickerOpen ? 'auto' : 'none'}
-          style={
-            desktop
-              ? [
-                  s.popover,
-                  {
-                    opacity: pickerAnimation,
-                    transform: [
-                      {
-                        scale: pickerAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0.92, 1],
-                        }),
-                      },
-                    ],
-                  },
-                ]
-              : undefined
-          }
+          style={desktop ? s.popover : undefined}
         >
           <MediaPicker
             height={Math.min(desktop ? 420 : 320, height * (desktop ? 0.65 : 0.45))}
@@ -295,7 +291,7 @@ export function MessageComposer({
               cancelClose();
             }}
           />
-        </Animated.View>
+        </View>
       )}
     </View>
   );
@@ -304,6 +300,8 @@ export function MessageComposer({
 const s = StyleSheet.create({
   popover: {
     transformOrigin: 'bottom right',
+    opacity: 0,
+    transform: [{ scale: 0.92 }],
     position: 'absolute',
     bottom: 56,
     right: 48,

@@ -30,6 +30,7 @@ export class MessageOutbox {
   private uploadListeners = new Map<string, Set<() => void>>();
   private entries = new Map<string, Entry>();
   private observed = new Set<string>();
+  private confirmedKeys = new Map<string, string>();
   private sequence = 0;
   private timestamp = 0;
   private disposed = false;
@@ -44,6 +45,10 @@ export class MessageOutbox {
     private readonly accept: (message: Message) => void,
     private readonly publish: (messages: Record<string, Message[]>) => void,
   ) {}
+  /** Keep mounted media alive when a temporary message receives its server ID. */
+  messageKey(message: Message) {
+    return this.confirmedKeys.get(message.id) ?? message.localId ?? message.id;
+  }
   /** Progress has its own subscription so bytes sent never rerender chat history. */
   getUpload(id: string) {
     return this.entries.get(id)?.progress;
@@ -133,6 +138,7 @@ export class MessageOutbox {
       );
       if (this.disposed || this.entries.get(entry.localId) !== entry) return;
       entry.confirmed = true;
+      this.confirmedKeys.set(message.id, entry.localId);
       entry.message = message;
       entry.upload?.dispose();
       entry.upload = undefined;
@@ -172,6 +178,7 @@ export class MessageOutbox {
     );
     if (!entry) return;
     entry.confirmed = true;
+    this.confirmedKeys.set(message.id, entry.localId);
     entry.message = message;
     entry.upload?.dispose();
     entry.upload = undefined;
@@ -233,6 +240,7 @@ export class MessageOutbox {
     this.entries.clear();
     this.uploadListeners.clear();
     this.observed.clear();
+    this.confirmedKeys.clear();
   }
 }
 

@@ -340,3 +340,25 @@ test('frequent upload progress updates notify only that bubble, without publishi
   await tick();
   box.dispose();
 });
+
+test('render keys survive HTTP confirmation, realtime echoes and history reconciliation', async () => {
+  const t = setup();
+  const firstKey = t.box.enqueue('chat', { attachment: { type: 'gif', gifId: 'gif' } });
+  const secondKey = t.box.enqueue('chat', { attachment: { type: 'gif', gifId: 'gif' } });
+  assert.equal(t.box.messageKey(t.snapshot()[0]), firstKey);
+  assert.equal(t.box.messageKey(t.snapshot()[1]), secondKey);
+  const firstMessage = t.confirmed(0);
+  t.box.observe(firstMessage);
+  assert.equal(t.box.messageKey(firstMessage), firstKey);
+  t.requests[0].resolve(firstMessage);
+  const secondMessage = t.confirmed(1);
+  t.requests[1].resolve(secondMessage);
+  await tick();
+  assert.equal(t.box.messageKey(secondMessage), secondKey);
+  t.box.reconcile({ chat: [firstMessage, secondMessage] });
+  assert.deepEqual(t.snapshot(), []);
+  assert.equal(t.box.messageKey({ ...firstMessage }), firstKey);
+  assert.equal(t.box.messageKey({ ...secondMessage }), secondKey);
+  assert.equal(t.box.messageKey({ ...firstMessage, id: 'unrelated' }), 'unrelated');
+  t.box.dispose();
+});

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Text } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { colors } from '../../components/ui';
@@ -24,6 +24,14 @@ export function GifPlayer({
   const video = useRef<HTMLVideoElement>(null);
   const [metadata, setMetadata] = useState<{ uri: string; size: MediaSize }>();
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  useEffect(() => {
+    const element = video.current;
+    if (!element || !element.requestVideoFrameCallback) return;
+    // loadeddata only means a frame was decoded. Keep the thumbnail covering
+    // the video until that frame has actually reached the browser compositor.
+    const callback = element.requestVideoFrameCallback(() => setReadyUri(uri));
+    return () => element.cancelVideoFrameCallback(callback);
+  }, [uri]);
   useFocusEffect(
     useCallback(() => {
       const update = () => {
@@ -69,6 +77,7 @@ export function GifPlayer({
           height: '100%',
           objectFit: 'cover',
           pointerEvents: 'none',
+          opacity: readyUri === uri ? 1 : 0,
         }}
         onLoadStart={() => setStatus('loading')}
         onLoadedMetadata={({ currentTarget }) =>
@@ -78,8 +87,12 @@ export function GifPlayer({
           })
         }
         onLoadedData={() => {
-          setReadyUri(uri);
           setStatus('ready');
+        }}
+        onPlaying={({ currentTarget }) => {
+          // Older browsers without frame callbacks can reveal after playback
+          // starts, rather than while the first decoded frame is still pending.
+          if (!currentTarget.requestVideoFrameCallback) setReadyUri(uri);
         }}
         onError={() => {
           setStatus('error');
