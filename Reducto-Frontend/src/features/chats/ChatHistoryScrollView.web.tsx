@@ -22,9 +22,28 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
     const thumb = useRef<HTMLDivElement>(null);
     const drag = useRef<ThumbDrag | undefined>(undefined);
     const frame = useRef<number | undefined>(undefined);
+    const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const visible = useRef(false);
     const enabled = props.scrollEnabled !== false;
     useImperativeHandle(ref, () => scroll.current!, []);
     const node = () => scroll.current?.getScrollableNode() as HTMLElement | undefined;
+    const updateVisibility = useCallback(() => {
+      const indicator = thumb.current;
+      if (!indicator) return;
+      indicator.style.transition = `opacity ${visible.current ? 120 : 180}ms ease-out`;
+      indicator.style.opacity = visible.current ? (enabled ? '1' : '0.5') : '0';
+      indicator.style.pointerEvents = visible.current && enabled ? 'auto' : 'none';
+    }, [enabled]);
+    const reveal = useCallback(() => {
+      visible.current = true;
+      updateVisibility();
+      clearTimeout(hideTimer.current);
+      hideTimer.current = setTimeout(() => {
+        if (drag.current) return;
+        visible.current = false;
+        updateVisibility();
+      }, 1000);
+    }, [updateVisibility]);
     const paint = useCallback(() => {
       const content = node();
       const indicator = thumb.current;
@@ -71,6 +90,28 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
     }, [paint]);
     useEffect(() => {
       const content = node();
+      const region = content?.parentElement;
+      if (!content || !region) return;
+      if (visible.current) reveal();
+      // Listen on the whole region, including the overlay thumb. Merely leaving
+      // the pointer parked here should not keep the indicator visible.
+      const onScroll = () => {
+        if (visible.current) reveal();
+      };
+      const events = ['pointerenter', 'pointermove', 'pointerdown', 'wheel', 'keydown'];
+      for (const event of events) region.addEventListener(event, reveal, { passive: true });
+      content.addEventListener('scroll', onScroll, { passive: true });
+      return () => {
+        for (const event of events) region.removeEventListener(event, reveal);
+        content.removeEventListener('scroll', onScroll);
+        clearTimeout(hideTimer.current);
+      };
+    }, [reveal]);
+    useEffect(() => {
+      updateVisibility();
+    }, [updateVisibility]);
+    useEffect(() => {
+      const content = node();
       if (!content || !onUserScroll) return;
       // Web ScrollView does not emit onScrollBeginDrag for wheel/keyboard
       // scrolling. User input must cancel pending automatic positioning too.
@@ -104,6 +145,7 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
     }, [enabled, schedulePaint]);
     const finishDrag = () => {
       drag.current = undefined;
+      reveal();
       schedulePaint();
     };
     return (
@@ -141,9 +183,12 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
             touchAction: 'none',
             userSelect: 'none',
             cursor: enabled ? 'pointer' : 'default',
-            opacity: enabled ? 1 : 0.5,
-            willChange: 'transform',
+            opacity: 0,
+            pointerEvents: 'none',
+            transition: 'opacity 180ms ease-out',
+            willChange: 'transform, opacity',
           }}
+          onFocus={reveal}
           onPointerDown={(event) => {
             if (!enabled || event.button !== 0 || drag.current) return;
             event.preventDefault();

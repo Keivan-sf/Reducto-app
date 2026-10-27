@@ -2467,7 +2467,8 @@ test('conversation list scrollbar overlays rows and scrolls in the list directio
   await signIn(page);
   const list = page.getByTestId('conversation-list');
   const thumb = page.getByRole('scrollbar', { name: 'Conversation list scrollbar' });
-  await expect(thumb).toBeVisible();
+  await list.hover();
+  await expect(thumb).toHaveCSS('opacity', '1');
   expect(
     await list.evaluate((element: HTMLElement) => element.offsetWidth - element.clientWidth),
   ).toBe(0);
@@ -2503,11 +2504,19 @@ test('chat scrollbar overlays history without a gutter and supports dragging', a
       createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
     })),
   );
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [{ ...chat, lastSeenMessageId: 'scroll-message-59', unreadCount: 0 }],
+      },
+    }),
+  );
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const history = page.getByTestId('chat-history');
   const thumb = page.getByRole('scrollbar', { name: 'Chat scrollbar' });
-  await expect(thumb).toBeVisible();
+  await history.hover();
+  await expect(thumb).toHaveCSS('opacity', '1');
   await expect
     .poll(() =>
       history.evaluate((element: HTMLElement) => element.offsetWidth - element.clientWidth),
@@ -2536,6 +2545,70 @@ test('chat scrollbar overlays history without a gutter and supports dragging', a
     .toBeGreaterThan(before + 10);
   await thumb.press('End');
   await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
+test('scrollbars fade after inactivity and reveal only in the active view', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Pointer movement between desktop panes');
+  await mockApi(
+    page,
+    Array.from({ length: 60 }, (_, index) => ({
+      ...first,
+      id: `fade-message-${index}`,
+      text: `Message ${index}`,
+      createdAt: new Date(Date.parse(first.createdAt) + index * 1000).toISOString(),
+    })),
+  );
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [
+          chat,
+          ...Array.from({ length: 50 }, (_, index) => ({
+            ...chat,
+            id: `fade-chat-${index}`,
+            name: `Conversation ${index}`,
+          })),
+        ],
+      },
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const history = page.getByTestId('chat-history');
+  const list = page.getByTestId('conversation-list');
+  const chatThumb = page.getByRole('scrollbar', { name: 'Chat scrollbar' });
+  const listThumb = page.getByRole('scrollbar', { name: 'Conversation list scrollbar' });
+  await page.mouse.move(0, 0);
+  await expect(chatThumb).toHaveCSS('opacity', '0');
+  await expect(listThumb).toHaveCSS('opacity', '0');
+
+  await history.hover();
+  await expect(chatThumb).toHaveCSS('opacity', '1');
+  await expect(chatThumb).toHaveCSS('transition-duration', '0.12s');
+  await expect(listThumb).toHaveCSS('opacity', '0');
+  // A stationary pointer inside the view does not prevent fading.
+  await expect(chatThumb).toHaveCSS('opacity', '0');
+  await expect(chatThumb).toHaveCSS('transition-duration', '0.18s');
+  await expect(chatThumb).toHaveCSS('pointer-events', 'none');
+
+  await list.hover();
+  await expect(listThumb).toHaveCSS('opacity', '1');
+  await expect(chatThumb).toHaveCSS('opacity', '0');
+  await expect(listThumb).toHaveCSS('opacity', '0');
+  // Wheel input reveals the thumb without moving the parked pointer.
+  await page.mouse.wheel(0, 100);
+  await expect(listThumb).toHaveCSS('opacity', '1');
+  const bounds = (await listThumb.boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(2300);
+  await expect(listThumb).toHaveCSS('opacity', '1');
+  await page.mouse.up();
+  await expect(listThumb).toHaveCSS('opacity', '0');
+  await listThumb.focus();
+  await expect(listThumb).toHaveCSS('opacity', '1');
 });
 
 test('chat scrollbar remains visible but disabled during voice seeking', async ({ page }) => {
