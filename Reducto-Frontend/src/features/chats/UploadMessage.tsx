@@ -1,8 +1,9 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { memo, useCallback, useState, useSyncExternalStore } from 'react';
 import type { MessageOutbox } from '../../api/message-outbox';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { PendingUpload } from '../../api/types';
-import { colors, Icon } from '../../components/ui';
+import { Icon } from '../../components/ui';
 import { mediaPreviewSize, type MediaSize } from '../../lib/media-preview';
 import { videoBytes, videoTime } from '../../lib/video-download.types';
 import { DownloadProgressRing } from './DownloadProgressRing';
@@ -27,6 +28,7 @@ export function UploadMessage({
   onCancel: () => void;
   onRetry: () => void;
 }) {
+  const s = useStyles();
   const subscribe = useCallback(
     (listener: () => void) => outbox.subscribeUpload(localId, listener),
     [outbox, localId],
@@ -111,7 +113,7 @@ export function UploadMessage({
     </View>
   );
 }
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   row: {
     width: 280,
     maxWidth: '100%',
@@ -134,7 +136,7 @@ const s = StyleSheet.create({
   visualControl: { backgroundColor: '#00000070' },
   details: { flex: 1, minWidth: 0, gap: 5 },
   name: { color: colors.dark, fontSize: 14, fontWeight: '500' },
-  status: { color: '#6C93AF', fontSize: 12, lineHeight: 14 },
+  status: { color: colors.fileAccent, fontSize: 12, lineHeight: 14 },
   media: {
     maxWidth: '100%',
     borderRadius: 10,
@@ -155,4 +157,4 @@ const s = StyleSheet.create({
     backgroundColor: '#00000070',
     fontSize: 12,
   },
-});
+}));

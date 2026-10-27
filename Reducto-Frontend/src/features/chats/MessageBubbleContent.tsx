@@ -1,5 +1,6 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { useState, type ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 
 export function MessageBubbleContent({
   visualMedia,
@@ -16,6 +17,7 @@ export function MessageBubbleContent({
   meta: ReactNode;
   reactions: ReactNode;
 }) {
+  const s = useStyles();
   const [mediaWidth, setMediaWidth] = useState(0);
   if (!visualMedia)
     return (
@@ -44,9 +46,9 @@ export function MessageBubbleContent({
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   media: { alignSelf: 'flex-start', maxWidth: '100%' },
   header: { paddingHorizontal: 10, paddingTop: 10 },
   caption: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8 },
   reactions: { paddingHorizontal: 8, paddingBottom: 6 },
-});
+}));

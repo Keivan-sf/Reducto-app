@@ -1,8 +1,9 @@
 import { AppViewport } from '../components/AppViewport';
 import { router } from 'expo-router';
 import { Text, View } from 'react-native';
-import { Button, styles } from '../components/ui';
+import { Button, useUIStyles } from '../components/ui';
 export default function UnsupportedLink() {
+  const styles = useUIStyles();
   return (
     <AppViewport>
       <View

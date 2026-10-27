@@ -1,15 +1,15 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   BackHandler,
   Keyboard,
   Platform,
   Pressable,
-  StyleSheet,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { colors, Icon, IconButton } from '../../components/ui';
+import { Icon, IconButton } from '../../components/ui';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { VoiceRecordButton } from './VoiceRecordButton';
 import { MediaPicker } from './MediaPicker';
@@ -44,6 +44,7 @@ export function MessageComposer({
   onError,
   onVoiceActive,
 }: Props) {
+  const s = useStyles();
   const [draft, setDraft] = useState(initialText);
   const text = useRef(initialText);
   const input = useRef<TextInput>(null);
@@ -297,7 +298,7 @@ export function MessageComposer({
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   popover: {
     transformOrigin: 'bottom right',
     opacity: 0,
@@ -308,7 +309,7 @@ const s = StyleSheet.create({
     width: 368,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     boxShadow: '0 4px 28px #17212B33',
     borderWidth: 1,
     borderColor: colors.border,
@@ -319,7 +320,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     padding: 6,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     width: '100%',
     alignSelf: 'center',
   },
@@ -346,4 +347,4 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}));

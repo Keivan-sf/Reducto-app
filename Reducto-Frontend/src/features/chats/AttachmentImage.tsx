@@ -1,6 +1,7 @@
+import { useTheme } from '../../context/ThemeContext';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Text } from 'react-native';
-import { colors } from '../../components/ui';
+
 import { MediaPreview } from './MediaPreview';
 import { mediaDimensions, type MediaSize } from '../../lib/media-preview';
 import { useCachedFile, useVideos, videoKey } from '../../context/VideosContext';
@@ -16,6 +17,7 @@ export function AttachmentImage({
   mediaId: string;
   initialMetadata?: AttachmentMetadata;
 }) {
+  const { colors } = useTheme();
   const metadata = useAttachmentMetadata(conversationId, mediaId, true, initialMetadata);
   const files = useVideos();
   const key = videoKey(conversationId, mediaId);

@@ -1,10 +1,11 @@
+import { useTheme } from '../../context/ThemeContext';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { api, useSession } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
-import { Avatar, Button, colors, Dialog, Field, Notice, styles } from '../../components/ui';
+import { Avatar, Button, Dialog, Field, Notice, useUIStyles } from '../../components/ui';
 import type { Conversation } from '../../api/types';
 import { useProfiles } from '../../context/ProfilesContext';
 import { conversationName, profileName } from '../../lib/messages';
@@ -21,6 +22,8 @@ export function GroupDialog({
   onClose: () => void;
   onViewUser: (userId: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useUIStyles();
   const { session } = useSession();
   const { members, loadConversation, removeConversation } = useChats();
   const { profiles } = useProfiles();

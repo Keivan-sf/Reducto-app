@@ -1,3 +1,4 @@
+import { themeContextMock } from './fixtures/theme-context';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -36,6 +37,7 @@ function nativeSeekBar(
     module,
     exports: module.exports,
     require: (name: string) => {
+      if (name.endsWith('/ThemeContext')) return themeContextMock;
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name === 'react')
         return {

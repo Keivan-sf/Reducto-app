@@ -1,3 +1,4 @@
+import { useTheme } from '../../context/ThemeContext';
 import { useState } from 'react';
 import { useWindowDimensions, View } from 'react-native';
 import ChatList from './ChatList';
@@ -6,12 +7,13 @@ import { RetainedLayer } from '../../components/RetainedLayer';
 import { useChats } from '../../context/ChatsContext';
 
 export default function ChatShell({ id, active }: { id?: string; active: boolean }) {
+  const { colors } = useTheme();
   const wide = useWindowDimensions().width >= 850;
   const { conversations } = useChats();
   const [visited, setVisited] = useState<string[]>([]);
   if (id && !visited.includes(id)) setVisited([...visited, id]);
   return (
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: 'white' }}>
+    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.surface }}>
       <RetainedLayer
         active={active && (wide || !id)}
         style={wide ? { width: 360, right: undefined } : undefined}

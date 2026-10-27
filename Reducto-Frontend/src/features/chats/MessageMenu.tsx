@@ -1,3 +1,4 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useState, type ComponentProps } from 'react';
 import {
   Animated,
@@ -12,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EMOJIS, type Emoji } from '../../api/types';
-import { colors, Icon } from '../../components/ui';
+import { Icon } from '../../components/ui';
 
 export type MessageMenuAction = {
   label: string;
@@ -35,6 +36,7 @@ export function MessageMenu({
   onReact: (emoji: Emoji) => void;
   onClose: () => void;
 }) {
+  const s = useStyles();
   const [progress] = useState(() => new Animated.Value(0));
   // Retain the entire menu until the closing animation finishes.
   const [content, setContent] = useState({ anchor, actions, selected });
@@ -139,16 +141,16 @@ export function MessageMenu({
     </Modal>
   );
 }
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   overlay: { flex: 1 },
   menu: { position: 'absolute', gap: 6 },
   actions: {
     flexShrink: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 12,
     boxShadow: '0 3px 18px #17212B26',
     borderWidth: 1,
-    borderColor: '#DCE4EB',
+    borderColor: colors.menuBorder,
   },
   action: {
     height: 40,
@@ -158,19 +160,19 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
   },
   label: { fontSize: 14, color: colors.dark },
-  hover: { backgroundColor: '#EAF3FC' },
+  hover: { backgroundColor: colors.menuHover },
   reactions: {
     flexDirection: 'row',
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'space-around',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 12,
     padding: 4,
     minHeight: 42,
     boxShadow: '0 3px 18px #17212B26',
     borderWidth: 1,
-    borderColor: '#DCE4EB',
+    borderColor: colors.menuBorder,
   },
   emoji: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
-});
+}));

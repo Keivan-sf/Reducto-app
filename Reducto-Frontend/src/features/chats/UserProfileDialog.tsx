@@ -1,14 +1,17 @@
+import { useTheme } from '../../context/ThemeContext';
 import { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import type { Conversation } from '../../api/types';
-import { Avatar, Button, colors, Dialog, Notice, styles } from '../../components/ui';
+import { Avatar, Button, Dialog, Notice, useUIStyles } from '../../components/ui';
 import { useChats } from '../../context/ChatsContext';
 import { useProfiles } from '../../context/ProfilesContext';
 import { api, useSession } from '../../context/SessionContext';
 import { profileName } from '../../lib/messages';
 
 export function UserProfileDialog({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { colors } = useTheme();
+  const styles = useUIStyles();
   const { session } = useSession();
   const { profiles, directory } = useProfiles();
   const { loadConversation } = useChats();

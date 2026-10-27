@@ -1,7 +1,8 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { colors } from '../../components/ui';
+
 import { documentFileKey, useCachedFile, voiceFileKey } from '../../context/VideosContext';
 import { videoTime } from '../../lib/video-download.types';
 import { useVoicePlayback, useVoicePlaybackState } from '../../context/VoicePlaybackContext';
@@ -117,6 +118,7 @@ function VoicePlayer({
   onError: (message: string) => void;
   onSeekingChange?: (seeking: boolean) => void;
 }) {
+  const s = useStyles();
   const audio = kind !== 'voice';
   const label = audio ? 'audio' : 'voice message';
   const title = metadata?.title?.trim() || metadata?.fileName || 'Audio';
@@ -252,7 +254,7 @@ function VoiceDurationProbe({
   }, [status.duration, onDuration]);
   return null;
 }
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   row: {
     width: 236,
     maxWidth: '100%',
@@ -277,5 +279,5 @@ const s = StyleSheet.create({
   // Match VoiceSeekBar's touch area so the duration stays put when loading finishes.
   seekPlaceholder: { height: 32, justifyContent: 'center' },
   track: { height: 3, borderRadius: 2, backgroundColor: '#3390EC38' },
-  time: { fontSize: 12, lineHeight: 14, color: '#6C93AF' },
-});
+  time: { fontSize: 12, lineHeight: 14, color: colors.fileAccent },
+}));

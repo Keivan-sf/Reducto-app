@@ -1,3 +1,4 @@
+import { useTheme } from '../../context/ThemeContext';
 import { Link } from 'expo-router';
 import * as Linking from 'expo-linking';
 import {
@@ -7,7 +8,7 @@ import {
   type TextStyle,
   type GestureResponderEvent,
 } from 'react-native';
-import { colors } from '../../components/ui';
+
 import { internalLinkPath, linkifyMentions } from '../../lib/links';
 
 export function MessageText({
@@ -23,6 +24,7 @@ export function MessageText({
   onError: (message: string) => void;
   onOpenUsername: (username: string) => void;
 }) {
+  const { colors } = useTheme();
   return (
     <Text selectable style={style} onPress={onMessagePress} onLongPress={onMessagePress}>
       {linkifyMentions(text).map((part, index) =>

@@ -1,3 +1,4 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import {
   ActivityIndicator,
   Pressable,
@@ -32,6 +33,7 @@ export function VideoCard({
   onOptions: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
 }) {
+  const s = useStyles();
   const { state, download, cancel } = useVideoFile(conversationId, mediaId, active);
   const metadata = useAttachmentMetadata(conversationId, mediaId, active, initialMetadata);
   const progress = state.status === 'loading' ? state.progress : undefined;
@@ -144,7 +146,7 @@ export function VideoCard({
     </View>
   );
 }
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   card: { maxWidth: '100%', backgroundColor: '#17212B', borderRadius: 10, overflow: 'hidden' },
   play: {
     width: 54,
@@ -179,5 +181,5 @@ const s = StyleSheet.create({
     borderRadius: 12,
   },
   track: { height: 2, backgroundColor: '#FFFFFF44', borderRadius: 1 },
-  progress: { height: 2, backgroundColor: 'white' },
-});
+  progress: { height: 2, backgroundColor: colors.surface },
+}));

@@ -1,9 +1,10 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import type { Message } from '../../api/types';
 import { useChats } from '../../context/ChatsContext';
 import { useProfiles } from '../../context/ProfilesContext';
-import { colors } from '../../components/ui';
+
 import { profileName, replySnippet } from '../../lib/messages';
 
 export function ReplyQuote({
@@ -13,6 +14,7 @@ export function ReplyQuote({
   message?: Message;
   unavailable?: boolean;
 }) {
+  const s = useStyles();
   const { profiles } = useProfiles();
   return (
     <View style={s.quote}>
@@ -73,7 +75,7 @@ export function ReplyPreview({
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   quote: {
     borderLeftWidth: 3,
     borderLeftColor: colors.blue,
@@ -85,6 +87,6 @@ const s = StyleSheet.create({
     minWidth: 100,
     maxWidth: '100%',
   },
-  name: { color: '#2479BD', fontSize: 12, fontWeight: '600' },
-  snippet: { color: '#425E73', fontSize: 13 },
-});
+  name: { color: colors.replyName, fontSize: 12, fontWeight: '600' },
+  snippet: { color: colors.replyText, fontSize: 13 },
+}));

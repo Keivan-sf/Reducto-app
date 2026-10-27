@@ -1,6 +1,7 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useLayoutEffect, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, Icon } from '../../components/ui';
+import { Animated, Easing, Pressable, Text, View } from 'react-native';
+import { Icon } from '../../components/ui';
 import { MentionIcon } from '../../components/MentionIcon';
 
 export function ScrollToLatestButton({
@@ -20,6 +21,8 @@ export function ScrollToLatestButton({
   mention?: boolean;
   raised?: boolean;
 }) {
+  const { colors } = useTheme();
+  const s = useStyles();
   const [opacity] = useState(() => new Animated.Value(0));
   const [mounted, setMounted] = useState(visible);
   if (visible && !mounted) setMounted(true);
@@ -81,7 +84,7 @@ export function ScrollToLatestButton({
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   position: {
     position: 'absolute',
     right: 16,
@@ -91,7 +94,7 @@ const s = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 26,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
@@ -110,4 +113,4 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   count: { color: 'white', fontSize: 10, fontWeight: '500' },
-});
+}));

@@ -1,5 +1,6 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
@@ -7,13 +8,12 @@ import * as Clipboard from 'expo-clipboard';
 import {
   Avatar,
   Button,
-  colors,
   Dialog,
   Field,
   Icon,
   IconButton,
   Notice,
-  styles,
+  useUIStyles,
 } from '../../components/ui';
 import { api, useSession } from '../../context/SessionContext';
 import type { User } from '../../api/types';
@@ -22,6 +22,9 @@ import { objectUrl } from '../../lib/config';
 import { fileForm } from '../../lib/uploads';
 
 export default function SettingsScreen() {
+  const { colors, theme, setTheme } = useTheme();
+  const s = useStyles();
+  const styles = useUIStyles();
   const { session, updateUser, signOut } = useSession();
   const user = session!.user;
   const { profiles } = useProfiles();
@@ -140,6 +143,53 @@ export default function SettingsScreen() {
           <Button title="Save changes" busy={busy} onPress={() => void save()} />
         </View>
         <View style={s.card}>
+          <Text style={s.section}>APPEARANCE</Text>
+          <Text style={styles.title}>Theme</Text>
+          <View accessibilityRole="radiogroup" accessibilityLabel="Theme" style={{ gap: 10 }}>
+            {(['light', 'dark'] as const).map((option) => (
+              <Pressable
+                key={option}
+                accessibilityRole="radio"
+                accessibilityLabel={option === 'light' ? 'Current theme' : 'Dark theme'}
+                accessibilityState={{ checked: theme === option }}
+                aria-checked={theme === option}
+                onPress={() =>
+                  void setTheme(option).catch(() =>
+                    setError('Could not save your theme. Please try again.'),
+                  )
+                }
+                style={[
+                  s.themeOption,
+                  theme === option && {
+                    borderColor: colors.blue,
+                    backgroundColor: colors.secondary,
+                  },
+                ]}
+              >
+                <Icon
+                  name={option === 'light' ? 'sunny-outline' : 'moon-outline'}
+                  color={colors.blue}
+                />
+                <View style={{ flex: 1, gap: 3 }}>
+                  <Text style={{ color: colors.dark, fontSize: 15, fontWeight: '600' }}>
+                    {option === 'light' ? 'Current theme' : 'Dark theme'}
+                  </Text>
+                  <Text style={s.hint}>
+                    {option === 'light'
+                      ? 'The original light appearance'
+                      : 'Deep blue-gray with blue accents'}
+                  </Text>
+                </View>
+                <Icon
+                  name={theme === option ? 'radio-button-on' : 'radio-button-off'}
+                  color={theme === option ? colors.blue : colors.muted}
+                />
+              </Pressable>
+            ))}
+          </View>
+          <Text style={s.hint}>Your choice is saved on this device.</Text>
+        </View>
+        <View style={s.card}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <Icon name="person-circle-outline" color={colors.blue} />
             <Text style={styles.title}>Your account</Text>
@@ -216,12 +266,12 @@ export default function SettingsScreen() {
     </View>
   );
 }
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.pale },
   header: {
     height: 76,
     paddingHorizontal: 18,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -233,7 +283,7 @@ const s = StyleSheet.create({
     width: '100%',
     maxWidth: 540,
     padding: 26,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     borderRadius: 18,
     gap: 18,
     borderWidth: 1,
@@ -250,5 +300,14 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  themeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   foot: { color: '#A5B1BE', fontSize: 12, paddingVertical: 12 },
-});
+}));

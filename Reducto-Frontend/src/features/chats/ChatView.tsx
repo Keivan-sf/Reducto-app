@@ -1,3 +1,4 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -22,16 +23,7 @@ import { pickUpload } from '../../lib/pick-upload';
 import * as Clipboard from 'expo-clipboard';
 import { api, useSession } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
-import {
-  Avatar,
-  Button,
-  colors,
-  Dialog,
-  Icon,
-  IconButton,
-  Notice,
-  styles,
-} from '../../components/ui';
+import { Avatar, Button, Dialog, Icon, IconButton, Notice, useUIStyles } from '../../components/ui';
 import { EMOJIS, type Emoji, type Message } from '../../api/types';
 import { conversationName, profileName, timeLabel, mergeMessages } from '../../lib/messages';
 import { useProfiles } from '../../context/ProfilesContext';
@@ -75,6 +67,9 @@ import { useMentionVisibility } from './useMentionVisibility';
 const readViewabilityConfig = { minimumViewTime: 350, viewAreaCoveragePercentThreshold: 60 };
 
 export default function ChatView({ id, active }: { id?: string; active: boolean }) {
+  const { colors } = useTheme();
+  const s = useStyles();
+  const styles = useUIStyles();
   const { session } = useSession();
   const { profiles, directory } = useProfiles();
   const {
@@ -820,8 +815,8 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           away.
         </Text>
         <View style={s.welcomePill}>
-          <Icon name="chatbubbles-outline" size={16} color="#6B8BA9" />
-          <Text style={{ fontSize: 12, color: '#6B8BA9' }}>A space for your people</Text>
+          <Icon name="chatbubbles-outline" size={16} color={colors.welcomeAccent} />
+          <Text style={{ fontSize: 12, color: colors.welcomeAccent }}>A space for your people</Text>
         </View>
       </View>
     );
@@ -1082,7 +1077,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                                 ? 'white'
                                 : message.delivery === 'sending'
                                   ? colors.muted
-                                  : '#6D9D62'
+                                  : colors.outgoingMeta
                             }
                           />
                         )}
@@ -1160,7 +1155,7 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
                           s.bubble,
                           mine ? s.outgoing : s.incoming,
                           visualMedia && s.mediaBubble,
-                          highlighted === message.id && { backgroundColor: '#FFF0B3' },
+                          highlighted === message.id && { backgroundColor: colors.highlight },
                         ]}
                       >
                         <MessageBubbleContent
@@ -1511,13 +1506,13 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
     </KeyboardAvoidingView>
   );
 }
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#E8EFF3' },
+const useStyles = createThemedStyles((colors) => ({
+  root: { flex: 1, backgroundColor: colors.chatBackground },
   welcome: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EDF3F7',
+    backgroundColor: colors.welcomeBackground,
     gap: 20,
     padding: 30,
   },
@@ -1525,14 +1520,19 @@ const s = StyleSheet.create({
     width: 136,
     height: 136,
     borderRadius: 45,
-    backgroundColor: '#DDECF8',
+    backgroundColor: colors.welcomeIcon,
     alignItems: 'center',
     justifyContent: 'center',
     transform: [{ rotate: '-8deg' }],
     marginBottom: 4,
   },
-  welcomeTitle: { color: '#3C566E', fontSize: 26, fontWeight: '600', letterSpacing: -0.5 },
-  welcomeText: { color: '#8599AB', textAlign: 'center', lineHeight: 25, fontSize: 14 },
+  welcomeTitle: {
+    color: colors.welcomeTitle,
+    fontSize: 26,
+    fontWeight: '600',
+    letterSpacing: -0.5,
+  },
+  welcomeText: { color: colors.welcomeText, textAlign: 'center', lineHeight: 25, fontSize: 14 },
   welcomePill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1540,12 +1540,12 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
-    backgroundColor: '#DFEAF2',
+    backgroundColor: colors.welcomePill,
     marginTop: 12,
   },
   header: {
     height: 78,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -1556,7 +1556,7 @@ const s = StyleSheet.create({
   headerTitle: { color: colors.dark, fontSize: 16, fontWeight: '600' },
   headerSubtitle: { color: colors.muted, fontSize: 12, marginTop: 4 },
   search: {
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
@@ -1582,13 +1582,13 @@ const s = StyleSheet.create({
   },
   mediaTime: { color: 'white', fontSize: 11 },
   outgoing: { backgroundColor: colors.green, borderBottomRightRadius: 4 },
-  incoming: { backgroundColor: 'white', borderBottomLeftRadius: 4 },
-  messageText: { color: '#243444', fontSize: 15, lineHeight: 22 },
+  incoming: { backgroundColor: colors.surface, borderBottomLeftRadius: 4 },
+  messageText: { color: colors.messageText, fontSize: 15, lineHeight: 22 },
   sender: { color: colors.blue, fontSize: 12, fontWeight: '600', marginBottom: 7 },
   forwarded: {
-    color: '#68A35C',
+    color: colors.forwarded,
     borderLeftWidth: 2,
-    borderColor: '#8BBC80',
+    borderColor: colors.forwardBorder,
     paddingLeft: 8,
     fontSize: 12,
     marginBottom: 8,
@@ -1600,17 +1600,17 @@ const s = StyleSheet.create({
     gap: 4,
     marginTop: 4,
   },
-  time: { fontSize: 10, color: '#8C9B91' },
+  time: { fontSize: 10, color: colors.time },
   date: { alignItems: 'center', marginVertical: 16 },
   dateText: {
-    color: '#7F96A7',
-    backgroundColor: '#DCE6EC',
+    color: colors.dateText,
+    backgroundColor: colors.dateBackground,
     fontSize: 11,
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderRadius: 20,
   },
-  emptyText: { color: '#7F96A7', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  emptyText: { color: colors.dateText, fontSize: 13, textAlign: 'center', lineHeight: 20 },
   attachment: { gap: 10 },
   reactions: { flexDirection: 'row', gap: 5, flexWrap: 'wrap', paddingTop: 5 },
   reaction: {
@@ -1621,14 +1621,14 @@ const s = StyleSheet.create({
   },
   reactionSelected: { backgroundColor: '#3390EC40' },
   reactionText: { fontSize: 12 },
-  composerWrap: { backgroundColor: 'white' },
+  composerWrap: { backgroundColor: colors.surface },
   pending: {
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
     paddingLeft: 14,
-    backgroundColor: '#F4F9FD',
+    backgroundColor: colors.pending,
     borderRadius: 12,
     marginBottom: 8,
   },
-});
+}));

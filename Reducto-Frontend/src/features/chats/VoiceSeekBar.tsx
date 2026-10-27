@@ -1,6 +1,7 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useRef, useState, type PointerEvent, type KeyboardEvent } from 'react';
-import { Platform, StyleSheet, View, type GestureResponderEvent } from 'react-native';
-import { colors } from '../../components/ui';
+import { Platform, View, type GestureResponderEvent } from 'react-native';
+
 import { videoTime } from '../../lib/video-download.types';
 
 interface Drag {
@@ -33,6 +34,7 @@ export function VoiceSeekBar({
   onSeek: (seconds: number) => void | Promise<void>;
   onDraggingChange?: (dragging: boolean) => void;
 }) {
+  const s = useStyles();
   const view = useRef<View>(null);
   const drag = useRef<Drag | undefined>(undefined);
   const dragging = useRef(false);
@@ -222,7 +224,7 @@ export function VoiceSeekBar({
   );
 }
 const webDragStyle = { touchAction: 'none', userSelect: 'none', cursor: 'pointer' } as const;
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   seek: { height: 32, justifyContent: 'center' },
   compact: { height: 20 },
   track: { height: 3, borderRadius: 2, backgroundColor: '#3390EC38' },
@@ -236,4 +238,4 @@ const s = StyleSheet.create({
     backgroundColor: colors.blue,
     marginLeft: -4,
   },
-});
+}));

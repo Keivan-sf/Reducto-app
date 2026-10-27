@@ -6425,3 +6425,49 @@ test('GIF library puts the latest used or added GIF first and remembers its orde
   await open();
   await expectOrder(['added', 'middle', 'new', 'old']);
 });
+
+test('settings theme applies immediately, persists after reload, and restores the current theme', async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const current = page.getByRole('radio', { name: 'Current theme', exact: true });
+  const dark = page.getByRole('radio', { name: 'Dark theme', exact: true });
+  const name = page.getByRole('textbox', { name: 'Display name', exact: true });
+  await expect(current).toBeChecked();
+  await expect(name).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await name.fill('Unsaved profile name');
+  await dark.click();
+  await expect(dark).toBeChecked();
+  await expect(name).toHaveValue('Unsaved profile name');
+  await expect(name).toHaveCSS('background-color', 'rgb(23, 33, 43)');
+  await expect(name).toHaveCSS('color', 'rgb(240, 243, 245)');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('reducto-theme'))).toBe('dark');
+  await page.screenshot({ path: testInfo.outputPath('dark-settings.png'), fullPage: true });
+  await page.reload();
+  await expect(dark).toBeChecked();
+  await expect(name).toHaveCSS('background-color', 'rgb(23, 33, 43)');
+  await page.getByRole('button', { name: 'Back to chats' }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const message = page.getByText('Hello from the group!', { exact: true }).last();
+  await expect(message).toBeVisible();
+  await expect(message).toHaveCSS('color', 'rgb(240, 243, 245)');
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveCSS(
+    'color',
+    'rgb(240, 243, 245)',
+  );
+  await page.screenshot({ path: testInfo.outputPath('dark-chat.png'), fullPage: true });
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await current.click();
+  await expect(current).toBeChecked();
+  await expect(name).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('reducto-theme'))).toBe('light');
+  await page.reload();
+  await expect(current).toBeChecked();
+  expect(errors).toEqual([]);
+});

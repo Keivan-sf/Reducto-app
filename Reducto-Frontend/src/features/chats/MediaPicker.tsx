@@ -1,9 +1,10 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
 import { pickUpload } from '../../lib/pick-upload';
 import { api, useSession } from '../../context/SessionContext';
 import type { Gif } from '../../api/types';
-import { Button, colors, Dialog, Field, Icon, IconButton, Notice } from '../../components/ui';
+import { Button, Dialog, Field, Icon, IconButton, Notice } from '../../components/ui';
 import { fileForm } from '../../lib/uploads';
 import { GifPreview } from './GifPreview';
 import { useVideos, gifFileKey } from '../../context/VideosContext';
@@ -28,6 +29,8 @@ export function MediaPicker({
   onHoldOpen: (hold: boolean) => void;
   height: number;
 }) {
+  const { colors } = useTheme();
+  const s = useStyles();
   const { session } = useSession();
   const recency = gifRecencyStore(session!.user.id);
   const order = useSyncExternalStore(recency.subscribe, recency.snapshot, recency.snapshot);
@@ -266,9 +269,9 @@ export function MediaPicker({
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   panel: {
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     overflow: 'hidden',
     borderTopWidth: 1,
     borderColor: colors.border,
@@ -305,7 +308,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     borderTopWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FCFDFE',
+    backgroundColor: colors.pickerBackground,
   },
   tab: { minWidth: 72, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
   underline: {
@@ -317,4 +320,4 @@ const s = StyleSheet.create({
     borderRadius: 1,
     backgroundColor: colors.blue,
   },
-});
+}));

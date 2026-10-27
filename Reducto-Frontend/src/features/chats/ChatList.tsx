@@ -1,15 +1,8 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
-import { Avatar, colors, Icon, IconButton, Notice, styles } from '../../components/ui';
+import { Avatar, Icon, IconButton, Notice, useUIStyles } from '../../components/ui';
 import { useSession } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
 import { conversationName, preview, timeLabel } from '../../lib/messages';
@@ -19,6 +12,9 @@ import { useProfiles } from '../../context/ProfilesContext';
 import { MentionIcon } from '../../components/MentionIcon';
 
 export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?: boolean }) {
+  const { colors } = useTheme();
+  const s = useStyles();
+  const styles = useUIStyles();
   const { session } = useSession();
   const { profiles, directory } = useProfiles();
   const {
@@ -209,7 +205,7 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
                     <View
                       testID={`unread-${chat.id}`}
                       accessibilityLabel={`${unread[chat.id]} unread messages`}
-                      style={[s.badge, selected && { backgroundColor: 'white' }]}
+                      style={[s.badge, selected && { backgroundColor: colors.surface }]}
                     >
                       <Text
                         style={{
@@ -258,8 +254,8 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
     </View>
   );
 }
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: 'white' },
+const useStyles = createThemedStyles((colors) => ({
+  root: { flex: 1, backgroundColor: colors.surface },
   header: {
     height: 78,
     flexDirection: 'row',
@@ -302,7 +298,7 @@ const s = StyleSheet.create({
   selected: { backgroundColor: colors.blue },
   rowLine: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'space-between' },
   chatName: { flex: 1, color: colors.dark, fontSize: 15, fontWeight: '600' },
-  time: { color: '#9AA7B4', fontSize: 11 },
+  time: { color: colors.timestamp, fontSize: 11 },
   preview: { color: colors.muted, fontSize: 13, flex: 1 },
   mention: {
     width: 21,
@@ -338,4 +334,4 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.blue,
   },
-});
+}));

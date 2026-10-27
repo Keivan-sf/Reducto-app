@@ -1,3 +1,4 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useMemo, useRef, useState } from 'react';
 import {
   FlatList,
@@ -9,7 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { colors, Icon } from '../../components/ui';
+import { Icon } from '../../components/ui';
 import { emojiGroups, emojiVariants, searchEmojis, type PickerEmoji } from '../../lib/emoji-picker';
 import { mostUsedEmojis } from '../../lib/emoji-usage';
 import { useEmojiUsage } from './useEmojiUsage';
@@ -18,6 +19,8 @@ type EmojiRow =
   { key: string; title: string; empty?: boolean } | { key: string; emojis: PickerEmoji[] };
 
 export function EmojiPanel({ onSelect }: { onSelect: (emoji: string) => void }) {
+  const { colors } = useTheme();
+  const s = useStyles();
   const panel = useRef<View>(null);
   const suppressTouchClick = useRef(false);
   const [toneMenu, setToneMenu] = useState<{
@@ -235,7 +238,7 @@ export function EmojiPanel({ onSelect }: { onSelect: (emoji: string) => void }) 
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   emptyText: { color: colors.muted, textAlign: 'center', padding: 8 },
   categories: {
     height: 46,
@@ -258,7 +261,7 @@ const s = StyleSheet.create({
     margin: 8,
     paddingHorizontal: 10,
     borderRadius: 10,
-    backgroundColor: '#EEEFF2',
+    backgroundColor: colors.emojiBorder,
   },
   searchInput: {
     flex: 1,
@@ -300,7 +303,7 @@ const s = StyleSheet.create({
     position: 'absolute',
     height: 54,
     zIndex: 4,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     borderRadius: 10,
     padding: 3,
     borderWidth: 1,
@@ -314,4 +317,4 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 6,
   },
-});
+}));

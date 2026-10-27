@@ -1,8 +1,9 @@
+import { useTheme } from '../context/ThemeContext';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { colors } from './ui';
 
 /** Geometric @ glyph with no platform font metrics or baseline padding. */
 export function MentionIcon({ size = 18 }: { size?: number }) {
+  const { colors } = useTheme();
   return (
     <Svg
       width={size}

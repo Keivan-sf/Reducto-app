@@ -1,14 +1,8 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useState } from 'react';
-import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type GestureResponderEvent,
-} from 'react-native';
+import { Platform, Pressable, Text, View, type GestureResponderEvent } from 'react-native';
 import type { AttachmentMetadata } from '../../api/types';
-import { colors } from '../../components/ui';
+
 import { useAttachmentMetadata } from '../../context/MediaMetadataContext';
 import { documentFileKey, useCachedFile } from '../../context/VideosContext';
 import { openLocalFile } from '../../lib/local-attachments';
@@ -31,6 +25,7 @@ export function DocumentMessage({
   onOptions: (event: GestureResponderEvent) => void;
   onError: (message: string) => void;
 }) {
+  const s = useStyles();
   const metadata = useAttachmentMetadata(conversationId, mediaId, active, initialMetadata);
   const { state, download, cancel } = useCachedFile(
     documentFileKey(conversationId, mediaId),
@@ -116,7 +111,7 @@ export function DocumentMessage({
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   row: {
     width: 280,
     maxWidth: '100%',
@@ -135,5 +130,5 @@ const s = StyleSheet.create({
   },
   details: { flex: 1, minWidth: 0, gap: 5 },
   name: { fontSize: 14, fontWeight: '500', color: colors.dark },
-  size: { fontSize: 12, lineHeight: 14, color: '#6C93AF' },
-});
+  size: { fontSize: 12, lineHeight: 14, color: colors.fileAccent },
+}));

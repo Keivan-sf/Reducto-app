@@ -1,6 +1,7 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
-import { Animated, PanResponder, Platform, StyleSheet, View } from 'react-native';
-import { colors, Icon } from '../../components/ui';
+import { Animated, PanResponder, Platform, View } from 'react-native';
+import { Icon } from '../../components/ui';
 
 const threshold = 64;
 const horizontal = (dx: number, dy: number) => dx < -10 && -dx > Math.abs(dy) * 1.5;
@@ -19,6 +20,7 @@ export function SwipeToReply({
   onReply,
   messageId,
 }: PropsWithChildren<{ disabled: boolean; onReply: () => void; messageId: string }>) {
+  const s = useStyles();
   const surface = useRef<View>(null);
   const [offset] = useState(() => new Animated.Value(0));
   const latest = useRef({ disabled, onReply });
@@ -180,7 +182,7 @@ export function SwipeToReply({
 }
 
 const webStyle = { position: 'relative', touchAction: 'pan-y' } as const;
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   indicator: {
     position: 'absolute',
     right: 12,
@@ -193,4 +195,4 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}));

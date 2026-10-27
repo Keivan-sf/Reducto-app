@@ -1,10 +1,10 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   useWindowDimensions,
   View,
@@ -13,12 +13,14 @@ import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api, useSession } from '../../context/SessionContext';
 import type { Session } from '../../api/types';
-import { Button, colors, Field, Icon, Notice } from '../../components/ui';
+import { Button, Field, Icon, Notice } from '../../components/ui';
 import { isValidUsername, normalizeUsername } from '../../lib/usernames';
 import { groupJoinPath } from '../../lib/links';
 import { normalizeServerUrl } from '../../lib/server';
 
 export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
+  const { colors } = useTheme();
+  const s = useStyles();
   const { establish, serverUrl, configureServer } = useSession();
   const [server, setServer] = useState(serverUrl);
   const [signup, setSignup] = useState(false);
@@ -227,8 +229,8 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
     </KeyboardAvoidingView>
   );
 }
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: 'white', flexDirection: 'row' },
+const useStyles = createThemedStyles((colors) => ({
+  root: { flex: 1, backgroundColor: colors.surface, flexDirection: 'row' },
   story: { width: '45%', padding: 48, justifyContent: 'space-between' },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   brandName: { fontSize: 27, color: 'white', fontWeight: '700', letterSpacing: -1 },
@@ -297,7 +299,7 @@ const s = StyleSheet.create({
     marginBottom: 28,
   },
   tab: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 9 },
-  activeTab: { backgroundColor: 'white', boxShadow: '0 1px 5px #17212B10' },
+  activeTab: { backgroundColor: colors.surface, boxShadow: '0 1px 5px #17212B10' },
   caption: {
     flexDirection: 'row',
     gap: 7,
@@ -307,4 +309,4 @@ const s = StyleSheet.create({
   },
   captionText: { fontSize: 12, color: '#99A8B5' },
   footer: { fontSize: 10, color: '#A0ADBA', letterSpacing: 1.5, paddingTop: 20 },
-});
+}));

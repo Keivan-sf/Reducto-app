@@ -1,8 +1,9 @@
+import { useTheme } from '../../context/ThemeContext';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, Image, Text } from 'react-native';
 import { useCachedFile, useVideos, gifFileKey } from '../../context/VideosContext';
 import { useGifs } from '../../context/GifsContext';
-import { colors } from '../../components/ui';
+
 import { GifPlayer } from './GifPlayer';
 import { ServerThumbnail } from './ServerThumbnail';
 import { MediaPreview } from './MediaPreview';
@@ -20,6 +21,7 @@ export function GifPreview({
   initialMetadata?: Gif;
   fill?: boolean;
 }) {
+  const { colors } = useTheme();
   const cache = useGifs();
   const files = useVideos();
   const { state: localState, download } = useCachedFile(gifFileKey(gifId), active);

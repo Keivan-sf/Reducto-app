@@ -1,7 +1,8 @@
+import { useTheme } from '../../context/ThemeContext';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Text } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { colors } from '../../components/ui';
+
 import type { MediaSize } from '../../lib/media-preview';
 import { MediaPreview } from './MediaPreview';
 import type { GifPlayerProps } from './GifPlayer';
@@ -19,6 +20,7 @@ export function GifPlayer({
   cached = false,
   fill = false,
 }: GifPlayerProps) {
+  const { colors } = useTheme();
   const viewers = useMediaViewers();
   const [readyUri, setReadyUri] = useState<string>();
   const video = useRef<HTMLVideoElement>(null);

@@ -1,5 +1,6 @@
+import { createThemedStyles } from '../../context/ThemeContext';
 import { type PropsWithChildren } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 import { mediaPreviewSize, type MediaSize } from '../../lib/media-preview';
 
 export function MediaPreview({
@@ -8,6 +9,7 @@ export function MediaPreview({
   label,
   fill = false,
 }: PropsWithChildren<{ size?: MediaSize; label: string; fill?: boolean }>) {
+  const s = useStyles();
   return (
     <View
       accessibilityLabel={label}
@@ -22,13 +24,13 @@ export function MediaPreview({
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   frame: {
     maxWidth: '100%',
     borderRadius: 10,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E4EBF1',
+    backgroundColor: colors.mediaPlaceholder,
   },
-});
+}));

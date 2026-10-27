@@ -1,10 +1,13 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, Icon, Notice } from '../../components/ui';
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
+import { Pressable, Text, View } from 'react-native';
+import { Icon, Notice } from '../../components/ui';
 import { useVoicePlayback, useVoicePlaybackState } from '../../context/VoicePlaybackContext';
 import { useProfiles } from '../../context/ProfilesContext';
 import { profileName } from '../../lib/messages';
 
 export function VoiceMiniPlayer() {
+  const { colors } = useTheme();
+  const s = useStyles();
   const playback = useVoicePlayback();
   const state = useVoicePlaybackState();
   const { profiles } = useProfiles();
@@ -38,7 +41,7 @@ export function VoiceMiniPlayer() {
     </View>
   );
 }
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   bar: {
     height: 36,
     flexDirection: 'row',
@@ -51,4 +54,4 @@ const s = StyleSheet.create({
   },
   button: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   name: { flex: 1, color: colors.dark, fontSize: 13, fontWeight: '500' },
-});
+}));

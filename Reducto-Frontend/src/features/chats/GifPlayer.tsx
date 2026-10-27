@@ -1,9 +1,10 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, StyleSheet, Text } from 'react-native';
 import { useEvent } from 'expo';
 import { useIsFocused } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { colors } from '../../components/ui';
+
 import { MediaPreview } from './MediaPreview';
 import type { MediaSize } from '../../lib/media-preview';
 import { ServerThumbnail } from './ServerThumbnail';
@@ -32,6 +33,8 @@ export function GifPlayer({
   cached = false,
   fill = false,
 }: GifPlayerProps) {
+  const { colors } = useTheme();
+  const s = useStyles();
   const [frameUri, setFrameUri] = useState<string>();
   const viewers = useMediaViewers();
   const focused = useIsFocused();
@@ -91,6 +94,6 @@ export function GifPlayer({
   );
 }
 
-const s = StyleSheet.create({
-  error: { color: colors.muted, backgroundColor: '#E4EBF1', padding: 8 },
-});
+const useStyles = createThemedStyles((colors) => ({
+  error: { color: colors.muted, backgroundColor: colors.mediaPlaceholder, padding: 8 },
+}));

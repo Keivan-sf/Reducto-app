@@ -1,3 +1,4 @@
+import { themeContextMock } from './fixtures/theme-context';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -56,6 +57,7 @@ function mount(file: string, imports: Record<string, unknown>) {
     module,
     exports: module.exports,
     require(name: string) {
+      if (name.endsWith('/ThemeContext')) return themeContextMock;
       if (name === 'react') return react;
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name in imports) return imports[name];

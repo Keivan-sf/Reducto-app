@@ -1,3 +1,4 @@
+import { useTheme, createThemedStyles } from '../context/ThemeContext';
 import { useState, type ComponentProps, type PropsWithChildren } from 'react';
 import { NoticeProvider } from './Notice';
 import {
@@ -8,7 +9,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -17,25 +17,17 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { initials } from '../lib/messages';
 export { Notice } from './Notice';
 
-export const colors = {
-  blue: '#3390EC',
-  dark: '#17212B',
-  muted: '#7A8A99',
-  border: '#E9EDF2',
-  pale: '#F4F7FA',
-  green: '#DFF3D3',
-  danger: '#CF4545',
-};
 export function Icon({
   name,
   size = 22,
-  color = colors.muted,
+  color,
 }: {
   name: ComponentProps<typeof Ionicons>['name'];
   size?: number;
   color?: string;
 }) {
-  return <Ionicons name={name} size={size} color={color} />;
+  const { colors } = useTheme();
+  return <Ionicons name={name} size={size} color={color ?? colors.muted} />;
 }
 export function IconButton({
   name,
@@ -50,6 +42,7 @@ export function IconButton({
   color?: string;
   disabled?: boolean;
 }) {
+  const styles = useUIStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -67,7 +60,7 @@ export function Avatar({
   uri,
   size = 48,
   online = false,
-  badgeBorderColor = 'white',
+  badgeBorderColor,
 }: {
   name: string;
   uri?: string;
@@ -75,6 +68,7 @@ export function Avatar({
   online?: boolean;
   badgeBorderColor?: string;
 }) {
+  const { colors } = useTheme();
   const [failedUri, setFailedUri] = useState<string>();
   const palette = ['#62A6E9', '#9A83DA', '#E4A55C', '#65B7A3', '#DC8096'];
   const tint = palette[[...name].reduce((sum, c) => sum + c.charCodeAt(0), 0) % palette.length];
@@ -113,7 +107,7 @@ export function Avatar({
             borderRadius: size,
             backgroundColor: colors.blue,
             borderWidth: 2,
-            borderColor: badgeBorderColor,
+            borderColor: badgeBorderColor ?? colors.surface,
           }}
         />
       )}
@@ -135,6 +129,8 @@ export function Button({
   danger?: boolean;
   disabled?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useUIStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -143,7 +139,7 @@ export function Button({
       style={({ pressed }) => [
         styles.button,
         secondary && styles.secondary,
-        danger && { backgroundColor: '#FCEDED' },
+        danger && { backgroundColor: colors.dangerBackground },
         (pressed || busy || disabled) && { opacity: 0.6 },
       ]}
     >
@@ -164,6 +160,7 @@ export function Button({
   );
 }
 export function Field({ label, ...props }: ComponentProps<typeof TextInput> & { label: string }) {
+  const styles = useUIStyles();
   return (
     <View style={{ gap: 7 }}>
       <Text style={styles.label}>{label}</Text>
@@ -182,6 +179,7 @@ export function Dialog({
   onClose,
   children,
 }: PropsWithChildren<{ visible: boolean; title: string; onClose: () => void }>) {
+  const styles = useUIStyles();
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
       {/* Modals have their own window, outside the root keyboard-avoiding view. */}
@@ -208,7 +206,7 @@ export function Dialog({
     </Modal>
   );
 }
-export const styles = StyleSheet.create({
+export const useUIStyles = createThemedStyles((colors) => ({
   title: { fontSize: 20, fontWeight: '600', color: colors.dark },
   subtitle: { color: colors.muted, fontSize: 14, lineHeight: 22 },
   iconButton: {
@@ -226,12 +224,12 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  secondary: { backgroundColor: '#EDF5FE' },
-  label: { fontSize: 13, fontWeight: '500', color: '#596A7B' },
+  secondary: { backgroundColor: colors.secondary },
+  label: { fontSize: 13, fontWeight: '500', color: colors.label },
   input: {
     borderWidth: 1,
-    borderColor: '#DDE4EB',
-    backgroundColor: 'white',
+    borderColor: colors.inputBorder,
+    backgroundColor: colors.surface,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 13,
@@ -250,7 +248,7 @@ export const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 480,
     maxHeight: '88%',
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     borderRadius: 20,
     overflow: 'hidden',
   },
@@ -261,4 +259,4 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-});
+}));

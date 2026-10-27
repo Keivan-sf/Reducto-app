@@ -1,10 +1,11 @@
+import { useTheme } from '../context/ThemeContext';
 import { useEffect, useState, type PropsWithChildren } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { loadIconFont } from '../lib/load-icon-font';
-import { colors } from './ui';
 
 /** Keep icons from starting uncaught font downloads in their mount lifecycle. */
 export function IconFontGate({ children }: PropsWithChildren) {
+  const { colors } = useTheme();
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -33,7 +34,7 @@ export function IconFontGate({ children }: PropsWithChildren) {
     <View
       style={{
         flex: 1,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,

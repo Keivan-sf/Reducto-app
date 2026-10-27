@@ -1,16 +1,16 @@
+import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
   Platform,
   Pressable,
-  StyleSheet,
   Text,
   View,
   type GestureResponderEvent,
 } from 'react-native';
 import { useIsFocused } from 'expo-router';
-import { Icon, colors } from '../../components/ui';
+import { Icon } from '../../components/ui';
 import { HoldRecorder } from '../../lib/hold-recorder';
 import { beginVoiceRecording } from '../../lib/voice-recording';
 import { videoTime } from '../../lib/video-download.types';
@@ -31,6 +31,8 @@ export function VoiceRecordButton({
   onError: (error: string) => void;
   onActive: (active: boolean) => void;
 }) {
+  const { colors } = useTheme();
+  const s = useStyles();
   const [phase, setPhase] = useState<RecordingPhase>('idle');
   const [elapsed, setElapsed] = useState(0);
   const gesture = useRef({ x: 0, y: 0, send: false, identifier: '' });
@@ -253,7 +255,7 @@ export function VoiceRecordButton({
   );
 }
 const webGestureStyle = { touchAction: 'none', userSelect: 'none', cursor: 'pointer' } as const;
-const s = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => ({
   mic: {
     width: 44,
     height: 44,
@@ -284,4 +286,4 @@ const s = StyleSheet.create({
     gap: 8,
   },
   lockText: { color: colors.muted, fontSize: 10, textAlign: 'center' },
-});
+}));

@@ -1,15 +1,18 @@
+import { useTheme } from '../../context/ThemeContext';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { api } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
-import { Button, colors, Dialog, Field, Notice, styles } from '../../components/ui';
+import { Button, Dialog, Field, Notice, useUIStyles } from '../../components/ui';
 import type { Conversation } from '../../api/types';
 import { isValidUsername, normalizeUsername } from '../../lib/usernames';
 import { useProfiles } from '../../context/ProfilesContext';
 import { groupInviteToken, groupJoinPath } from '../../lib/links';
 
 export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const { colors } = useTheme();
+  const styles = useUIStyles();
   const { loadConversation } = useChats();
   const { directory } = useProfiles();
   const [mode, setMode] = useState<'private' | 'group' | 'join'>('private');
@@ -71,7 +74,7 @@ export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose:
               flex: 1,
               padding: 10,
               borderRadius: 10,
-              backgroundColor: mode === type ? '#EAF4FF' : colors.pale,
+              backgroundColor: mode === type ? colors.newChat : colors.pale,
               alignItems: 'center',
             }}
           >

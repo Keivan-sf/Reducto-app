@@ -1,13 +1,16 @@
+import { useTheme } from '../../context/ThemeContext';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { api } from '../../context/SessionContext';
 import { useChats } from '../../context/ChatsContext';
 import type { Conversation } from '../../api/types';
-import { Button, colors, Notice, styles } from '../../components/ui';
+import { Button, Notice, useUIStyles } from '../../components/ui';
 import { groupJoinPath, INVITE_TOKEN } from '../../lib/links';
 
 export default function JoinGroupScreen({ token }: { token: string }) {
+  const { colors } = useTheme();
+  const styles = useUIStyles();
   const { loadConversation } = useChats();
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);

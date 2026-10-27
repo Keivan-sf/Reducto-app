@@ -1,3 +1,4 @@
+import { useTheme } from '../context/ThemeContext';
 import { useSyncExternalStore, type PropsWithChildren } from 'react';
 import { Keyboard, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +16,7 @@ const keyboardIsVisible = () => Platform.OS === 'android' && Keyboard.isVisible(
 const serverKeyboardIsVisible = () => false;
 
 export function AppViewport({ children }: PropsWithChildren) {
+  const { colors } = useTheme();
   const keyboardVisible = useSyncExternalStore(
     subscribeToKeyboard,
     keyboardIsVisible,
@@ -24,7 +26,7 @@ export function AppViewport({ children }: PropsWithChildren) {
   return (
     // Use screen coordinates for keyboard avoidance, outside the safe area.
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: 'white' }}
+      style={{ flex: 1, backgroundColor: colors.surface }}
       enabled={Platform.OS === 'android'}
       behavior="height"
     >
