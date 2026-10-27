@@ -2278,6 +2278,53 @@ for (const anchored of [true, false]) {
   });
 }
 
+test('conversation list scrollbar overlays rows and scrolls in the list direction', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.route('**:3001/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        conversations: [
+          chat,
+          ...Array.from({ length: 50 }, (_, index) => ({
+            ...chat,
+            id: `scroll-chat-${index}`,
+            name: `Conversation ${index}`,
+          })),
+        ],
+      },
+    }),
+  );
+  await signIn(page);
+  const list = page.getByTestId('conversation-list');
+  const thumb = page.getByRole('scrollbar', { name: 'Conversation list scrollbar' });
+  await expect(thumb).toBeVisible();
+  expect(
+    await list.evaluate((element: HTMLElement) => element.offsetWidth - element.clientWidth),
+  ).toBe(0);
+  const bounds = (await thumb.boundingBox())!;
+  expect(bounds.width).toBe(6);
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x - 40, bounds.y + bounds.height / 2 + 100);
+  await page.mouse.up();
+  await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+  await thumb.press('Home');
+  await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(0);
+  await thumb.press('ArrowDown');
+  await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(40);
+  // Virtualization can extend the measured range after reaching the current end.
+  await expect(async () => {
+    await thumb.press('End');
+    expect(
+      await list.evaluate((element) =>
+        Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop),
+      ),
+    ).toBeLessThan(1);
+  }).toPass();
+});
+
 test('chat scrollbar overlays history without a gutter and supports dragging', async ({ page }) => {
   await mockApi(
     page,

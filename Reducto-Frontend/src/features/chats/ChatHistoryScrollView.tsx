@@ -4,7 +4,10 @@ import type { ChatHistoryScrollProps } from './ChatHistoryScrollView.types';
 
 // Native scroll indicators already overlay their content without reserving width.
 export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollProps>(
-  function ChatHistoryScrollView({ onUserScroll, ...props }, ref) {
+  function ChatHistoryScrollView(
+    { onUserScroll, scrollbarInverted: _inverted, scrollbarLabel: _label, ...props },
+    ref,
+  ) {
     return (
       <ScrollView
         {...props}

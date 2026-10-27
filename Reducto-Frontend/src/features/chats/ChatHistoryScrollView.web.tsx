@@ -10,10 +10,13 @@ interface ThumbDrag {
   height: number;
 }
 
-/** A transparent overlay for inverted chat history. Paint directly once per
+/** A transparent overlay shared by chat history and the conversation list. Paint once per
  * animation frame so scrolling never waits for a React render. */
 export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollProps>(
-  function ChatHistoryScrollView({ onUserScroll, ...props }, ref) {
+  function ChatHistoryScrollView(
+    { onUserScroll, scrollbarInverted = true, scrollbarLabel = 'Chat scrollbar', ...props },
+    ref,
+  ) {
     const scrollId = useId();
     const scroll = useRef<ScrollView>(null);
     const thumb = useRef<HTMLDivElement>(null);
@@ -45,13 +48,20 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
         );
         // Virtualization can change the total height during a drag. Keep the
         // thumb under the pointer and map that position to the current range.
-        content.scrollTop = maximum * (1 - (top - 2) / travel);
-      } else top = 2 + travel * (1 - Math.min(maximum, Math.max(0, content.scrollTop)) / maximum);
+        const fraction = (top - 2) / travel;
+        content.scrollTop = maximum * (scrollbarInverted ? 1 - fraction : fraction);
+      } else {
+        const fraction = Math.min(maximum, Math.max(0, content.scrollTop)) / maximum;
+        top = 2 + travel * (scrollbarInverted ? 1 - fraction : fraction);
+      }
       indicator.style.height = `${thumbHeight}px`;
       indicator.style.transform = `translate3d(0, ${top}px, 0)`;
       indicator.setAttribute('aria-valuemax', String(Math.round(maximum)));
-      indicator.setAttribute('aria-valuenow', String(Math.round(maximum - content.scrollTop)));
-    }, []);
+      indicator.setAttribute(
+        'aria-valuenow',
+        String(Math.round(scrollbarInverted ? maximum - content.scrollTop : content.scrollTop)),
+      );
+    }, [scrollbarInverted]);
     const schedulePaint = useCallback(() => {
       if (frame.current !== undefined) return;
       frame.current = requestAnimationFrame(() => {
@@ -115,7 +125,7 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
         <div
           ref={thumb}
           role="scrollbar"
-          aria-label="Chat scrollbar"
+          aria-label={scrollbarLabel}
           aria-controls={scrollId}
           aria-orientation="vertical"
           aria-valuemin={0}
@@ -166,19 +176,24 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
             const content = node();
             if (!enabled || !content) return;
             const maximum = Math.max(0, content.scrollHeight - content.clientHeight);
+            const direction = scrollbarInverted ? -1 : 1;
             const offset =
               event.key === 'ArrowUp'
-                ? content.scrollTop + 40
+                ? content.scrollTop - direction * 40
                 : event.key === 'ArrowDown'
-                  ? content.scrollTop - 40
+                  ? content.scrollTop + direction * 40
                   : event.key === 'PageUp'
-                    ? content.scrollTop + content.clientHeight
+                    ? content.scrollTop - direction * content.clientHeight
                     : event.key === 'PageDown'
-                      ? content.scrollTop - content.clientHeight
+                      ? content.scrollTop + direction * content.clientHeight
                       : event.key === 'Home'
-                        ? maximum
+                        ? scrollbarInverted
+                          ? maximum
+                          : 0
                         : event.key === 'End'
-                          ? 0
+                          ? scrollbarInverted
+                            ? 0
+                            : maximum
                           : undefined;
             if (offset === undefined) return;
             onUserScroll?.();

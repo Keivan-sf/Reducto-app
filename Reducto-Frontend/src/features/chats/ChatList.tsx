@@ -1,6 +1,14 @@
 import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+  type ScrollViewProps,
+} from 'react-native';
 import { router } from 'expo-router';
 import { Avatar, Icon, IconButton, Notice, useUIStyles } from '../../components/ui';
 import { useSession } from '../../context/SessionContext';
@@ -10,6 +18,17 @@ import { NewChatDialog } from './NewChatDialog';
 import { VoiceMiniPlayer } from './VoiceMiniPlayer';
 import { useProfiles } from '../../context/ProfilesContext';
 import { MentionIcon } from '../../components/MentionIcon';
+import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+
+function renderChatListScroll(props: ScrollViewProps) {
+  return (
+    <ChatHistoryScrollView
+      {...props}
+      scrollbarInverted={false}
+      scrollbarLabel="Conversation list scrollbar"
+    />
+  );
+}
 
 export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?: boolean }) {
   const { colors } = useTheme();
@@ -121,6 +140,8 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
       {showVoicePlayer && <VoiceMiniPlayer />}
       <Notice text={error} onDismiss={() => setError('')} />
       <FlatList
+        testID="conversation-list"
+        renderScrollComponent={renderChatListScroll}
         data={chats}
         keyExtractor={(chat) => chat.id}
         refreshing={refreshing}
