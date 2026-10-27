@@ -903,12 +903,12 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
           style={{ padding: 8 }}
         />
       )}
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, minHeight: 0 }}>
         <View
           ref={(view) => mentionVisibility.setViewport(view)}
           collapsable={false}
           testID="positioned-chat-history"
-          style={{ flex: 1, opacity: openingHistory ? 0 : 1 }}
+          style={[s.historyViewport, { opacity: openingHistory ? 0 : 1 }]}
           pointerEvents={openingHistory ? 'none' : 'auto'}
           accessibilityElementsHidden={openingHistory}
           importantForAccessibility={openingHistory ? 'no-hide-descendants' : 'auto'}
@@ -1561,6 +1561,8 @@ const useStyles = createThemedStyles((colors) => ({
     alignItems: 'center',
     paddingHorizontal: 12,
   },
+  // Inverted rows create transformed layers; clip them below the header border.
+  historyViewport: { flex: 1, minHeight: 0, overflow: 'hidden' },
   history: { paddingHorizontal: 20, paddingVertical: 14 },
   messageRow: { flexDirection: 'row', marginBottom: 9 },
   bubble: {

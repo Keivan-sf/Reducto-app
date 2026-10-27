@@ -318,7 +318,7 @@ const useStyles = createThemedStyles((colors) => ({
   },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 15 },
   footer: {
-    height: 76,
+    height: 56,
     borderTopWidth: 1,
     borderColor: colors.border,
     flexDirection: 'row',
@@ -327,9 +327,9 @@ const useStyles = createThemedStyles((colors) => ({
     paddingHorizontal: 20,
   },
   compose: {
-    width: 48,
-    height: 48,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.blue,
