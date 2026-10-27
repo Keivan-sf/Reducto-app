@@ -20,7 +20,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const preferenceKey = 'reducto-theme';
 
 export function ThemeProvider({ children }: PropsWithChildren) {
-  const [theme, setCurrentTheme] = useState<ThemeName>('light');
+  const [theme, setCurrentTheme] = useState<ThemeName>('dark');
   const [ready, setReady] = useState(false);
   const writes = useRef(Promise.resolve());
   useEffect(() => {

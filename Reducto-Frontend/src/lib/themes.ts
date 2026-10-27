@@ -84,5 +84,5 @@ export const darkColors: ThemeColors = {
 };
 export const themePalettes = { light: lightColors, dark: darkColors };
 export function parseTheme(value: string | null): ThemeName {
-  return value === 'dark' ? 'dark' : 'light';
+  return value === 'light' ? 'light' : 'dark';
 }

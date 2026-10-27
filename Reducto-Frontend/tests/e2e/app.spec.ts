@@ -6814,6 +6814,9 @@ test('settings theme applies immediately, persists after reload, and restores th
       theme === 'dark' ? 'rgb(23, 33, 43)' : 'rgb(255, 255, 255)',
     );
   }
+  await expect(dark).toBeChecked();
+  await expectBrowserTheme('dark');
+  await current.click();
   await expect(current).toBeChecked();
   await expectBrowserTheme('light');
   await expect(name).toHaveCSS('background-color', 'rgb(255, 255, 255)');
