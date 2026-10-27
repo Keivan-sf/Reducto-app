@@ -6484,11 +6484,25 @@ test('settings theme applies immediately, persists after reload, and restores th
   const current = page.getByRole('radio', { name: 'Current theme', exact: true });
   const dark = page.getByRole('radio', { name: 'Dark theme', exact: true });
   const name = page.getByRole('textbox', { name: 'Display name', exact: true });
+  async function expectBrowserTheme(theme: 'light' | 'dark') {
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
+      'content',
+      theme === 'dark' ? '#17212B' : 'white',
+    );
+    await expect(page.locator('meta[name="color-scheme"]')).toHaveAttribute('content', theme);
+    await expect(page.locator('html')).toHaveCSS('color-scheme', theme);
+    await expect(page.locator('body')).toHaveCSS(
+      'background-color',
+      theme === 'dark' ? 'rgb(23, 33, 43)' : 'rgb(255, 255, 255)',
+    );
+  }
   await expect(current).toBeChecked();
+  await expectBrowserTheme('light');
   await expect(name).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await name.fill('Unsaved profile name');
   await dark.click();
   await expect(dark).toBeChecked();
+  await expectBrowserTheme('dark');
   await expect(name).toHaveValue('Unsaved profile name');
   await expect(name).toHaveCSS('background-color', 'rgb(23, 33, 43)');
   await expect(name).toHaveCSS('color', 'rgb(240, 243, 245)');
@@ -6496,6 +6510,7 @@ test('settings theme applies immediately, persists after reload, and restores th
   await page.screenshot({ path: testInfo.outputPath('dark-settings.png'), fullPage: true });
   await page.reload();
   await expect(dark).toBeChecked();
+  await expectBrowserTheme('dark');
   await expect(name).toHaveCSS('background-color', 'rgb(23, 33, 43)');
   await page.getByRole('button', { name: 'Back to chats' }).click();
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
@@ -6512,9 +6527,11 @@ test('settings theme applies immediately, persists after reload, and restores th
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await current.click();
   await expect(current).toBeChecked();
+  await expectBrowserTheme('light');
   await expect(name).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('reducto-theme'))).toBe('light');
   await page.reload();
   await expect(current).toBeChecked();
+  await expectBrowserTheme('light');
   expect(errors).toEqual([]);
 });

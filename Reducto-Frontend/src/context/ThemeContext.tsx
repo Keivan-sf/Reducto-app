@@ -7,6 +7,7 @@ import {
   type PropsWithChildren,
 } from 'react';
 import { StyleSheet } from 'react-native';
+import { syncBrowserTheme } from '../lib/browser-theme';
 import { readClientPreference, writeClientPreference } from '../lib/client-preferences';
 import { parseTheme, themePalettes, type ThemeColors, type ThemeName } from '../lib/themes';
 
@@ -36,6 +37,10 @@ export function ThemeProvider({ children }: PropsWithChildren) {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (ready) syncBrowserTheme(theme);
+  }, [ready, theme]);
 
   function setTheme(next: ThemeName) {
     setCurrentTheme(next);
