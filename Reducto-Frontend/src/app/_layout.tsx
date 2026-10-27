@@ -1,6 +1,7 @@
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { NavigationBar } from 'expo-navigation-bar';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider, useSession } from '../context/SessionContext';
@@ -42,6 +43,7 @@ function ThemedApp() {
         <View style={{ flex: 1, backgroundColor: colors.surface }}>
           <NoticeProvider>
             <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
+            <NavigationBar style={theme === 'dark' ? 'light' : 'dark'} />
             <IconFontGate>
               <Navigation />
             </IconFontGate>
