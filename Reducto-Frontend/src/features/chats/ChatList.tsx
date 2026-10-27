@@ -1,5 +1,5 @@
 import { useTheme, createThemedStyles } from '../../context/ThemeContext';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -30,7 +30,13 @@ function renderChatListScroll(props: ScrollViewProps) {
   );
 }
 
-export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?: boolean }) {
+export default function ChatList({
+  showVoicePlayer = true,
+  activeChatId,
+}: {
+  showVoicePlayer?: boolean;
+  activeChatId?: string;
+}) {
   const { colors } = useTheme();
   const s = useStyles();
   const styles = useUIStyles();
@@ -42,7 +48,6 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
     outgoing,
     members,
     unread,
-    activeId,
     loading,
     connection,
     error,
@@ -53,6 +58,29 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
   const [filter, setFilter] = useState('All chats');
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [selection, setSelection] = useState({ routeId: activeChatId, id: activeChatId });
+  const navigationFrame = useRef<number | null>(null);
+  // Follow back/deep-link navigation while allowing immediate feedback on list clicks.
+  if (selection.routeId !== activeChatId) {
+    setSelection({ routeId: activeChatId, id: activeChatId });
+  }
+  useEffect(
+    () => () => {
+      if (navigationFrame.current !== null) cancelAnimationFrame(navigationFrame.current);
+    },
+    [activeChatId],
+  );
+  function openChat(id: string) {
+    setSelection({ routeId: activeChatId, id });
+    if (navigationFrame.current !== null) cancelAnimationFrame(navigationFrame.current);
+    // Let the selected row paint before mounting and loading the conversation.
+    navigationFrame.current = requestAnimationFrame(() => {
+      navigationFrame.current = requestAnimationFrame(() => {
+        navigationFrame.current = null;
+        router.push(`/chat/${id}`);
+      });
+    });
+  }
   function peer(chat: (typeof conversations)[number]) {
     const id = members[chat.id]?.find((member) => member.userId !== session!.user.id)?.userId;
     return chat.type === 'private' && id ? profiles[id] : undefined;
@@ -146,7 +174,7 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
         keyExtractor={(chat) => chat.id}
         refreshing={refreshing}
         onRefresh={() => void reload()}
-        contentContainerStyle={{ flexGrow: 1, padding: 8 }}
+        contentContainerStyle={{ flexGrow: 1 }}
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator style={{ marginTop: 60 }} color={colors.blue} />
@@ -175,41 +203,32 @@ export default function ChatList({ showVoicePlayer = true }: { showVoicePlayer?:
         }
         renderItem={({ item: chat }) => {
           const last = lastMessage(chat.id);
-          const selected = activeId === chat.id;
+          const selected = selection.id === chat.id;
           return (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Open ${title(chat)}`}
-              onPress={() => router.push(`/chat/${chat.id}`)}
-              style={({ pressed }) => [s.row, selected && s.selected, pressed && { opacity: 0.7 }]}
+              accessibilityState={{ selected }}
+              aria-selected={selected}
+              onPress={() => openChat(chat.id)}
+              style={[s.row, selected && s.selected]}
             >
               <Avatar
                 name={title(chat)}
                 uri={peer(chat)?.avatarUrl ?? undefined}
                 size={52}
                 online={peer(chat)?.online}
-                badgeBorderColor={selected ? '#E8F3FF' : 'white'}
+                badgeBorderColor={colors.surface}
               />
               <View style={{ flex: 1, gap: 7 }}>
                 <View style={s.rowLine}>
-                  <Text numberOfLines={1} style={[s.chatName, selected && { color: 'white' }]}>
+                  <Text numberOfLines={1} style={s.chatName}>
                     {title(chat)}
                   </Text>
-                  <Text style={[s.time, selected && { color: '#DDEEFF' }]}>
-                    {last ? timeLabel(last.createdAt) : ''}
-                  </Text>
+                  <Text style={s.time}>{last ? timeLabel(last.createdAt) : ''}</Text>
                 </View>
-                {peer(chat)?.username && (
-                  <Text numberOfLines={1} style={[s.time, selected && { color: '#DDEEFF' }]}>
-                    @{peer(chat)!.username}
-                  </Text>
-                )}
                 <View style={s.rowLine}>
-                  <Text
-                    testID={`preview-${chat.id}`}
-                    numberOfLines={1}
-                    style={[s.preview, selected && { color: '#E6F1FE' }]}
-                  >
+                  <Text testID={`preview-${chat.id}`} numberOfLines={1} style={s.preview}>
                     {last?.senderId === session!.user.id ? 'You: ' : ''}
                     {last ? preview(last) : last === null ? preview() : ''}
                   </Text>
@@ -319,11 +338,9 @@ const useStyles = createThemedStyles((colors) => ({
     gap: 12,
     padding: 12,
     alignItems: 'center',
-    borderRadius: 12,
-    marginBottom: 2,
     minHeight: 80,
   },
-  selected: { backgroundColor: colors.blue },
+  selected: { backgroundColor: colors.selectedChat },
   rowLine: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'space-between' },
   chatName: { flex: 1, color: colors.dark, fontSize: 15, fontWeight: '600' },
   time: { color: colors.timestamp, fontSize: 11 },

@@ -29,7 +29,7 @@ export default function ChatShell({ id, active }: { id?: string; active: boolean
             : undefined
         }
       >
-        <ChatList showVoicePlayer={!id} />
+        <ChatList showVoicePlayer={!id} activeChatId={id} />
       </RetainedLayer>
       <View style={{ flex: 1, marginLeft: sidebarVisible ? 360 : 0 }}>
         <RetainedLayer active={active && wide && !id}>

@@ -1,6 +1,7 @@
 export type ThemeName = 'light' | 'dark';
 export const lightColors = {
   blue: '#3390EC',
+  selectedChat: 'rgba(51, 144, 236, 0.2)',
   dark: '#17212B',
   muted: '#7A8A99',
   border: '#E9EDF2',
@@ -42,6 +43,7 @@ export const lightColors = {
 export type ThemeColors = typeof lightColors;
 export const darkColors: ThemeColors = {
   blue: '#6AB2F2',
+  selectedChat: 'rgba(106, 178, 242, 0.2)',
   dark: '#F0F3F5',
   muted: '#9AAABB',
   border: '#2B3B4B',

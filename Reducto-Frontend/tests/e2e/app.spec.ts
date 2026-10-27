@@ -613,6 +613,62 @@ async function signIn(page: Page) {
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 }
 
+test('chat rows hide usernames and paint full-width selection before navigation', async ({
+  page,
+}) => {
+  await mockApi(page);
+  const privateChat = { ...chat, id: 'private-chat', type: 'private', name: null };
+  await page.route('**/api/users/friend', (route) =>
+    route.fulfill({ json: { user: { ...friend, online: true } } }),
+  );
+  await page.route('**/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [chat, privateChat] } }),
+  );
+  await page.route(`**/api/conversations/${privateChat.id}`, (route) =>
+    route.fulfill({ json: { conversation: privateChat } }),
+  );
+  await signIn(page);
+  const list = page.getByTestId('conversation-list');
+  const row = page.getByRole('button', {
+    name: 'Open Grace Hopper',
+    exact: true,
+    includeHidden: true,
+  });
+  await expect(row).toBeVisible();
+  await expect(list.getByText('@grace', { exact: true })).toHaveCount(0);
+  await expect(row).toHaveCSS('border-radius', '0px');
+  const [listBox, rowBox] = await Promise.all([list.boundingBox(), row.boundingBox()]);
+  expect(rowBox!.x).toBeCloseTo(listBox!.x, 0);
+  expect(rowBox!.width).toBeCloseTo(listBox!.width, 0);
+
+  // Sample at paint time, before navigation can hide the sidebar on mobile.
+  const beforeClick = new URL(page.url()).pathname;
+  await row.evaluate((element) => {
+    const sample = () => {
+      const color = getComputedStyle(element).backgroundColor;
+      if (element.getAttribute('aria-selected') === 'true' && color === 'rgba(51, 144, 236, 0.2)') {
+        element.setAttribute('data-selected-path', location.pathname);
+      } else {
+        requestAnimationFrame(sample);
+      }
+    };
+    requestAnimationFrame(sample);
+  });
+  await row.click();
+  await expect(row).toHaveAttribute('data-selected-path', beforeClick);
+  await expect(row).toHaveCSS('background-color', 'rgba(51, 144, 236, 0.2)');
+  await expect(row.getByLabel('Grace Hopper online')).toHaveCSS(
+    'background-color',
+    'rgb(51, 144, 236)',
+  );
+  await expect(page).toHaveURL(new RegExp(`/chat/${privateChat.id}$`));
+  await page.goBack();
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute('aria-selected', 'false');
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await expect(page).toHaveURL(new RegExp(`/chat/${chat.id}$`));
+});
+
 test('conversation search submits on mobile, debounces on desktop, and jumps through paginated results', async ({
   page,
 }, testInfo) => {
