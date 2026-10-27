@@ -849,9 +849,9 @@ export default function ChatView({ id, active }: { id?: string; active: boolean 
               if (peerId) setProfileUserId(peerId);
             } else setDetails(true);
           }}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}
         >
-          <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={44} />
+          <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={40} />
           <View style={{ flex: 1 }}>
             <Text numberOfLines={1} style={s.headerTitle}>
               {title}
@@ -1544,17 +1544,17 @@ const useStyles = createThemedStyles((colors) => ({
     marginTop: 12,
   },
   header: {
-    height: 78,
+    height: 64,
     backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     gap: 4,
     borderBottomWidth: 1,
     borderColor: colors.border,
   },
   headerTitle: { color: colors.dark, fontSize: 16, fontWeight: '600' },
-  headerSubtitle: { color: colors.muted, fontSize: 12, marginTop: 4 },
+  headerSubtitle: { color: colors.muted, fontSize: 12, marginTop: 2 },
   search: {
     backgroundColor: colors.surface,
     flexDirection: 'row',
@@ -1572,7 +1572,13 @@ const useStyles = createThemedStyles((colors) => ({
     borderRadius: 15,
     boxShadow: '0 1px 2px #17212B0A',
   },
-  mediaBubble: { padding: 2 },
+  // Match the preview's 10-point corners plus its 2-point inset on every side.
+  mediaBubble: {
+    padding: 2,
+    borderRadius: 12,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
   mediaMeta: {
     position: 'absolute',
     right: 6,
