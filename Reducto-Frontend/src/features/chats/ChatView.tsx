@@ -1622,7 +1622,7 @@ const useStyles = createThemedStyles((colors) => ({
     borderRadius: 12,
   },
   reactionSelected: { backgroundColor: '#3390EC40' },
-  reactionText: { fontSize: 12 },
+  reactionText: { color: colors.messageText, fontSize: 12 },
   composerWrap: { backgroundColor: colors.surface },
   pending: {
     flexDirection: 'row',
