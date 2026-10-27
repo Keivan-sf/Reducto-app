@@ -36,6 +36,7 @@ import { conversationName, profileName, timeLabel, mergeMessages } from '../../l
 import { useProfiles } from '../../context/ProfilesContext';
 import { retainUpload, saveLocalFile } from '../../lib/local-attachments';
 import { messageUpload } from '../../lib/message-upload';
+import { uploadSizeError } from '../../lib/upload-limits';
 import { UploadMessage } from './UploadMessage';
 import { downloadAttachment } from '../../lib/download';
 import { AttachmentImage } from './AttachmentImage';
@@ -685,7 +686,8 @@ export default function ChatView({
     const picked = await pickUpload();
     if (picked.canceled) return;
     const file = picked.assets[0];
-    if ((file.size ?? 0) > 50 * 1024 * 1024) return setError('Choose a file smaller than 50 MB.');
+    const sizeError = uploadSizeError(file.size);
+    if (sizeError) return setError(sizeError);
     outbox.enqueue(
       conversationId,
       { ...(replyToMessageId ? { replyToMessageId } : {}) },

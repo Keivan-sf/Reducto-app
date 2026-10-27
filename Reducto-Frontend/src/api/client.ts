@@ -122,7 +122,10 @@ export class ApiClient {
       response = await transport(`${requestBaseUrl}${path}`, {
         ...options,
         headers,
-        signal: options.signal ?? AbortSignal.timeout(20000),
+        // Uploads may take arbitrarily long; only their caller can cancel them.
+        signal:
+          options.signal ??
+          (options.body instanceof FormData ? undefined : AbortSignal.timeout(20000)),
       });
     } catch (error) {
       if (options.signal?.aborted) throw error;

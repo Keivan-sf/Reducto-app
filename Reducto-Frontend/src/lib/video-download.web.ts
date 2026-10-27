@@ -21,8 +21,6 @@ export async function loadVideoFile(request: VideoDownloadRequest): Promise<Vide
       xhr.onerror = () =>
         reject(new Error('Could not download this video. Check your connection.'));
       xhr.onabort = () => reject(new Error('Download cancelled'));
-      xhr.timeout = 120000;
-      xhr.ontimeout = () => reject(new Error('Video download timed out. Tap to retry.'));
       xhr.send();
     });
   let response = await get(request.headers);

@@ -109,7 +109,6 @@ export class MessageOutbox {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       if (entry.upload && !entry.payload.attachment) {
-        timeout = setTimeout(() => entry.controller.abort(), 120000);
         const attachment = await entry.upload.prepare(entry.controller.signal, (update) => {
           if (
             this.disposed ||
@@ -128,7 +127,6 @@ export class MessageOutbox {
           return;
         entry.payload = { ...entry.payload, attachment };
         entry.message = { ...entry.message, attachment };
-        clearTimeout(timeout);
       }
       timeout = setTimeout(() => entry.controller.abort(), 20000);
       const message = await this.post(

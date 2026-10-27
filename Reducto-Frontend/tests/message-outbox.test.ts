@@ -4,6 +4,39 @@ import { MessageOutbox, type OutgoingPayload } from '../src/api/message-outbox';
 import type { Message } from '../src/api/types';
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test('long uploads remain active and can finish after the former timeout', async (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const t = setup();
+  let signal!: AbortSignal;
+  let finish!: (attachment: { type: 'video'; mediaId: string }) => void;
+  t.box.enqueue(
+    'chat',
+    {},
+    {
+      initial: { type: 'video', name: 'large.mp4', total: 100, sent: 0 },
+      prepare: (uploadSignal) => {
+        signal = uploadSignal;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      },
+      dispose: () => {},
+    },
+  );
+  context.mock.timers.tick(60 * 60 * 1000);
+  assert.equal(signal.aborted, false);
+  assert.equal(t.snapshot()[0].delivery, 'sending');
+  assert.equal(t.requests.length, 0);
+  finish({ type: 'video', mediaId: 'uploaded' });
+  await tick();
+  assert.equal(t.requests.length, 1);
+  t.requests[0].resolve(t.confirmed(0));
+  await tick();
+  assert.equal(t.accepted.length, 1);
+  t.box.dispose();
+});
+
 function setup() {
   let outgoing: Record<string, Message[]> = {};
   const accepted: Message[] = [];

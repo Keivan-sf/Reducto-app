@@ -6,6 +6,7 @@ import { api, useSession } from '../../context/SessionContext';
 import type { Gif } from '../../api/types';
 import { Button, Dialog, Field, Icon, IconButton, Notice } from '../../components/ui';
 import { fileForm } from '../../lib/uploads';
+import { uploadSizeError } from '../../lib/upload-limits';
 import { GifPreview } from './GifPreview';
 import { useVideos, gifFileKey } from '../../context/VideosContext';
 import { retainUpload } from '../../lib/local-attachments';
@@ -92,16 +93,17 @@ export function MediaPicker({
     if (picked.canceled) return;
     await run(async () => {
       const file = picked.assets[0];
-      if ((file.size ?? 0) > 50 * 1024 * 1024)
-        throw new Error('Choose a GIF or video smaller than 50 MB.');
+      const sizeError = uploadSizeError(file.size, 'GIF or video');
+      if (sizeError) throw new Error(sizeError);
       let local: VideoFile | undefined;
       try {
         local = await retainUpload(file);
+        const retainedSizeError = uploadSizeError(local.bytes, 'GIF or video');
+        if (retainedSizeError) throw new Error(retainedSizeError);
         const body = await fileForm('gif', { ...file, uri: local.uri });
         const { gif } = await api.request<{ gif: Gif }>('/api/gifs', {
           method: 'POST',
           body,
-          signal: AbortSignal.timeout(120000),
         });
         await recency.record(gif.id);
         cache.remember(gif);

@@ -110,6 +110,9 @@ the application supports user-selected HTTP/LAN servers.
 - Cached, paginated history, text messages, message search, real-time delivery, reconnect synchronization, and session-local unread counts.
 - Replies with sender names and compact text/attachment previews, a cancellable reply composer, and click-to-jump navigation with a brief target highlight.
 - Attachment upload and authenticated download, image previews, message forwarding, and all eight supported emoji reactions.
+- Attachments and GIF/video uploads support files up to 2 GB (2,147,483,648 bytes), matching the backend. Avatars retain the backend's separate 5 MB limit.
+- Uploads have no frontend time limit. Chat uploads can still be cancelled manually.
+- Downloads have no frontend time limit on web or Android. Manual download cancellation remains available.
 - Group renaming, invitations, adding/removing members, owner/admin roles, leaving groups, and confirmed group deletion.
 - Blue, clickable HTTP(S), FTP, `www.` and `reducto://` links in messages. Web links open separately; Reducto group invites stay inside the app.
 - GIF/video upload, GIF library add/remove, and inline GIF previews that autoplay muted on a loop without video controls.

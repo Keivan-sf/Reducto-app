@@ -79,9 +79,25 @@ test('multipart uploads keep the browser-generated boundary and 204 returns void
     assert.equal(new Headers(options!.headers).has('Content-Type'), false);
     assert.equal(new Headers(options!.headers).get('Authorization'), 'Bearer expired');
     assert.equal(options!.body, body);
+    assert.equal(options!.signal, undefined, 'multipart uploads have no automatic timeout');
     return new Response(null, { status: 204 });
   };
   assert.equal(await client.request('/upload', { method: 'POST', body }), undefined);
+});
+
+test('multipart uploads preserve explicit cancellation signals', async () => {
+  const client = new ApiClient('http://test');
+  const controller = new AbortController();
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options!.signal, controller.signal);
+    controller.abort();
+    options!.signal!.throwIfAborted();
+    return json({});
+  };
+  await assert.rejects(
+    client.request('/upload', { method: 'POST', body: new FormData(), signal: controller.signal }),
+    { name: 'AbortError' },
+  );
 });
 
 test('validation errors expose the backend error and do not refresh', async () => {

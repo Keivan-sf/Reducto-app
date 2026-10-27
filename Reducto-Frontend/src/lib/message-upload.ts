@@ -8,6 +8,7 @@ import { documentFileKey, gifFileKey, videoKey, voiceFileKey } from '../context/
 import { compressImageUpload } from './compress-image-upload';
 import { retainUpload } from './local-attachments';
 import { uploadKind } from './upload-kind';
+import { uploadSizeError } from './upload-limits';
 import { fileForm, type UploadAsset } from './uploads';
 
 /** The outbox owns this job and its file independently of any mounted chat. */
@@ -61,7 +62,8 @@ export function messageUpload(
         check(signal);
         if (!local) local = await retainUpload(asset);
         check(signal);
-        if (local.bytes > 50 * 1024 * 1024) throw new Error('Choose a file smaller than 50 MB.');
+        const sizeError = uploadSizeError(local.bytes);
+        if (sizeError) throw new Error(sizeError);
         if (type === 'image' && !compressed) {
           const source = local;
           const result = await compressImageUpload(source);
