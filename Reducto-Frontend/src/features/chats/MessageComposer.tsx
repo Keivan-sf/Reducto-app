@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   BackHandler,
+  Easing,
   Keyboard,
   Platform,
   Pressable,
@@ -51,6 +53,22 @@ export function MessageComposer({
   const { width, height } = useWindowDimensions();
   const desktop = Platform.OS === 'web' && width >= 768;
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerMounted, setPickerMounted] = useState(false);
+  const [pickerAnimation] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    const animation = Animated.timing(pickerAnimation, {
+      toValue: pickerOpen ? 1 : 0,
+      duration: desktop ? (pickerOpen ? 160 : 120) : 0,
+      easing: pickerOpen ? Easing.out(Easing.cubic) : Easing.in(Easing.quad),
+      useNativeDriver: false,
+      isInteraction: false,
+    });
+    animation.start(({ finished }) => {
+      // Interrupted exits must not unmount a picker that has reopened.
+      if (finished && !pickerOpen) setPickerMounted(false);
+    });
+    return () => animation.stop();
+  }, [desktop, pickerOpen, pickerAnimation]);
   const [cursor, setCursor] = useState<{ start: number; end: number }>();
   const selection = useRef({ start: initialText.length, end: initialText.length });
   const holdOpen = useRef(false);
@@ -75,6 +93,7 @@ export function MessageComposer({
       }
     }
     if (!desktop) Keyboard.dismiss();
+    setPickerMounted(desktop);
     setPickerOpen(true);
   }
   useEffect(() => () => clearTimeout(closeTimer.current), []);
@@ -141,7 +160,7 @@ export function MessageComposer({
   }
   return (
     <View
-      style={{ position: 'relative', zIndex: pickerOpen ? 20 : 0 }}
+      style={{ position: 'relative', zIndex: pickerOpen || pickerMounted ? 20 : 0 }}
       onPointerEnter={cancelClose}
       onPointerLeave={() => {
         if (desktop && !holdOpen.current) closeTimer.current = setTimeout(closePicker, 220);
@@ -243,10 +262,28 @@ export function MessageComposer({
           />
         )}
       </View>
-      {pickerOpen && active && !editing && onSendGif && (
-        <View
+      {(pickerOpen || (desktop && pickerMounted)) && active && !editing && onSendGif && (
+        <Animated.View
           testID={desktop ? 'media-picker-popover' : 'media-picker-keyboard'}
-          style={desktop ? s.popover : undefined}
+          pointerEvents={pickerOpen ? 'auto' : 'none'}
+          style={
+            desktop
+              ? [
+                  s.popover,
+                  {
+                    opacity: pickerAnimation,
+                    transform: [
+                      {
+                        scale: pickerAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.92, 1],
+                        }),
+                      },
+                    ],
+                  },
+                ]
+              : undefined
+          }
         >
           <MediaPicker
             height={Math.min(desktop ? 420 : 320, height * (desktop ? 0.65 : 0.45))}
@@ -258,7 +295,7 @@ export function MessageComposer({
               cancelClose();
             }}
           />
-        </View>
+        </Animated.View>
       )}
     </View>
   );
@@ -266,6 +303,7 @@ export function MessageComposer({
 
 const s = StyleSheet.create({
   popover: {
+    transformOrigin: 'bottom right',
     position: 'absolute',
     bottom: 56,
     right: 48,
