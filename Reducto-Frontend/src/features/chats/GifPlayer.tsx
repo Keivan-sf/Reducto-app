@@ -23,7 +23,13 @@ export interface GifPlayerProps {
 }
 
 /** The backend converts GIFs to silent MP4s. Keep their playback inline and automatic. */
-export function GifPlayer({
+export function GifPlayer(props: GifPlayerProps) {
+  // useVideoPlayer releases its previous handle when its source changes. Give
+  // each source its own view too, so Android never rebinds a view to that handle.
+  return <GifPlayerSource key={props.uri} {...props} />;
+}
+
+function GifPlayerSource({
   uri,
   active = true,
   size: metadataSize,

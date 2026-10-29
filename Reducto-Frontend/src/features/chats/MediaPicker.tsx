@@ -147,112 +147,111 @@ export function MediaPicker({
   }
   return (
     <View testID="media-picker" style={[s.panel, { height }]}>
-      {tab === 'Emoji' ? (
-        <EmojiPanel onSelect={onEmoji} />
-      ) : (
-        <>
-          <View style={s.header}>
-            <Text style={s.heading}>GIFs</Text>
-            <IconButton name="close-outline" label="Close media picker" onPress={onClose} />
-          </View>
-          <View style={{ flex: 1 }}>
-            {loading ? (
-              <ActivityIndicator style={s.empty} color={colors.blue} />
-            ) : (
-              <FlatList
-                renderScrollComponent={renderGifScroll}
-                data={sortedGifs}
-                numColumns={3}
-                keyExtractor={(gif) => gif.id}
-                contentContainerStyle={{ padding: 8, paddingBottom: 64, flexGrow: 1 }}
-                columnWrapperStyle={{ gap: 2 }}
-                ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
-                onViewableItemsChanged={viewability}
-                viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
-                initialNumToRender={12}
-                windowSize={3}
-                keyboardShouldPersistTaps="handled"
-                ListEmptyComponent={
-                  <View style={s.empty}>
-                    <Icon name="images-outline" size={40} />
-                    <Text style={s.emptyTitle}>Your GIF collection</Text>
-                    <Text style={s.emptyText}>Tap + to add a GIF or video.</Text>
-                  </View>
-                }
-                renderItem={({ item }) => (
-                  <View
-                    style={s.tile}
-                    onPointerEnter={(event) => {
-                      if (Platform.OS === 'web' && event.nativeEvent.pointerType === 'mouse')
-                        setHoveredGif(item.id);
+      {tab === 'Emoji' && <EmojiPanel onSelect={onEmoji} />}
+      {/* Keep native video views alive across tab changes; active pauses them. */}
+      <View style={{ flex: 1, display: tab === 'GIF' ? 'flex' : 'none' }}>
+        <View style={s.header}>
+          <Text style={s.heading}>GIFs</Text>
+          <IconButton name="close-outline" label="Close media picker" onPress={onClose} />
+        </View>
+        <View style={{ flex: 1 }}>
+          {loading ? (
+            <ActivityIndicator style={s.empty} color={colors.blue} />
+          ) : (
+            <FlatList
+              renderScrollComponent={renderGifScroll}
+              data={sortedGifs}
+              numColumns={3}
+              keyExtractor={(gif) => gif.id}
+              contentContainerStyle={{ padding: 8, paddingBottom: 64, flexGrow: 1 }}
+              columnWrapperStyle={{ gap: 2 }}
+              ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
+              onViewableItemsChanged={viewability}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
+              initialNumToRender={12}
+              windowSize={3}
+              removeClippedSubviews={false}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                <View style={s.empty}>
+                  <Icon name="images-outline" size={40} />
+                  <Text style={s.emptyTitle}>Your GIF collection</Text>
+                  <Text style={s.emptyText}>Tap + to add a GIF or video.</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <View
+                  style={s.tile}
+                  onPointerEnter={(event) => {
+                    if (Platform.OS === 'web' && event.nativeEvent.pointerType === 'mouse')
+                      setHoveredGif(item.id);
+                  }}
+                  onPointerLeave={() => {
+                    setHoveredGif(null);
+                    setHoveredRemove(null);
+                  }}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    testID={`gif-choice-${item.id}`}
+                    accessibilityLabel="Send GIF"
+                    accessibilityHint="Immediately sends this GIF to the chat"
+                    disabled={busy}
+                    onPress={() => {
+                      try {
+                        if (onSend(item.id)) {
+                          void recency.record(item.id);
+                          onClose();
+                        }
+                      } catch (err) {
+                        setError((err as Error).message);
+                      }
                     }}
-                    onPointerLeave={() => {
-                      setHoveredGif(null);
-                      setHoveredRemove(null);
+                    onLongPress={() => {
+                      setGifId(item.id);
+                      showAdd(true);
                     }}
+                    style={({ pressed }) => [s.gifButton, { opacity: pressed || busy ? 0.6 : 1 }]}
                   >
+                    <GifPreview
+                      gifId={item.id}
+                      initialMetadata={item}
+                      active={tab === 'GIF' && visibleIds.has(item.id)}
+                      fill
+                    />
+                  </Pressable>
+                  {Platform.OS === 'web' && hoveredGif === item.id && (
                     <Pressable
                       accessibilityRole="button"
-                      testID={`gif-choice-${item.id}`}
-                      accessibilityLabel="Send GIF"
-                      accessibilityHint="Immediately sends this GIF to the chat"
+                      accessibilityLabel="Remove GIF from library"
+                      testID={`gif-remove-${item.id}`}
                       disabled={busy}
-                      onPress={() => {
-                        try {
-                          if (onSend(item.id)) {
-                            void recency.record(item.id);
-                            onClose();
-                          }
-                        } catch (err) {
-                          setError((err as Error).message);
-                        }
-                      }}
-                      onLongPress={() => {
-                        setGifId(item.id);
-                        showAdd(true);
-                      }}
-                      style={({ pressed }) => [s.gifButton, { opacity: pressed || busy ? 0.6 : 1 }]}
+                      onHoverIn={() => setHoveredRemove(item.id)}
+                      onHoverOut={() => setHoveredRemove(null)}
+                      onPress={() => void run(() => removeFromLibrary(item.id))}
+                      style={({ pressed }) => [
+                        s.removeGif,
+                        (hoveredRemove === item.id || pressed) && s.removeGifHovered,
+                        busy && { opacity: 0.5 },
+                      ]}
                     >
-                      <GifPreview
-                        gifId={item.id}
-                        initialMetadata={item}
-                        active={tab === 'GIF' && visibleIds.has(item.id)}
-                        fill
-                      />
+                      <Icon name="close" size={16} color="white" />
                     </Pressable>
-                    {Platform.OS === 'web' && hoveredGif === item.id && (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Remove GIF from library"
-                        testID={`gif-remove-${item.id}`}
-                        disabled={busy}
-                        onHoverIn={() => setHoveredRemove(item.id)}
-                        onHoverOut={() => setHoveredRemove(null)}
-                        onPress={() => void run(() => removeFromLibrary(item.id))}
-                        style={({ pressed }) => [
-                          s.removeGif,
-                          (hoveredRemove === item.id || pressed) && s.removeGifHovered,
-                          busy && { opacity: 0.5 },
-                        ]}
-                      >
-                        <Icon name="close" size={16} color="white" />
-                      </Pressable>
-                    )}
-                  </View>
-                )}
-              />
-            )}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Add a new GIF"
-              onPress={() => showAdd(true)}
-              style={s.add}
-            >
-              <Icon name="add" size={28} color="white" />
-            </Pressable>
-          </View>
-        </>
-      )}
+                  )}
+                </View>
+              )}
+            />
+          )}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add a new GIF"
+            onPress={() => showAdd(true)}
+            style={s.add}
+          >
+            <Icon name="add" size={28} color="white" />
+          </Pressable>
+        </View>
+      </View>
       <Notice text={error} onDismiss={() => setError('')} />
       <View accessibilityRole="tablist" style={s.tabs}>
         {(['GIF', 'Emoji'] as const).map((value) => (

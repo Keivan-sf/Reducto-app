@@ -305,6 +305,23 @@ test('sending a library GIF reuses its signed playback link without a details lo
   await page.getByRole('button', { name: 'Reply', exact: true }).click();
   await page.getByRole('button', { name: 'Open GIF library' }).click();
   await expect(page.locator('video')).toBeVisible();
+  const pickerVideo = page.getByTestId('media-picker').locator('video');
+  const originalVideo = await pickerVideo.elementHandle();
+  for (let index = 0; index < 3; index++) {
+    await page.getByRole('tab', { name: 'Emoji', exact: true }).click();
+    await expect(pickerVideo).toBeHidden();
+    await expect
+      .poll(() => pickerVideo.evaluate((video: HTMLVideoElement) => video.paused))
+      .toBe(true);
+    await page.getByRole('tab', { name: 'GIF', exact: true }).click();
+    await expect(pickerVideo).toBeVisible();
+    expect(await pickerVideo.evaluate((video, original) => video === original, originalVideo)).toBe(
+      true,
+    );
+    await expect
+      .poll(() => pickerVideo.evaluate((video: HTMLVideoElement) => video.paused))
+      .toBe(false);
+  }
   const sent = page.waitForRequest(
     (request) =>
       request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/messages'),
