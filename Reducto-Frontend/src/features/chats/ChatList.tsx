@@ -125,7 +125,7 @@ export default function ChatList({
       <View style={s.header}>
         <View style={s.brand}>
           <Icon name="paper-plane" color={colors.blue} size={25} />
-          <Text style={s.brandText}>reducto</Text>
+          <Text style={s.brandText}>Reducto</Text>
         </View>
         <IconButton
           name="settings-outline"

@@ -974,13 +974,9 @@ export default function ChatView({
           <Icon name="paper-plane-outline" size={58} color={colors.blue} />
         </View>
         <Text style={s.welcomeTitle}>Good to have you here.</Text>
-        <Text style={s.welcomeText}>
-          Choose a conversation and make someone’s day.{'\n'}Your next great conversation is a hello
-          away.
-        </Text>
         <View style={s.welcomePill}>
           <Icon name="chatbubbles-outline" size={16} color={colors.welcomeAccent} />
-          <Text style={{ fontSize: 12, color: colors.welcomeAccent }}>A space for your people</Text>
+          <Text style={{ fontSize: 12, color: colors.welcomeAccent }}>Reducto</Text>
         </View>
       </View>
     );
