@@ -9,11 +9,23 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewProps,
 } from 'react-native';
 import { Icon } from '../../components/ui';
 import { emojiGroups, emojiVariants, searchEmojis, type PickerEmoji } from '../../lib/emoji-picker';
 import { mostUsedEmojis } from '../../lib/emoji-usage';
 import { useEmojiUsage } from './useEmojiUsage';
+import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+
+function renderEmojiScroll(props: ScrollViewProps) {
+  return (
+    <ChatHistoryScrollView
+      {...props}
+      scrollbarInverted={false}
+      scrollbarLabel="Emoji menu scrollbar"
+    />
+  );
+}
 
 type EmojiRow =
   { key: string; title: string; empty?: boolean } | { key: string; emojis: PickerEmoji[] };
@@ -136,6 +148,7 @@ export function EmojiPanel({ onSelect }: { onSelect: (emoji: string) => void }) 
       </View>
       <FlatList<EmojiRow>
         ref={scroll}
+        renderScrollComponent={renderEmojiScroll}
         style={{ flex: 1, minHeight: 0 }}
         onScrollBeginDrag={() => setToneMenu(null)}
         testID="emoji-list"

@@ -1,6 +1,6 @@
 import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Text, View, type ScrollViewProps } from 'react-native';
 import { pickUpload } from '../../lib/pick-upload';
 import { api, useSession } from '../../context/SessionContext';
 import type { Gif } from '../../api/types';
@@ -15,6 +15,17 @@ import { useGifs } from '../../context/GifsContext';
 import { EmojiPanel } from './EmojiPanel';
 import { gifRecencyStore } from '../../lib/gif-recency-store';
 import { sortGifsByRecency } from '../../lib/gif-recency';
+import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+
+function renderGifScroll(props: ScrollViewProps) {
+  return (
+    <ChatHistoryScrollView
+      {...props}
+      scrollbarInverted={false}
+      scrollbarLabel="GIF menu scrollbar"
+    />
+  );
+}
 
 type Tab = 'GIF' | 'Emoji';
 export function MediaPicker({
@@ -131,6 +142,7 @@ export function MediaPicker({
               <ActivityIndicator style={s.empty} color={colors.blue} />
             ) : (
               <FlatList
+                renderScrollComponent={renderGifScroll}
                 data={sortedGifs}
                 numColumns={3}
                 keyExtractor={(gif) => gif.id}
