@@ -56,6 +56,7 @@ import { VoiceMessage } from './VoiceMessage';
 import { DocumentMessage } from './DocumentMessage';
 import { MessageComposer } from './MessageComposer';
 import { MediaSendPreview } from './MediaSendPreview';
+import { ChatFileDropArea } from './ChatFileDropArea';
 import type { UploadAsset } from '../../lib/uploads';
 import type { VideoFile } from '../../api/video-cache';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
@@ -700,6 +701,22 @@ export default function ChatView({
     void showLatest();
     return true;
   }
+  const previewFile = useCallback(
+    (file: File) => {
+      if (!id || busy || !focused) return;
+      const sizeError = uploadSizeError(file.size);
+      if (sizeError) return setError(sizeError);
+      ++uploadSequence.current;
+      setError('');
+      setMediaDraft({
+        // The preview owns the blob URL created from this file.
+        asset: { uri: '', name: file.name || 'attachment', mimeType: file.type, file },
+        conversationId: id,
+        replyToMessageId: replyTo?.id,
+      });
+    },
+    [id, busy, focused, replyTo?.id],
+  );
   async function upload() {
     if (!id || busy) return;
     // Capture the destination and reply before opening the asynchronous picker.
@@ -1006,7 +1023,10 @@ export default function ChatView({
       style={[s.root, { flexDirection: 'row' }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={{ flex: 1, minWidth: 0 }}>
+      <ChatFileDropArea
+        enabled={focused && !busy && !editing && !voiceActive && !mediaDraft}
+        onFile={previewFile}
+      >
         <View style={s.header}>
           {!wide && (
             <IconButton
@@ -1650,19 +1670,7 @@ export default function ChatView({
               onSend={(text) => send(undefined, text)}
               onSendVoice={sendVoice}
               onAttach={() => void upload().catch((err) => setError(err.message))}
-              onPasteFile={(file) => {
-                if (!id || busy || !focused) return;
-                const sizeError = uploadSizeError(file.size);
-                if (sizeError) return setError(sizeError);
-                ++uploadSequence.current;
-                setError('');
-                setMediaDraft({
-                  // The preview owns the blob URL created from this file.
-                  asset: { uri: '', name: file.name || 'attachment', mimeType: file.type, file },
-                  conversationId: id,
-                  replyToMessageId: replyTo?.id,
-                });
-              }}
+              onPasteFile={previewFile}
               onPickerVisibilityChange={setGifs}
               onSendGif={(gifId) => send(gifId)}
               onError={setError}
@@ -1743,7 +1751,7 @@ export default function ChatView({
           }}
           onClose={() => setActionsVisible(false)}
         />
-      </View>
+      </ChatFileDropArea>
       {wide && searchOpen && (
         <View
           testID="desktop-message-search"

@@ -3929,6 +3929,76 @@ test('historical video metadata without dimensions or thumbnails keeps a square 
   expect(downloads).toBe(0);
 });
 
+test('desktop file drops show the overlay and preview only the first file', async ({
+  page,
+  isMobile,
+}) => {
+  await mockApi(page, []);
+  let uploads = 0;
+  await page.route('**/api/conversations/*/attachments', async (route) => {
+    uploads++;
+    await route.fulfill({
+      status: 201,
+      json: {
+        attachment: {
+          id: 'dropped-document',
+          type: 'document',
+          fileName: 'first.txt',
+          contentType: 'text/plain',
+          fileSize: 5,
+        },
+      },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Keep my draft');
+  const dataTransfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(['first'], 'first.txt', { type: 'text/plain' }));
+    data.items.add(new File(['second'], 'second.txt', { type: 'text/plain' }));
+    return data;
+  });
+  const history = page.getByTestId('positioned-chat-history');
+  await history.dispatchEvent('dragenter', { dataTransfer });
+  const overlay = page.getByTestId('chat-file-drop-overlay');
+  if (isMobile) {
+    await expect(overlay).toHaveCount(0);
+    await history.dispatchEvent('drop', { dataTransfer });
+    await expect(page.getByTestId('file-send-preview')).toHaveCount(0);
+    expect(uploads).toBe(0);
+    return;
+  }
+  await expect(overlay).toBeVisible();
+  await expect(overlay).toContainText('Drop files here');
+  await expect(overlay).toContainText('to send them');
+  await expect(overlay).not.toContainText('documents');
+  await history.dispatchEvent('dragleave', { dataTransfer });
+  await expect(overlay).toHaveCount(0);
+  for (const send of [false, true]) {
+    await history.dispatchEvent('dragenter', { dataTransfer });
+    await history.dispatchEvent('dragover', { dataTransfer });
+    await history.dispatchEvent('drop', { dataTransfer });
+    await expect(overlay).toHaveCount(0);
+    const preview = page.getByTestId('file-send-preview');
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText('first.txt');
+    await expect(preview).not.toContainText('second.txt');
+    expect(uploads).toBe(0);
+    const sendButton = preview.getByRole('button', { name: 'Send file', exact: true });
+    await expect(sendButton).toBeEnabled();
+    if (send) {
+      await sendButton.click();
+      await expect.poll(() => uploads).toBe(1);
+    } else {
+      await preview.getByRole('button', { name: 'Cancel', exact: true }).click();
+    }
+    await expect(preview).toHaveCount(0);
+    await expect(composer).toHaveValue('Keep my draft');
+  }
+});
+
 test('desktop pasted images focus the caption and send with Enter, while Shift+Enter adds a line', async ({
   page,
 }, testInfo) => {
