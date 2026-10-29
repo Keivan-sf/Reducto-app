@@ -1650,7 +1650,7 @@ export default function ChatView({
               onSend={(text) => send(undefined, text)}
               onSendVoice={sendVoice}
               onAttach={() => void upload().catch((err) => setError(err.message))}
-              onPasteImage={(file) => {
+              onPasteFile={(file) => {
                 if (!id || busy || !focused) return;
                 const sizeError = uploadSizeError(file.size);
                 if (sizeError) return setError(sizeError);
@@ -1658,7 +1658,7 @@ export default function ChatView({
                 setError('');
                 setMediaDraft({
                   // The preview owns the blob URL created from this file.
-                  asset: { uri: '', name: file.name || 'image.png', mimeType: file.type, file },
+                  asset: { uri: '', name: file.name || 'attachment', mimeType: file.type, file },
                   conversationId: id,
                   replyToMessageId: replyTo?.id,
                 });

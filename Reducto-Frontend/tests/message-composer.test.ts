@@ -105,7 +105,7 @@ function composer(accepted = true, platform = 'android', width = 400) {
     },
     onSendVoice: async () => {},
     onAttach: () => {},
-    onPasteImage: (file: File) => pasted.push(file),
+    onPasteFile: (file: File) => pasted.push(file),
     onSendGif: () => true,
     onError: (error: string) => errors.push(error),
     onVoiceActive: () => {},
@@ -219,21 +219,30 @@ test('emoji replaces the selected text and sends with the rest of the draft', ()
   assert.deepEqual(t.sends, ['Hello 😀!']);
 });
 
-test('desktop image paste opens the image flow and preserves the composer draft', () => {
-  const t = composer(true, 'web', 1200);
-  const file = new File(['image bytes'], 'screenshot.png', { type: 'image/png' });
-  t.type('Keep this draft');
-  t.render();
-  assert.equal(t.paste([file]), true);
-  assert.deepEqual(t.pasted, [file]);
-  assert.deepEqual(t.sends, []);
-  t.render();
-  assert.equal(t.input().props.value, 'Keep this draft');
-  assert.equal(t.paste([]), false, 'ordinary text pastes keep browser behavior');
-  assert.equal(t.paste([new File(['text'], 'notes.txt', { type: 'text/plain' })]), false);
-});
+for (const [name, type] of [
+  ['screenshot.png', 'image/png'],
+  ['clip.mp4', 'video/mp4'],
+  ['song.mp3', 'audio/mpeg'],
+  ['report.pdf', 'application/pdf'],
+  ['notes.txt', 'text/plain'],
+  ['archive.zip', ''],
+]) {
+  test(`desktop paste of ${name} opens the attachment flow without inserting its path`, () => {
+    const t = composer(true, 'web', 1200);
+    const file = new File(['file bytes'], name, { type });
+    t.type('Keep this draft');
+    t.render();
+    assert.equal(t.paste([file]), true, 'prevent the browser from inserting clipboard text');
+    assert.deepEqual(t.pasted, [file]);
+    assert.deepEqual(t.sends, [], 'pasting must wait for confirmation in the preview');
+    t.render();
+    assert.equal(t.input().props.value, 'Keep this draft');
+    assert.equal(t.native.value, 'Keep this draft');
+    assert.equal(t.paste([]), false, 'ordinary text pastes keep browser behavior');
+  });
+}
 
-test('image paste is disabled on mobile, inactive, busy, editing, and recording composers', () => {
+test('file paste is disabled on mobile, inactive, busy, editing, and recording composers', () => {
   const file = new File(['image bytes'], 'screenshot.png', { type: 'image/png' });
   for (const [platform, width] of [
     ['android', 1200],
