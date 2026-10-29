@@ -6990,6 +6990,66 @@ test('desktop media picker closes on pointer leave and Escape', async ({ page, i
   await expect(page.getByTestId('media-picker-popover')).toHaveCount(0);
 });
 
+test('GIF library removal is desktop hover only and does not send the GIF', async ({
+  page,
+  isMobile,
+}) => {
+  await mockApi(page, []);
+  const gif = {
+    id: 'hover-remove-gif',
+    width: 160,
+    height: 120,
+    fileSize: 4000,
+    objectKey: 'gifs/hover-remove.mp4',
+    playbackUrl: 'https://media.example/hover-remove.mp4',
+  };
+  let removed = false;
+  let failRemoval = true;
+  let sends = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/messages')) sends++;
+  });
+  await page.route('**/api/gifs', (route) =>
+    route.fulfill({ json: { gifs: removed ? [] : [gif] } }),
+  );
+  await page.route(`**/api/gifs/${gif.id}`, (route) => {
+    if (route.request().method() === 'DELETE') {
+      if (failRemoval) return route.fulfill({ status: 500, json: { error: 'Removal failed' } });
+      removed = true;
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ json: { gif } });
+  });
+  await page.route(gif.playbackUrl, (route) => route.fulfill({ status: 503 }));
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'Open GIF library', exact: true }).click();
+  const tile = page.getByTestId(`gif-choice-${gif.id}`);
+  const remove = page.getByTestId(`gif-remove-${gif.id}`);
+  await expect(tile).toBeVisible();
+  await expect(remove).toHaveCount(0);
+  if (isMobile) {
+    await tile.dispatchEvent('pointerover', { pointerType: 'touch', bubbles: true });
+    await expect(remove).toHaveCount(0);
+    return;
+  }
+  await tile.hover();
+  await expect(remove).toBeVisible();
+  await expect(remove).toHaveCSS('background-color', 'rgba(0, 0, 0, 0.35)');
+  await remove.hover();
+  await expect(remove).toHaveCSS('background-color', 'rgba(0, 0, 0, 0.55)');
+  await remove.click();
+  await expect(page.getByText('Removal failed', { exact: true })).toBeVisible();
+  await expect(tile).toBeVisible();
+  failRemoval = false;
+  await tile.hover();
+  await remove.click();
+  await expect(tile).toHaveCount(0);
+  await expect(page.getByTestId('media-picker')).toBeVisible();
+  expect(removed).toBe(true);
+  expect(sends).toBe(0);
+});
+
 test('GIF sending and the media picker exit do not wait for each other', async ({
   page,
   isMobile,

@@ -1,6 +1,14 @@
 import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, View, type ScrollViewProps } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Platform,
+  Pressable,
+  Text,
+  View,
+  type ScrollViewProps,
+} from 'react-native';
 import { pickUpload } from '../../lib/pick-upload';
 import { api, useSession } from '../../context/SessionContext';
 import type { Gif } from '../../api/types';
@@ -56,6 +64,8 @@ export function MediaPicker({
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [tab, setTab] = useState<Tab>('GIF');
+  const [hoveredGif, setHoveredGif] = useState<string | null>(null);
+  const [hoveredRemove, setHoveredRemove] = useState<string | null>(null);
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
   const viewability = useCallback(({ viewableItems }: { viewableItems: { item: Gif }[] }) => {
     setVisibleIds(new Set(viewableItems.map(({ item }) => item.id)));
@@ -98,6 +108,14 @@ export function MediaPicker({
     } finally {
       setBusy(false);
     }
+  }
+  async function removeFromLibrary(id: string) {
+    await api.request(`/api/gifs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const remaining = gifs.filter((gif) => gif.id !== id);
+    setGifs(remaining);
+    setHoveredGif(null);
+    setHoveredRemove(null);
+    await recency.syncLibrary(remaining.map((gif) => gif.id));
   }
   async function upload() {
     const picked = await pickUpload(['image/gif', 'video/*']);
@@ -162,35 +180,65 @@ export function MediaPicker({
                   </View>
                 }
                 renderItem={({ item }) => (
-                  <Pressable
-                    accessibilityRole="button"
-                    testID={`gif-choice-${item.id}`}
-                    accessibilityLabel="Send GIF"
-                    accessibilityHint="Immediately sends this GIF to the chat"
-                    disabled={busy}
-                    onPress={() => {
-                      try {
-                        if (onSend(item.id)) {
-                          void recency.record(item.id);
-                          onClose();
-                        }
-                      } catch (err) {
-                        setError((err as Error).message);
-                      }
+                  <View
+                    style={s.tile}
+                    onPointerEnter={(event) => {
+                      if (Platform.OS === 'web' && event.nativeEvent.pointerType === 'mouse')
+                        setHoveredGif(item.id);
                     }}
-                    onLongPress={() => {
-                      setGifId(item.id);
-                      showAdd(true);
+                    onPointerLeave={() => {
+                      setHoveredGif(null);
+                      setHoveredRemove(null);
                     }}
-                    style={({ pressed }) => [s.tile, { opacity: pressed || busy ? 0.6 : 1 }]}
                   >
-                    <GifPreview
-                      gifId={item.id}
-                      initialMetadata={item}
-                      active={tab === 'GIF' && visibleIds.has(item.id)}
-                      fill
-                    />
-                  </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      testID={`gif-choice-${item.id}`}
+                      accessibilityLabel="Send GIF"
+                      accessibilityHint="Immediately sends this GIF to the chat"
+                      disabled={busy}
+                      onPress={() => {
+                        try {
+                          if (onSend(item.id)) {
+                            void recency.record(item.id);
+                            onClose();
+                          }
+                        } catch (err) {
+                          setError((err as Error).message);
+                        }
+                      }}
+                      onLongPress={() => {
+                        setGifId(item.id);
+                        showAdd(true);
+                      }}
+                      style={({ pressed }) => [s.gifButton, { opacity: pressed || busy ? 0.6 : 1 }]}
+                    >
+                      <GifPreview
+                        gifId={item.id}
+                        initialMetadata={item}
+                        active={tab === 'GIF' && visibleIds.has(item.id)}
+                        fill
+                      />
+                    </Pressable>
+                    {Platform.OS === 'web' && hoveredGif === item.id && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove GIF from library"
+                        testID={`gif-remove-${item.id}`}
+                        disabled={busy}
+                        onHoverIn={() => setHoveredRemove(item.id)}
+                        onHoverOut={() => setHoveredRemove(null)}
+                        onPress={() => void run(() => removeFromLibrary(item.id))}
+                        style={({ pressed }) => [
+                          s.removeGif,
+                          (hoveredRemove === item.id || pressed) && s.removeGifHovered,
+                          busy && { opacity: 0.5 },
+                        ]}
+                      >
+                        <Icon name="close" size={16} color="white" />
+                      </Pressable>
+                    )}
+                  </View>
                 )}
               />
             )}
@@ -267,11 +315,8 @@ export function MediaPicker({
             disabled={busy}
             onPress={() =>
               void run(async () => {
-                await api.request(`/api/gifs/${encodeURIComponent(gifId.trim())}`, {
-                  method: 'DELETE',
-                });
+                await removeFromLibrary(gifId.trim());
                 setGifId('');
-                await load();
                 showAdd(false);
               })
             }
@@ -301,6 +346,19 @@ const useStyles = createThemedStyles((colors) => ({
   },
   heading: { color: colors.muted, fontSize: 14 },
   tile: { width: '33.0%', aspectRatio: 1.25, overflow: 'hidden', backgroundColor: colors.pale },
+  gifButton: { flex: 1 },
+  removeGif: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeGifHovered: { backgroundColor: 'rgba(0, 0, 0, 0.55)' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10, padding: 24 },
   emptyTitle: { color: colors.dark, fontSize: 16, fontWeight: '600' },
   emptyText: { color: colors.muted, textAlign: 'center', padding: 8 },
