@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
@@ -19,7 +20,9 @@ import { retainUpload } from '../../lib/local-attachments';
 import type { UploadAsset } from '../../lib/uploads';
 import { VideoPlayback } from './VideoPlayback';
 import { uploadKind } from '../../lib/upload-kind';
-import { videoBytes } from '../../lib/video-download.types';
+import { videoBytes, videoTime } from '../../lib/video-download.types';
+import { readUploadMusicMetadata } from '../../lib/upload-music-metadata';
+import type { MusicMetadata } from '../../lib/music-metadata';
 
 /** Own the original until Cancel disposes it or Send transfers it to the outbox. */
 export function MediaSendPreview({
@@ -46,11 +49,25 @@ export function MediaSendPreview({
   const [captionFocused, setCaptionFocused] = useState(false);
   const [asDocument, setAsDocument] = useState(false);
   const [file, setFile] = useState<VideoFile>();
+  const [musicInfo, setMusicInfo] = useState<{ file: VideoFile; metadata: MusicMetadata }>();
+  const musicMetadata = musicInfo?.file === file ? musicInfo?.metadata : undefined;
   const [error, setError] = useState('');
   const transferred = useRef(false);
   const captionInput = useRef<TextInput>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    if (!music || !file) return;
+    const controller = new AbortController();
+    void readUploadMusicMetadata(file, controller.signal)
+      .then((metadata) => {
+        if (!controller.signal.aborted) setMusicInfo({ file, metadata });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setMusicInfo({ file, metadata: {} });
+      });
+    return () => controller.abort();
+  }, [file, music]);
   useEffect(() => {
     const player = audio.current;
     return () => player?.pause();
@@ -181,6 +198,17 @@ export function MediaSendPreview({
                       .catch(() => setError('Could not play this music file.'));
                 }}
               >
+                {music && !!musicMetadata?.coverUrl && (
+                  <>
+                    <Image
+                      source={{ uri: musicMetadata.coverUrl }}
+                      accessibilityLabel="Music cover"
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
+                    />
+                    <View pointerEvents="none" style={[StyleSheet.absoluteFill, s.coverShade]} />
+                  </>
+                )}
                 {!file && !error ? (
                   <ActivityIndicator color="white" />
                 ) : (
@@ -193,9 +221,17 @@ export function MediaSendPreview({
               </Pressable>
               <View style={s.fileDetails}>
                 <Text numberOfLines={1} style={s.fileName}>
-                  {asset.name}
+                  {(music && musicMetadata?.title) || asset.name}
                 </Text>
-                <Text style={s.fileSize}>{file ? videoBytes(file.bytes) : 'Preparing file…'}</Text>
+                {music && (
+                  <Text numberOfLines={1} style={s.fileSize}>
+                    {musicMetadata?.artist || 'Unknown artist'}
+                  </Text>
+                )}
+                <Text style={s.fileSize}>
+                  {file ? videoBytes(file.bytes) : 'Preparing file…'}
+                  {music && !!musicMetadata?.duration && ` · ${videoTime(musicMetadata.duration)}`}
+                </Text>
               </View>
               {music && file && Platform.OS === 'web' && (
                 <audio
@@ -326,7 +362,9 @@ const useStyles = createThemedStyles((colors) => ({
     backgroundColor: colors.blue,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  coverShade: { backgroundColor: '#00000045' },
   fileDetails: { flex: 1, minWidth: 0, gap: 6 },
   fileName: { fontSize: 15, fontWeight: '500', color: colors.dark },
   fileSize: { fontSize: 14, color: colors.muted },

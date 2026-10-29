@@ -3988,6 +3988,37 @@ test('desktop pasted images focus the caption and send with Enter, while Shift+E
   expect(uploads).toBe(2);
 });
 
+test('desktop music send preview displays embedded title, artist and duration before uploading', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Music sends directly on mobile.');
+  await mockApi(page, []);
+  let uploads = 0;
+  await page.route('**/api/conversations/*/attachments', async (route) => {
+    uploads++;
+    await route.abort();
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  const picker = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+  await (
+    await picker
+  ).setFiles({
+    name: 'Original filename.mp3',
+    mimeType: 'audio/mpeg',
+    buffer: readFileSync(path.join(__dirname, '../fixtures/music/tagged.mp3')),
+  });
+  const preview = page.getByTestId('music-send-preview');
+  await expect(preview.getByText('آهنگ Test', { exact: true })).toBeVisible();
+  await expect(preview.getByText('Test Artist', { exact: true })).toBeVisible();
+  await expect(preview.getByText(/ · 0:00$/)).toBeVisible();
+  expect(uploads).toBe(0);
+  await preview.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(preview).toHaveCount(0);
+  expect(uploads).toBe(0);
+});
+
 for (const kind of ['file', 'music'] as const) {
   test(`desktop ${kind} preview cancels and sends captions while mobile sends directly`, async ({
     page,
@@ -4045,6 +4076,7 @@ for (const kind of ['file', 'music'] as const) {
       preview.getByText(music ? 'Send music' : 'Send file', { exact: true }),
     ).toBeVisible();
     await expect(preview.getByText(name, { exact: true })).toBeVisible();
+    if (music) await expect(preview.getByText('Unknown artist', { exact: true })).toBeVisible();
     await expect(preview.getByRole('checkbox')).toHaveCount(0);
     const caption = preview.getByRole('textbox', {
       name: music ? 'Music caption' : 'File caption',
