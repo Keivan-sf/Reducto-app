@@ -1,10 +1,10 @@
 import { createThemedStyles } from '../../context/ThemeContext';
-import { memo, useCallback, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useSyncExternalStore } from 'react';
 import type { MessageOutbox } from '../../api/message-outbox';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { PendingUpload } from '../../api/types';
 import { Icon } from '../../components/ui';
-import { mediaPreviewSize, type MediaSize } from '../../lib/media-preview';
+import { mediaDimensions, mediaPreviewSize } from '../../lib/media-preview';
 import { videoBytes, videoTime } from '../../lib/video-download.types';
 import { DownloadProgressRing } from './DownloadProgressRing';
 import { AttachmentControlIcon } from './AttachmentControlIcon';
@@ -38,7 +38,7 @@ export function UploadMessage({
     [outbox, localId, initialUpload],
   );
   const upload = useSyncExternalStore(subscribe, snapshot, snapshot);
-  const [size, setSize] = useState<MediaSize>();
+  const size = mediaDimensions(upload);
   const visual = ['image', 'video', 'gif'].includes(upload.type);
   const progress = upload.total ? upload.sent / upload.total : 0;
   const status = failed
@@ -69,20 +69,13 @@ export function UploadMessage({
         {!!upload.uri &&
           (upload.type === 'video' ? (
             <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-              <UploadVideoPreview
-                uri={upload.uri}
-                active={false}
-                muted
-                nativeControls={false}
-                onSize={setSize}
-              />
+              <UploadVideoPreview uri={upload.uri} active={false} muted nativeControls={false} />
             </View>
           ) : (
             <Image
               source={{ uri: upload.uri }}
               style={StyleSheet.absoluteFill}
               resizeMode="cover"
-              onLoad={(event) => setSize(event.nativeEvent.source)}
             />
           ))}
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, s.shade]} />

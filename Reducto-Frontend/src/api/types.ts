@@ -69,6 +69,10 @@ export interface Reaction {
   messageId: string;
 }
 export interface PendingUpload {
+  /** Reserve visual bubbles only after local metadata has been read. */
+  preparing?: boolean;
+  width?: number;
+  height?: number;
   type: Attachment['type'];
   name: string;
   uri?: string;

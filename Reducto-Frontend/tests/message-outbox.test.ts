@@ -1,9 +1,59 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MessageOutbox, type OutgoingPayload } from '../src/api/message-outbox';
-import type { Message } from '../src/api/types';
+import type { Message, PendingUpload } from '../src/api/types';
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+for (const type of ['image', 'video', 'gif'] as const) {
+  test(`${type} uploads first appear with dimensions and keep progress updates out of history`, () => {
+    const t = setup();
+    let progress!: (update: Partial<PendingUpload>) => void;
+    const id = t.box.enqueue(
+      'chat',
+      {},
+      {
+        initial: { type, name: 'media', total: 100, sent: 0, preparing: true },
+        prepare: (_signal, update) => {
+          progress = update;
+          return new Promise(() => {});
+        },
+        dispose() {},
+      },
+    );
+    assert.equal(t.snapshot().length, 0);
+    progress({ preparing: false, width: 120, height: 240, uri: 'owned:media' });
+    assert.equal(t.snapshot().length, 1);
+    assert.equal(t.box.getUpload(id)?.width, 120);
+    assert.equal(t.box.getUpload(id)?.height, 240);
+    const history = t.snapshot();
+    progress({ sent: 50 });
+    assert.equal(t.snapshot(), history);
+    assert.equal(t.box.getUpload(id)?.sent, 50);
+    t.box.cancel(id);
+    assert.equal(t.snapshot().length, 0);
+    t.box.dispose();
+  });
+}
+
+test('metadata preparation failures remain visible for retry', async () => {
+  const t = setup();
+  t.box.enqueue(
+    'chat',
+    {},
+    {
+      initial: { type: 'video', name: 'broken.mp4', total: 100, sent: 0, preparing: true },
+      async prepare() {
+        throw new Error('Could not read media dimensions.');
+      },
+      dispose() {},
+    },
+  );
+  await tick();
+  assert.equal(t.snapshot()[0].delivery, 'failed');
+  assert.equal(t.requests.length, 0);
+  t.box.dispose();
+});
 
 test('long uploads remain active and can finish after the former timeout', async (context) => {
   context.mock.timers.enable({ apis: ['setTimeout'] });

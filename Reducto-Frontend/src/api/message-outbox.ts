@@ -67,6 +67,7 @@ export class MessageOutbox {
     const result: Record<string, Message[]> = {};
     for (const entry of this.entries.values()) {
       if (!entry.visible) continue;
+      if (entry.progress?.preparing && entry.message.delivery === 'sending') continue;
       (result[entry.message.conversationId] ??= []).push(entry.message);
     }
     this.publish(result);
@@ -116,8 +117,10 @@ export class MessageOutbox {
             entry.controller.signal.aborted
           )
             return;
+          const wasPreparing = entry.progress?.preparing;
           entry.progress = { ...entry.progress!, ...update };
           for (const listener of this.uploadListeners.get(entry.localId) ?? []) listener();
+          if (wasPreparing && !entry.progress.preparing) this.emit();
         });
         if (
           this.disposed ||

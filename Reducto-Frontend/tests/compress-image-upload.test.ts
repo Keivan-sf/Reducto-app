@@ -102,7 +102,9 @@ for (const platform of ['android', 'web'] as const) {
   ] as const) {
     test(`${platform} ${width}×${height} images fit within 1280 pixels without upscaling`, async () => {
       const { compress, calls } = compressor(platform, false, width, height);
-      await compress({ uri: 'owned:source', bytes: 100, dispose() {} });
+      const output = await compress({ uri: 'owned:source', bytes: 100, dispose() {} });
+      assert.equal(output.width, expected?.width ?? width);
+      assert.equal(output.height, expected?.height ?? height);
       const resize = calls.find((call) => Array.isArray(call) && call[0] === 'resize');
       assert.deepEqual(
         JSON.parse(JSON.stringify(resize ?? null)),

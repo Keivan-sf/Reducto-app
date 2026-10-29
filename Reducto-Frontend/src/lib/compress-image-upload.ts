@@ -36,11 +36,14 @@ export async function compressImageUpload(source: VideoFile): Promise<VideoFile>
         if (Platform.OS === 'web')
           normalizedUri = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
         else new File(image.uri).write(bytes);
-        return await retainUpload({
+        const retained = await retainUpload({
           uri: normalizedUri ?? image.uri,
           name: `${base}.jpg`,
           mimeType: 'image/jpeg',
         });
+        retained.width = rendered.width;
+        retained.height = rendered.height;
+        return retained;
       } finally {
         if (normalizedUri) URL.revokeObjectURL(normalizedUri);
         if (Platform.OS === 'web') URL.revokeObjectURL(image.uri);

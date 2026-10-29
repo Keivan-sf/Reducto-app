@@ -6475,6 +6475,7 @@ for (const kind of ['image', 'video', 'music'] as const) {
       await page.getByRole('button', { name: 'Send image', exact: true }).click();
     const bubble = page.getByTestId(kind === 'music' ? 'upload-file' : 'upload-media');
     await expect(bubble).toBeVisible();
+    const initialBounds = await bubble.boundingBox();
     await expect(bubble.getByRole('progressbar', { name: 'Upload progress' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEditable();
     await expect(page.getByRole('button', { name: 'Attach a file', exact: true })).toBeEnabled();
@@ -6488,6 +6489,20 @@ for (const kind of ['image', 'video', 'music'] as const) {
         .poll(() => bubble.locator('video').evaluate((video: HTMLVideoElement) => video.videoWidth))
         .toBeGreaterThan(0);
     } else await expect(bubble.getByText('song.mp3', { exact: true })).toBeVisible();
+    if (kind !== 'music') {
+      const dimensions = await bubble.evaluate((element) => {
+        const image = element.querySelector('img');
+        const video = element.querySelector('video');
+        return image
+          ? { width: image.naturalWidth, height: image.naturalHeight }
+          : { width: video!.videoWidth, height: video!.videoHeight };
+      });
+      const ratio = Math.min(4, Math.max(0.35, dimensions.width / dimensions.height));
+      expect(initialBounds!.width / initialBounds!.height).toBeCloseTo(ratio, 2);
+      const loadedBounds = await bubble.boundingBox();
+      expect(loadedBounds!.width).toBeCloseTo(initialBounds!.width, 1);
+      expect(loadedBounds!.height).toBeCloseTo(initialBounds!.height, 1);
+    }
     await expect.poll(() => !!release).toBe(true);
     await page.getByRole('button', { name: `Cancel ${kind} upload`, exact: true }).click();
     await expect(bubble).toHaveCount(0);

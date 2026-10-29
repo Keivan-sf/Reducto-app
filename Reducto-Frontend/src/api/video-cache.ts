@@ -6,6 +6,8 @@ export interface VideoFile {
   name?: string;
   mimeType?: string;
   duration?: number;
+  width?: number;
+  height?: number;
   exists?: () => boolean;
   dispose: () => void;
 }

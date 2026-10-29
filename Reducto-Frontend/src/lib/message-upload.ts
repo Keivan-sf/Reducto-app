@@ -10,6 +10,8 @@ import { retainUpload } from './local-attachments';
 import { uploadKind } from './upload-kind';
 import { uploadSizeError } from './upload-limits';
 import { fileForm, type UploadAsset } from './uploads';
+import { readUploadDimensions } from './upload-dimensions';
+import { mediaDimensions } from './media-preview';
 
 /** The outbox owns this job and its file independently of any mounted chat. */
 export function messageUpload(
@@ -55,8 +57,9 @@ export function messageUpload(
   return {
     initial: {
       type,
+      preparing: ['image', 'video', 'gif'].includes(type),
       name: asset.name,
-      // Wait for the owned preview URI so the browser loads the video only once.
+      // Preview only the owned file, which survives navigation and upload retries.
       uri: local?.uri,
       total: local?.bytes ?? asset.size ?? 0,
       sent: 0,
@@ -77,7 +80,19 @@ export function messageUpload(
           compressed = true;
           check(signal);
         }
-        progress({ uri: local.uri, total: local.bytes, sent: 0, name: local.name ?? asset.name });
+        const dimensions = ['image', 'video', 'gif'].includes(type)
+          ? (mediaDimensions(local) ??
+            (await readUploadDimensions(local.uri, type === 'video' ? 'video' : 'image', signal)))
+          : undefined;
+        check(signal);
+        progress({
+          preparing: false,
+          ...dimensions,
+          uri: local.uri,
+          total: local.bytes,
+          sent: 0,
+          name: local.name ?? asset.name,
+        });
         const size = local.bytes;
         const body = await fileForm(
           type === 'gif' ? 'gif' : 'file',
