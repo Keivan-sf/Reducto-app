@@ -3929,6 +3929,65 @@ test('historical video metadata without dimensions or thumbnails keeps a square 
   expect(downloads).toBe(0);
 });
 
+test('desktop pasted images focus the caption and send with Enter, while Shift+Enter adds a line', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop');
+  await mockApi(page, []);
+  const original = readFileSync(path.join(__dirname, '../fixtures/portrait.png'));
+  let uploads = 0;
+  await page.route('**/api/conversations/*/attachments', async (route) => {
+    uploads++;
+    await route.fulfill({
+      status: 201,
+      json: {
+        attachment: {
+          id: `pasted-image-${uploads}`,
+          type: 'document',
+          fileName: 'pasted.png',
+          contentType: 'image/png',
+          fileSize: original.length,
+        },
+      },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  for (const caption of ['', 'First line\nSecond line']) {
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+    await composer.focus();
+    await composer.evaluate((element, base64) => {
+      const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+      const clipboardData = new DataTransfer();
+      clipboardData.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }));
+      element.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+      );
+    }, original.toString('base64'));
+    const preview = page.getByTestId('image-send-preview');
+    const input = preview.getByRole('textbox', { name: 'Image caption', exact: true });
+    await expect(input).toBeFocused();
+    await expect(preview.getByRole('button', { name: 'Send image', exact: true })).toBeEnabled();
+    await preview.getByRole('checkbox', { name: 'Send as a document' }).click();
+    await input.focus();
+    if (caption) {
+      await input.pressSequentially('First line');
+      await input.press('Shift+Enter');
+      await input.pressSequentially('Second line');
+      await expect(input).toHaveValue(caption);
+      await expect(preview).toBeVisible();
+    }
+    const sent = page.waitForRequest(
+      (request) => request.method() === 'POST' && request.url().endsWith('/messages'),
+    );
+    await input.press('Enter');
+    const body = (await sent).postDataJSON();
+    expect(body.text ?? '').toBe(caption);
+    await expect(preview).toHaveCount(0);
+  }
+  expect(uploads).toBe(2);
+});
+
 test('image send preview cancels without uploading and sends original document bytes with a caption', async ({
   page,
 }, testInfo) => {

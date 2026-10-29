@@ -11,12 +11,18 @@ interface Node {
 }
 /** The native input is independent of React's render queue: assert its value
  * changes inside the press handler, before running another component render. */
-function composer(accepted = true) {
+function composer(accepted = true, platform = 'android', width = 400) {
+  let effects: (() => unknown)[] = [];
+  let cleanups: (() => void)[] = [];
+  const listeners = new Map<string, (event: unknown) => void>();
   const states: unknown[] = [];
   const refs: { current: any }[] = [];
   let stateIndex = 0,
     refIndex = 0;
   const native = {
+    addEventListener: (name: string, callback: (event: unknown) => void) =>
+      listeners.set(name, callback),
+    removeEventListener: (name: string) => listeners.delete(name),
     value: '',
     focused: false,
     clears: 0,
@@ -52,7 +58,7 @@ function composer(accepted = true) {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'Fragment' };
       if (name === 'react')
         return {
-          useEffect: () => {},
+          useEffect: (effect: () => unknown) => effects.push(effect),
           useLayoutEffect: () => {},
           useState: (initial: unknown) => {
             const index = stateIndex++;
@@ -71,9 +77,10 @@ function composer(accepted = true) {
         };
       if (name === 'react-native')
         return {
-          Platform: { OS: 'android' },
-          useWindowDimensions: () => ({ width: 400, height: 800 }),
+          Platform: { OS: platform },
+          useWindowDimensions: () => ({ width, height: 800 }),
           Keyboard: { dismiss: () => {} },
+          BackHandler: { addEventListener: () => ({ remove() {} }) },
           Pressable: 'Pressable',
           TextInput: 'TextInput',
           View: 'View',
@@ -88,6 +95,8 @@ function composer(accepted = true) {
     },
   });
   const props = {
+    active: true,
+    editing: false,
     busy: false,
     hasAttachment: false,
     onSend: (text: string) => {
@@ -96,10 +105,12 @@ function composer(accepted = true) {
     },
     onSendVoice: async () => {},
     onAttach: () => {},
+    onPasteImage: (file: File) => pasted.push(file),
     onSendGif: () => true,
     onError: (error: string) => errors.push(error),
     onVoiceActive: () => {},
   };
+  const pasted: File[] = [];
   let tree: Node;
   const find = (predicate: (node: Node) => boolean, node = tree): Node | undefined => {
     if (!node || typeof node !== 'object') return;
@@ -112,9 +123,14 @@ function composer(accepted = true) {
     }
   };
   const render = () => {
+    cleanups.forEach((cleanup) => cleanup());
+    effects = [];
     stateIndex = refIndex = 0;
     tree = module.exports.MessageComposer(props) as unknown as Node;
     find((node) => node.type === 'TextInput')!.props.ref.current = native;
+    cleanups = effects
+      .map((effect) => effect())
+      .filter((value) => typeof value === 'function') as (() => void)[];
   };
   render();
   const type = (value: string) => {
@@ -125,6 +141,17 @@ function composer(accepted = true) {
     native,
     sends,
     errors,
+    pasted,
+    paste: (files: File[]) => {
+      let prevented = false;
+      listeners.get('paste')?.({
+        clipboardData: { files },
+        preventDefault: () => {
+          prevented = true;
+        },
+      });
+      return prevented;
+    },
     props,
     render,
     type,
@@ -134,6 +161,7 @@ function composer(accepted = true) {
       find((node) => node.type === 'MediaPicker')!.props.onEmoji(emoji);
     },
     input: () => find((node) => node.type === 'TextInput')!,
+    record: () => find((node) => node.type === 'VoiceRecordButton')!.props.onActive(true),
     send: () => find((node) => node.props?.accessibilityLabel === 'Send message')!.props.onPress(),
   };
 }
@@ -189,4 +217,42 @@ test('emoji replaces the selected text and sends with the rest of the draft', ()
   assert.equal(t.input().props.value, 'Hello 😀!');
   t.send();
   assert.deepEqual(t.sends, ['Hello 😀!']);
+});
+
+test('desktop image paste opens the image flow and preserves the composer draft', () => {
+  const t = composer(true, 'web', 1200);
+  const file = new File(['image bytes'], 'screenshot.png', { type: 'image/png' });
+  t.type('Keep this draft');
+  t.render();
+  assert.equal(t.paste([file]), true);
+  assert.deepEqual(t.pasted, [file]);
+  assert.deepEqual(t.sends, []);
+  t.render();
+  assert.equal(t.input().props.value, 'Keep this draft');
+  assert.equal(t.paste([]), false, 'ordinary text pastes keep browser behavior');
+  assert.equal(t.paste([new File(['text'], 'notes.txt', { type: 'text/plain' })]), false);
+});
+
+test('image paste is disabled on mobile, inactive, busy, editing, and recording composers', () => {
+  const file = new File(['image bytes'], 'screenshot.png', { type: 'image/png' });
+  for (const [platform, width] of [
+    ['android', 1200],
+    ['web', 400],
+  ] as const) {
+    const t = composer(true, platform, width);
+    assert.equal(t.paste([file]), false);
+    assert.deepEqual(t.pasted, []);
+  }
+  for (const flags of [{ active: false }, { busy: true }, { editing: true }]) {
+    const t = composer(true, 'web', 1200);
+    Object.assign(t.props, flags);
+    t.render();
+    assert.equal(t.paste([file]), false);
+    assert.deepEqual(t.pasted, []);
+  }
+  const t = composer(true, 'web', 1200);
+  t.record();
+  t.render();
+  assert.equal(t.paste([file]), false);
+  assert.deepEqual(t.pasted, []);
 });

@@ -1643,6 +1643,19 @@ export default function ChatView({
               onSend={(text) => send(undefined, text)}
               onSendVoice={sendVoice}
               onAttach={() => void upload().catch((err) => setError(err.message))}
+              onPasteImage={(file) => {
+                if (!id || busy || !focused) return;
+                const sizeError = uploadSizeError(file.size);
+                if (sizeError) return setError(sizeError);
+                ++uploadSequence.current;
+                setError('');
+                setImageDraft({
+                  // The preview owns the blob URL created from this file.
+                  asset: { uri: '', name: file.name || 'image.png', mimeType: file.type, file },
+                  conversationId: id,
+                  replyToMessageId: replyTo?.id,
+                });
+              }}
               onPickerVisibilityChange={setGifs}
               onSendGif={(gifId) => send(gifId)}
               onError={setError}

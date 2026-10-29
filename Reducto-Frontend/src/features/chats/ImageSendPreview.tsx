@@ -39,6 +39,7 @@ export function ImageSendPreview({
   const [file, setFile] = useState<VideoFile>();
   const [error, setError] = useState('');
   const transferred = useRef(false);
+  const captionInput = useRef<TextInput>(null);
   useEffect(() => {
     let alive = true;
     let owned: VideoFile | undefined;
@@ -84,6 +85,9 @@ export function ImageSendPreview({
       visible
       animationType="fade"
       onRequestClose={onClose}
+      onShow={() => {
+        if (desktop) captionInput.current?.focus();
+      }}
       statusBarTranslucent
       navigationBarTranslucent
     >
@@ -156,6 +160,8 @@ export function ImageSendPreview({
             </Pressable>
             <View style={[s.captionField, captionFocused && { borderBottomColor: colors.blue }]}>
               <TextInput
+                ref={captionInput}
+                autoFocus={desktop}
                 accessibilityLabel="Image caption"
                 placeholder="Add a caption…"
                 placeholderTextColor={colors.muted}
@@ -163,6 +169,18 @@ export function ImageSendPreview({
                 onChangeText={setCaption}
                 onFocus={() => setCaptionFocused(true)}
                 onBlur={() => setCaptionFocused(false)}
+                onKeyPress={(event) => {
+                  const key = event.nativeEvent as unknown as {
+                    key: string;
+                    shiftKey?: boolean;
+                    isComposing?: boolean;
+                    repeat?: boolean;
+                  };
+                  if (desktop && key.key === 'Enter' && !key.shiftKey && !key.isComposing) {
+                    event.preventDefault();
+                    if (!key.repeat) submit();
+                  }
+                }}
                 multiline
                 numberOfLines={Platform.OS === 'web' ? 1 : undefined}
                 maxLength={10000}

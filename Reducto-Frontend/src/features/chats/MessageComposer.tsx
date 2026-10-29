@@ -23,6 +23,7 @@ interface Props {
   onSend: (text: string) => boolean;
   onSendVoice: (voice: RecordedVoice, signal: AbortSignal) => Promise<void>;
   onAttach: () => void;
+  onPasteImage?: (file: File) => void;
   onPickerVisibilityChange?: (open: boolean) => void;
   onSendGif?: (id: string) => boolean;
   onError: (error: string) => void;
@@ -39,6 +40,7 @@ export function MessageComposer({
   onSend,
   onSendVoice,
   onAttach,
+  onPasteImage,
   onSendGif,
   onPickerVisibilityChange,
   onError,
@@ -51,6 +53,21 @@ export function MessageComposer({
   const [recording, setRecording] = useState(false);
   const { width, height } = useWindowDimensions();
   const desktop = Platform.OS === 'web' && width >= 768;
+  useEffect(() => {
+    if (!desktop || !active || busy || editing || recording || !onPasteImage) return;
+    const element = input.current as unknown as HTMLTextAreaElement | null;
+    if (!element) return;
+    function paste(event: ClipboardEvent) {
+      const file = Array.from(event.clipboardData?.files ?? []).find((file) =>
+        file.type.toLowerCase().startsWith('image/'),
+      );
+      if (!file) return;
+      event.preventDefault();
+      onPasteImage!(file);
+    }
+    element.addEventListener('paste', paste);
+    return () => element.removeEventListener('paste', paste);
+  }, [desktop, active, busy, editing, recording, onPasteImage]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMounted, setPickerMounted] = useState(false);
   const pickerElement = useRef<View>(null);
