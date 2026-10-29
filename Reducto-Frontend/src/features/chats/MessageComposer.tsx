@@ -54,6 +54,12 @@ export function MessageComposer({
   const { width, height } = useWindowDimensions();
   const desktop = Platform.OS === 'web' && width >= 768;
   useEffect(() => {
+    if (!desktop || !active || busy || recording) return;
+    // Wait for retained chat layers and modal focus traps to finish updating.
+    const frame = requestAnimationFrame(() => input.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [desktop, active, busy, recording]);
+  useEffect(() => {
     if (!desktop || !active || busy || editing || recording || !onPasteFile) return;
     const element = input.current as unknown as HTMLTextAreaElement | null;
     if (!element) return;
@@ -300,7 +306,14 @@ export function MessageComposer({
           <MediaPicker
             height={Math.min(desktop ? 420 : 320, height * (desktop ? 0.65 : 0.45))}
             onClose={closePicker}
-            onSend={onSendGif}
+            onSend={(id) => {
+              const accepted = onSendGif(id);
+              if (accepted && desktop) {
+                closePicker();
+                input.current?.focus();
+              }
+              return accepted;
+            }}
             onEmoji={insertEmoji}
             onHoldOpen={(hold) => {
               holdOpen.current = hold;

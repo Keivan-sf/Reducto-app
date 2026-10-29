@@ -13,7 +13,10 @@ interface Node {
  * changes inside the press handler, before running another component render. */
 function composer(accepted = true, platform = 'android', width = 400) {
   let effects: (() => unknown)[] = [];
-  let cleanups: (() => void)[] = [];
+  const effectSlots: { deps: unknown[]; cleanup?: () => void }[] = [];
+  const frames = new Map<number, () => void>();
+  let nextFrame = 0;
+  let effectIndex = 0;
   const listeners = new Map<string, (event: unknown) => void>();
   const states: unknown[] = [];
   const refs: { current: any }[] = [];
@@ -52,13 +55,26 @@ function composer(accepted = true, platform = 'android', width = 400) {
     module,
     clearTimeout,
     setTimeout,
+    requestAnimationFrame: (callback: () => void) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    },
+    cancelAnimationFrame: (id: number) => frames.delete(id),
     exports: module.exports,
     require: (name: string) => {
       if (name.endsWith('/ThemeContext')) return themeContextMock;
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'Fragment' };
       if (name === 'react')
         return {
-          useEffect: (effect: () => unknown) => effects.push(effect),
+          useEffect: (effect: () => (() => void) | void, deps: unknown[]) => {
+            const index = effectIndex++;
+            const previous = effectSlots[index];
+            if (previous && deps.every((value, i) => Object.is(value, previous.deps[i]))) return;
+            effects.push(() => {
+              previous?.cleanup?.();
+              effectSlots[index] = { deps, cleanup: effect() || undefined };
+            });
+          },
           useLayoutEffect: () => {},
           useState: (initial: unknown) => {
             const index = stateIndex++;
@@ -123,14 +139,11 @@ function composer(accepted = true, platform = 'android', width = 400) {
     }
   };
   const render = () => {
-    cleanups.forEach((cleanup) => cleanup());
     effects = [];
-    stateIndex = refIndex = 0;
+    stateIndex = refIndex = effectIndex = 0;
     tree = module.exports.MessageComposer(props) as unknown as Node;
     find((node) => node.type === 'TextInput')!.props.ref.current = native;
-    cleanups = effects
-      .map((effect) => effect())
-      .filter((value) => typeof value === 'function') as (() => void)[];
+    effects.forEach((effect) => effect());
   };
   render();
   const type = (value: string) => {
@@ -139,6 +152,11 @@ function composer(accepted = true, platform = 'android', width = 400) {
   };
   return {
     native,
+    flushFrames: () => {
+      const pending = [...frames.values()];
+      frames.clear();
+      pending.forEach((callback) => callback());
+    },
     sends,
     errors,
     pasted,
@@ -165,6 +183,44 @@ function composer(accepted = true, platform = 'android', width = 400) {
     send: () => find((node) => node.props?.accessibilityLabel === 'Send message')!.props.onPress(),
   };
 }
+
+test('desktop focuses on opening and reactivating, without stealing focus on draft updates', () => {
+  const t = composer(true, 'web', 1200);
+  t.flushFrames();
+  assert.equal(t.native.focused, true);
+  t.native.focused = false;
+  t.type('Draft');
+  t.render();
+  t.flushFrames();
+  assert.equal(t.native.focused, false);
+  t.props.active = false;
+  t.render();
+  t.flushFrames();
+  assert.equal(t.native.focused, false);
+  t.props.active = true;
+  t.render();
+  t.flushFrames();
+  assert.equal(t.native.focused, true);
+});
+
+test('automatic desktop focus is cancelled when the chat becomes inactive', () => {
+  const t = composer(true, 'web', 1200);
+  t.props.active = false;
+  t.render();
+  t.flushFrames();
+  assert.equal(t.native.focused, false);
+});
+
+test('mobile composers do not automatically focus', () => {
+  for (const [platform, width] of [
+    ['android', 1200],
+    ['web', 400],
+  ] as const) {
+    const t = composer(true, platform, width);
+    t.flushFrames();
+    assert.equal(t.native.focused, false);
+  }
+});
 
 test('Android clears native text in the send handler before React renders and keeps focus', () => {
   const t = composer();

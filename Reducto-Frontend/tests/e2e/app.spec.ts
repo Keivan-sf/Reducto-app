@@ -4025,7 +4025,7 @@ test('desktop pasted images focus the caption and send with Enter, while Shift+E
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   for (const caption of ['', 'First line\nSecond line']) {
     const composer = page.getByRole('textbox', { name: 'Message', exact: true });
-    await composer.focus();
+    await expect(composer).toBeFocused();
     await composer.evaluate((element, base64) => {
       const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
       const clipboardData = new DataTransfer();
@@ -4054,6 +4054,7 @@ test('desktop pasted images focus the caption and send with Enter, while Shift+E
     const body = (await sent).postDataJSON();
     expect(body.text ?? '').toBe(caption);
     await expect(preview).toHaveCount(0);
+    await expect(composer).toBeFocused();
   }
   expect(uploads).toBe(2);
 });
@@ -4269,6 +4270,8 @@ test('video send preview plays locally, cancels without uploading, and sends wit
     attachment: { type: 'video', mediaId: 'preview-video' },
   });
   await expect(preview).toHaveCount(0);
+  if (testInfo.project.name === 'desktop')
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeFocused();
   expect(uploads).toBe(1);
 });
 

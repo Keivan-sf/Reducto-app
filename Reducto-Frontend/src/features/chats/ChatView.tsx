@@ -1664,7 +1664,7 @@ export default function ChatView({
           )}
           <View style={editing ? { display: 'none' } : undefined}>
             <MessageComposer
-              active={focused && !editing && (wide || !searchOpen)}
+              active={focused && !editing && !mediaDraft && (wide || !searchOpen)}
               busy={busy}
               hasAttachment={false}
               onSend={(text) => send(undefined, text)}
