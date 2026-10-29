@@ -111,6 +111,21 @@ function nativeRecorder(delayed = false) {
           Pressable: 'Pressable',
           Text: 'Text',
           ActivityIndicator: 'ActivityIndicator',
+          Animated: {
+            View: 'Animated.View',
+            Value: class {
+              constructor(public value: number) {}
+              setValue(value: number) {
+                this.value = value;
+              }
+              interpolate(config: unknown) {
+                return { value: this, config };
+              }
+            },
+            timing: () => ({ start() {}, stop() {} }),
+            spring: () => ({ start() {}, stop() {} }),
+            loop: () => ({ start() {}, stop() {} }),
+          },
           Platform: { OS: 'android' },
           StyleSheet: { create: (value: unknown) => value },
           AppState: {

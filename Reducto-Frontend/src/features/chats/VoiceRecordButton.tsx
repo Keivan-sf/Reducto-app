@@ -2,6 +2,7 @@ import { useTheme, createThemedStyles } from '../../context/ThemeContext';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   AppState,
   Platform,
   Pressable,
@@ -35,6 +36,10 @@ export function VoiceRecordButton({
   const s = useStyles();
   const [phase, setPhase] = useState<RecordingPhase>('idle');
   const [elapsed, setElapsed] = useState(0);
+  const [arrowCue] = useState(() => new Animated.Value(0));
+  const [lockProgress] = useState(() => new Animated.Value(0));
+  const [lockVisibility] = useState(() => new Animated.Value(0));
+  const [iconScale] = useState(() => new Animated.Value(1));
   const gesture = useRef({ x: 0, y: 0, send: false, identifier: '' });
   const nativeHeld = useRef(false);
   const nativeHoldTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -79,6 +84,40 @@ export function VoiceRecordButton({
   const recording = phase === 'recording' || phase === 'locked';
   const locked = phase === 'locked';
   useEffect(() => {
+    if (phase !== 'recording') return;
+    lockProgress.setValue(0);
+    arrowCue.setValue(0);
+    const cue = Animated.loop(
+      Animated.timing(arrowCue, {
+        toValue: 1,
+        duration: 1200,
+        useNativeDriver: true,
+        isInteraction: false,
+      }),
+    );
+    cue.start();
+    return () => cue.stop();
+  }, [phase, arrowCue, lockProgress]);
+  useEffect(() => {
+    const visibility = Animated.timing(lockVisibility, {
+      toValue: phase === 'recording' ? 1 : 0,
+      duration: locked ? 220 : 150,
+      useNativeDriver: true,
+    });
+    const scale = Animated.spring(iconScale, {
+      toValue: phase === 'recording' ? 1.15 : 1,
+      speed: 24,
+      bounciness: locked ? 12 : 5,
+      useNativeDriver: true,
+    });
+    visibility.start();
+    scale.start();
+    return () => {
+      visibility.stop();
+      scale.stop();
+    };
+  }, [phase, locked, lockVisibility, iconScale]);
+  useEffect(() => {
     if (!recording) return;
     const started = Date.now();
     const timer = setInterval(() => setElapsed((Date.now() - started) / 1000), 100);
@@ -91,6 +130,8 @@ export function VoiceRecordButton({
   function move(x: number, y: number) {
     const dx = x - gesture.current.x;
     const dy = y - gesture.current.y;
+    if (phase !== 'recording') return;
+    lockProgress.setValue(Math.min(1, Math.max(0, -dy / 60)));
     if (dy <= -60 && -dy > Math.abs(dx)) controller.lock();
   }
   function beginHold() {
@@ -138,12 +179,56 @@ export function VoiceRecordButton({
           )}
         </View>
       )}
-      {phase === 'recording' && (
-        <View style={s.lockHint} pointerEvents="none">
-          <Icon name="lock-closed" color={colors.muted} size={17} />
-          <Icon name="chevron-up" color={colors.blue} size={20} />
+      {(phase === 'recording' || locked) && (
+        <Animated.View
+          style={[s.lockHint, { opacity: lockVisibility }]}
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          <Animated.View
+            style={{
+              transform: [
+                { scale: lockProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 1.2] }) },
+              ],
+            }}
+          >
+            <Icon name="lock-closed" color={locked ? colors.blue : colors.muted} size={17} />
+          </Animated.View>
+          <Animated.View
+            style={{
+              opacity: lockProgress.interpolate({
+                inputRange: [0, 0.75, 1],
+                outputRange: [1, 0.5, 0],
+              }),
+              transform: [
+                {
+                  translateY: lockProgress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -20],
+                  }),
+                },
+              ],
+            }}
+          >
+            <Animated.View
+              style={{
+                opacity: arrowCue.interpolate({
+                  inputRange: [0, 0.15, 0.75, 1],
+                  outputRange: [0, 1, 1, 0],
+                }),
+                transform: [
+                  {
+                    translateY: arrowCue.interpolate({ inputRange: [0, 1], outputRange: [4, -12] }),
+                  },
+                ],
+              }}
+            >
+              <Icon name="chevron-up" color={colors.blue} size={20} />
+            </Animated.View>
+          </Animated.View>
           <Text style={s.lockText}>Slide up to lock</Text>
-        </View>
+        </Animated.View>
       )}
       <RecordControl
         accessibilityRole="button"
@@ -248,7 +333,9 @@ export function VoiceRecordButton({
         {working || phase === 'preparing' ? (
           <ActivityIndicator color="white" />
         ) : (
-          <Icon name={locked ? 'send' : 'mic'} color="white" size={23} />
+          <Animated.View style={{ transform: [{ scale: iconScale }] }}>
+            <Icon name={locked ? 'send' : 'mic'} color="white" size={23} />
+          </Animated.View>
         )}
       </RecordControl>
     </View>
