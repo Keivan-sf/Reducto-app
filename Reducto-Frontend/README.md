@@ -157,6 +157,12 @@ tests/                 API/state/proxy tests and browser flow tests
 
 ## Verification
 
+Music uploads read local title, artist, duration, and artwork before displaying
+the pending bubble. Missing or unreadable tags use the same fixed music layout
+and fallbacks as sent messages. Reads use file ranges with time and memory limits.
+The `music-metadata>file-type` pnpm override keeps file-type on 21.3.4 because
+22.x uses regular expression flags unsupported by this SDK's Android Hermes compiler.
+
 ```sh
 pnpm typecheck
 pnpm lint

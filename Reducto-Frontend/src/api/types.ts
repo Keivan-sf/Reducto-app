@@ -69,7 +69,7 @@ export interface Reaction {
   messageId: string;
 }
 export interface PendingUpload {
-  /** Reserve visual bubbles only after local metadata has been read. */
+  /** Publish media bubbles only after local metadata has been read. */
   preparing?: boolean;
   width?: number;
   height?: number;
@@ -79,6 +79,9 @@ export interface PendingUpload {
   total: number;
   sent: number;
   duration?: number;
+  title?: string;
+  artist?: string;
+  coverUrl?: string;
 }
 export interface Message {
   /** Persisted by the server after a message text edit. */

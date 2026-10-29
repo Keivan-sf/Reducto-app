@@ -23,6 +23,7 @@
     "expo-sharing": "~57.0.23",
     "expo-status-bar": "~57.0.1",
     "expo-video": "~57.0.5",
+    "music-metadata": "^12.3.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
@@ -58,6 +59,11 @@
     "android:dev": "node scripts/android-dev.mjs",
     "ios": "expo start --ios",
     "web": "expo start --web"
+  },
+  "pnpm": {
+    "overrides": {
+      "music-metadata>file-type": "21.3.4"
+    }
   },
   "private": true
 }

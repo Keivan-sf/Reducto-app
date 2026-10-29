@@ -10,6 +10,7 @@ import { DownloadProgressRing } from './DownloadProgressRing';
 import { AttachmentControlIcon } from './AttachmentControlIcon';
 import { VideoPlayback } from './VideoPlayback';
 import { VoiceSeekBar } from './VoiceSeekBar';
+import { audioMessageLayout } from './audio-message-layout';
 
 const UploadVideoPreview = memo(VideoPlayback);
 
@@ -55,6 +56,12 @@ export function UploadMessage({
       }}
       style={[s.control, visual && s.visualControl]}
     >
+      {upload.type === 'music' && !!upload.coverUrl && (
+        <>
+          <Image source={{ uri: upload.coverUrl }} style={StyleSheet.absoluteFill} />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, s.shade]} />
+        </>
+      )}
       {!failed && <DownloadProgressRing progress={progress} label="Upload progress" />}
       {failed ? (
         <Icon name="refresh" color="white" size={24} />
@@ -81,6 +88,25 @@ export function UploadMessage({
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, s.shade]} />
         {control}
         {(upload.type !== 'image' || failed) && <Text style={s.badge}>{status}</Text>}
+      </View>
+    );
+  if (upload.type === 'music')
+    return (
+      <View testID="upload-music" style={s.musicRow}>
+        {control}
+        <View style={s.musicControls}>
+          <View style={s.musicHeading}>
+            <Text numberOfLines={1} style={s.musicTitle}>
+              {upload.title || upload.name || 'Audio'}
+            </Text>
+          </View>
+          <Text numberOfLines={1} style={s.musicArtist}>
+            {upload.artist || 'Unknown artist'}
+          </Text>
+          <Text numberOfLines={1} style={s.status}>
+            {failed ? 'Tap to retry' : `${status} · ${videoTime(upload.duration ?? 0)}`}
+          </Text>
+        </View>
       </View>
     );
   return (
@@ -118,6 +144,11 @@ const useStyles = createThemedStyles((colors) => ({
   // Match the completed voice player's width and seek/duration spacing.
   voiceRow: { width: 236 },
   voiceDetails: { gap: 0 },
+  musicRow: audioMessageLayout.row,
+  musicControls: audioMessageLayout.controls,
+  musicHeading: audioMessageLayout.heading,
+  musicTitle: { ...audioMessageLayout.title, color: colors.dark },
+  musicArtist: { ...audioMessageLayout.artist, color: colors.muted },
   control: {
     width: 46,
     height: 46,
@@ -125,6 +156,7 @@ const useStyles = createThemedStyles((colors) => ({
     backgroundColor: colors.blue,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   visualControl: { backgroundColor: '#00000070' },
   details: { flex: 1, minWidth: 0, gap: 5 },

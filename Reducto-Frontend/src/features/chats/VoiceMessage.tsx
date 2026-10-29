@@ -12,6 +12,7 @@ import { DownloadProgressRing } from './DownloadProgressRing';
 import { useAttachmentMetadata } from '../../context/MediaMetadataContext';
 import { ServerThumbnail } from './ServerThumbnail';
 import type { AttachmentMetadata } from '../../api/types';
+import { audioMessageLayout } from './audio-message-layout';
 
 export function VoiceMessage({
   conversationId,
@@ -255,14 +256,7 @@ function VoiceDurationProbe({
   return null;
 }
 const useStyles = createThemedStyles((colors) => ({
-  row: {
-    width: 236,
-    maxWidth: '100%',
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  row: audioMessageLayout.row,
   play: {
     width: 46,
     height: 46,
@@ -272,12 +266,12 @@ const useStyles = createThemedStyles((colors) => ({
     alignItems: 'center',
   },
   audioPlay: { overflow: 'hidden' },
-  heading: { flexDirection: 'row', alignItems: 'center' },
-  title: { flex: 1, fontSize: 14, lineHeight: 18, fontWeight: '500', color: colors.dark },
-  artist: { height: 20, lineHeight: 20, fontSize: 12, color: colors.muted },
-  controls: { flex: 1, minWidth: 0 },
+  heading: audioMessageLayout.heading,
+  title: { ...audioMessageLayout.title, color: colors.dark },
+  artist: { ...audioMessageLayout.artist, color: colors.muted },
+  controls: audioMessageLayout.controls,
   // Match VoiceSeekBar's touch area so the duration stays put when loading finishes.
   seekPlaceholder: { height: 32, justifyContent: 'center' },
   track: { height: 3, borderRadius: 2, backgroundColor: '#3390EC38' },
-  time: { fontSize: 12, lineHeight: 14, color: colors.fileAccent },
+  time: { ...audioMessageLayout.time, color: colors.fileAccent },
 }));

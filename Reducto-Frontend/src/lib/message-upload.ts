@@ -12,6 +12,7 @@ import { uploadSizeError } from './upload-limits';
 import { fileForm, type UploadAsset } from './uploads';
 import { readUploadDimensions } from './upload-dimensions';
 import { mediaDimensions } from './media-preview';
+import { readUploadMusicMetadata } from './upload-music-metadata';
 
 /** The outbox owns this job and its file independently of any mounted chat. */
 export function messageUpload(
@@ -57,7 +58,7 @@ export function messageUpload(
   return {
     initial: {
       type,
-      preparing: ['image', 'video', 'gif'].includes(type),
+      preparing: ['image', 'video', 'gif', 'music'].includes(type),
       name: asset.name,
       // Preview only the owned file, which survives navigation and upload retries.
       uri: local?.uri,
@@ -85,9 +86,12 @@ export function messageUpload(
             (await readUploadDimensions(local.uri, type === 'video' ? 'video' : 'image', signal)))
           : undefined;
         check(signal);
+        const music = type === 'music' ? await readUploadMusicMetadata(local, signal) : undefined;
+        check(signal);
         progress({
           preparing: false,
           ...dimensions,
+          ...music,
           uri: local.uri,
           total: local.bytes,
           sent: 0,

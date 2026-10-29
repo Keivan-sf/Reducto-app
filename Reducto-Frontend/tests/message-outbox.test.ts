@@ -5,6 +5,34 @@ import type { Message, PendingUpload } from '../src/api/types';
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
+test('music appears only after local tags are available and retains them during progress updates', () => {
+  const t = setup();
+  let progress!: (update: Partial<PendingUpload>) => void;
+  const id = t.box.enqueue(
+    'chat',
+    {},
+    {
+      initial: { type: 'music', name: 'track.mp3', total: 100, sent: 0, preparing: true },
+      prepare: (_signal, update) => {
+        progress = update;
+        return new Promise(() => {});
+      },
+      dispose() {},
+    },
+  );
+  assert.equal(t.snapshot().length, 0);
+  progress({ preparing: false, title: 'Track', artist: 'Artist', duration: 125 });
+  assert.equal(t.snapshot().length, 1);
+  assert.equal(t.box.getUpload(id)?.title, 'Track');
+  const history = t.snapshot();
+  progress({ sent: 50 });
+  assert.equal(t.snapshot(), history);
+  assert.equal(t.box.getUpload(id)?.artist, 'Artist');
+  assert.equal(t.box.getUpload(id)?.duration, 125);
+  t.box.cancel(id);
+  t.box.dispose();
+});
+
 for (const type of ['image', 'video', 'gif'] as const) {
   test(`${type} uploads first appear with dimensions and keep progress updates out of history`, () => {
     const t = setup();
