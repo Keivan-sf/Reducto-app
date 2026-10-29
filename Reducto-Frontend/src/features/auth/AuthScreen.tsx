@@ -221,7 +221,7 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
           </View>
           <View style={s.caption}>
             <Icon name="chatbubbles-outline" size={17} color="#99A8B5" />
-            <Text style={s.captionText}>Good conversations start here.</Text>
+            <Text style={s.captionText}>Reducto</Text>
           </View>
         </View>
         <Text style={s.footer}>REDUCTO · A SPACE FOR YOUR PEOPLE</Text>
