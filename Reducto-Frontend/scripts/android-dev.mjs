@@ -4,10 +4,11 @@ import { fileURLToPath } from 'node:url';
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 const args = process.argv.slice(2);
-if (args.some((arg) => arg !== '--build')) {
-  console.error('Usage: pnpm android:dev [--build]');
+if (args.some((arg) => !['--build', '--release'].includes(arg))) {
+  console.error('Usage: pnpm android:dev [--build] | pnpm android:dev-no-debug');
   process.exit(1);
 }
+const release = args.includes('--release');
 
 function output(command, args) {
   return execFileSync(command, args, { encoding: 'utf8' }).trim();
@@ -47,19 +48,20 @@ try {
   }
   const adb = (...args) => run('adb', ['-s', serial, ...args]);
   console.log(`Using Android device: ${serial}`);
-  const apk = 'dist/reducto-debug.apk';
-  if (args.includes('--build') || !existsSync(apk)) {
+  const apk = release ? 'dist/reducto.apk' : 'dist/reducto-debug.apk';
+  if (release || args.includes('--build') || !existsSync(apk)) {
     const abi = output('adb', ['-s', serial, 'shell', 'getprop', 'ro.product.cpu.abi']);
-    await run('bash', ['./build-apk.sh', '--debug'], {
+    await run('bash', ['./build-apk.sh', ...(release ? [] : ['--debug'])], {
       ...process.env,
       APK_ARCHITECTURES: process.env.APK_ARCHITECTURES || abi,
     });
   }
   // Reverse forwarding works over an already paired wireless ADB connection too.
-  for (const port of [8081, 3000]) await adb('reverse', `tcp:${port}`, `tcp:${port}`);
+  for (const port of release ? [3000] : [8081, 3000])
+    await adb('reverse', `tcp:${port}`, `tcp:${port}`);
   await adb('install', '-r', apk);
 
-  if (!(await metroReady())) {
+  if (!release && !(await metroReady())) {
     metro = spawn('pnpm', ['exec', 'expo', 'start', '--localhost', '--port', '8081'], {
       stdio: 'inherit',
       env: { ...process.env, BROWSER: 'none' },
@@ -73,15 +75,20 @@ try {
         throw new Error('Metro did not start on port 8081.');
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-  } else {
+  } else if (!release) {
     console.log('Reusing Metro on port 8081.');
   }
 
   await adb('shell', 'am', 'start', '-n', 'app.reducto.messenger/.MainActivity');
-  console.log(
-    'Reducto is live. Save JS/TS changes for Fast Refresh. Backend: http://localhost:3000',
-  );
-  console.log('Dev menu: shake the phone. Native/config changes: pnpm android:dev --build');
+  if (release) {
+    console.log('Release APK installed and opened. Backend: http://localhost:3000');
+    console.log('Run pnpm android:dev-no-debug again to rebuild and install changes.');
+  } else {
+    console.log(
+      'Reducto is live. Save JS/TS changes for Fast Refresh. Backend: http://localhost:3000',
+    );
+    console.log('Dev menu: shake the phone. Native/config changes: pnpm android:dev --build');
+  }
   if (metro) {
     process.once('SIGINT', () => metro.kill('SIGTERM'));
     process.once('SIGTERM', () => metro.kill('SIGTERM'));

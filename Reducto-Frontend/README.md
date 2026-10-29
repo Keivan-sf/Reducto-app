@@ -60,15 +60,30 @@ forwarding and reopen the app. If multiple devices are connected, select one wit
 `ANDROID_SERIAL=<serial> pnpm android:dev`. Android builds use the existing Nix
 toolchain described below and select the connected phone's CPU architecture.
 
+To build and install a fresh release APK through the same USB or paired wireless
+ADB connection, run:
+
+```sh
+pnpm android:dev-no-debug
+```
+
+This always rebuilds `dist/reducto.apk` for the selected phone's architecture,
+installs it as an update, forwards the local backend port (3000), and opens the
+app. It bundles the JavaScript and runs without Metro, Fast Refresh, or the dev
+menu. Run the command again to apply code changes. `ANDROID_SERIAL` and the
+`APK_*` build options work with this command too. Backend forwarding requires the
+ADB connection to remain active; use a reachable server URL to run independently.
+
 ## Build an Android APK on NixOS
 
 From this directory, run:
 
 ```sh
-./build-apk.sh
+pnpm android:release
 ```
 
 The APK is written to `dist/reducto.apk`, with a SHA-256 checksum alongside it.
+This command runs `./build-apk.sh` and only builds; no phone connection is needed.
 It includes the application bundle and runs without Expo Go, Metro, Android
 Studio, or an Expo account. Install it on your phone by opening the APK and
 allowing installation from that source, or use `adb install -r dist/reducto.apk`.
