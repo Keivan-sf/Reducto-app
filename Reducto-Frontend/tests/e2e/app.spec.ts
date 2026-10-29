@@ -3988,6 +3988,101 @@ test('desktop pasted images focus the caption and send with Enter, while Shift+E
   expect(uploads).toBe(2);
 });
 
+for (const kind of ['file', 'music'] as const) {
+  test(`desktop ${kind} preview cancels and sends captions while mobile sends directly`, async ({
+    page,
+  }, testInfo) => {
+    await mockApi(page, []);
+    const music = kind === 'music';
+    const bytes = music
+      ? readFileSync(path.join(__dirname, '../fixtures/voice.ogg'))
+      : Buffer.from('File preview contents');
+    const name = music ? 'Preview song.ogg' : 'report.txt';
+    let uploads = 0;
+    await page.route('**/api/conversations/*/attachments', async (route) => {
+      uploads++;
+      const form = (await new Response(new Uint8Array(route.request().postDataBuffer()!), {
+        headers: { 'Content-Type': route.request().headers()['content-type'] },
+      }).formData()) as unknown as { get(name: string): File | string | null };
+      expect(form.get('kind')).toBe(music ? 'music' : 'document');
+      expect(Buffer.from(await (form.get('file') as File).arrayBuffer())).toEqual(bytes);
+      await route.fulfill({
+        status: 201,
+        json: {
+          attachment: {
+            id: `preview-${kind}`,
+            type: music ? 'music' : 'document',
+            fileName: name,
+            contentType: music ? 'audio/ogg' : 'text/plain',
+            fileSize: bytes.length,
+            durationSeconds: music ? 1 : null,
+          },
+        },
+      });
+    });
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    async function choose() {
+      const picker = page.waitForEvent('filechooser');
+      await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+      await (
+        await picker
+      ).setFiles({ name, mimeType: music ? 'audio/ogg' : 'text/plain', buffer: bytes });
+    }
+    const preview = page.getByTestId(`${kind}-send-preview`);
+    if (testInfo.project.name === 'mobile') {
+      const sent = page.waitForRequest(
+        (request) => request.method() === 'POST' && request.url().endsWith('/messages'),
+      );
+      await choose();
+      await sent;
+      await expect(preview).toHaveCount(0);
+      expect(uploads).toBe(1);
+      return;
+    }
+    await choose();
+    await expect(
+      preview.getByText(music ? 'Send music' : 'Send file', { exact: true }),
+    ).toBeVisible();
+    await expect(preview.getByText(name, { exact: true })).toBeVisible();
+    await expect(preview.getByRole('checkbox')).toHaveCount(0);
+    const caption = preview.getByRole('textbox', {
+      name: music ? 'Music caption' : 'File caption',
+      exact: true,
+    });
+    await expect(caption).toBeFocused();
+    await expect(preview.getByRole('button', { name: `Send ${kind}`, exact: true })).toBeEnabled();
+    if (music) {
+      await preview.getByRole('button', { name: 'Play music preview', exact: true }).click();
+      await expect(
+        preview.getByRole('button', { name: 'Pause music preview', exact: true }),
+      ).toBeVisible();
+      await preview.getByRole('button', { name: 'Pause music preview', exact: true }).click();
+      await expect(
+        preview.getByRole('button', { name: 'Play music preview', exact: true }),
+      ).toBeVisible();
+    }
+    expect(uploads).toBe(0);
+    await preview.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(preview).toHaveCount(0);
+    expect(uploads).toBe(0);
+    await choose();
+    await caption.fill('Attachment caption');
+    await caption.press('Shift+Enter');
+    await caption.pressSequentially('Second line');
+    const sent = page.waitForRequest(
+      (request) => request.method() === 'POST' && request.url().endsWith('/messages'),
+    );
+    await caption.press('Enter');
+    expect((await sent).postDataJSON()).toMatchObject({
+      text: 'Attachment caption\nSecond line',
+      attachment: { type: music ? 'music' : 'document', mediaId: `preview-${kind}` },
+    });
+    await expect(preview).toHaveCount(0);
+    expect(uploads).toBe(1);
+  });
+}
+
 test('video send preview plays locally, cancels without uploading, and sends with a caption', async ({
   page,
 }, testInfo) => {
@@ -4300,8 +4395,13 @@ for (const selection of [
     const picker = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
     await (await picker).setFiles({ name, mimeType, buffer });
-    if (kind === 'image' || kind === 'video')
-      await page.getByRole('button', { name: `Send ${kind}`, exact: true }).click();
+    if (kind === 'image' || kind === 'video' || testInfo.project.name === 'desktop')
+      await page
+        .getByRole('button', {
+          name: `Send ${kind === 'document' ? 'file' : kind === 'audio' ? 'music' : kind}`,
+          exact: true,
+        })
+        .click();
     const message = page.getByTestId('message-44444444-4444-4444-8444-444444444444');
     await expect(message).toBeVisible();
     if (kind === 'image') {
@@ -6583,6 +6683,8 @@ test('concurrent uploads keep their bubbles and destinations while both chats re
     const picker = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
     await (await picker).setFiles({ name, mimeType: 'application/pdf', buffer: Buffer.alloc(100) });
+    if (page.viewportSize()!.width >= 768)
+      await page.getByRole('button', { name: 'Send file', exact: true }).click();
   }
   async function back() {
     const button = page.getByRole('button', { name: 'Back to chats', exact: true });
@@ -6598,6 +6700,7 @@ test('concurrent uploads keep their bubbles and destinations while both chats re
     .toBe(true);
   await back();
   await page.getByRole('button', { name: 'Open Another chat' }).click();
+  await expect(page.getByTestId(`conversation-${other.id}`)).toHaveCSS('opacity', '1');
   await attach('second.pdf');
   await expect(page.getByText('second.pdf', { exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('During second upload');
@@ -6623,7 +6726,7 @@ test('concurrent uploads keep their bubbles and destinations while both chats re
 for (const kind of ['image', 'video', 'music'] as const) {
   test(`uploaded pending ${kind} attachments show cancellable progress inside their own bubble`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     await mockApi(page, []);
     let release: (() => void) | undefined;
     await page.route('**/api/conversations/*/attachments', async (route) => {
@@ -6648,8 +6751,13 @@ for (const kind of ['image', 'video', 'music'] as const) {
             buffer: Buffer.alloc(1024),
           },
     );
-    if (kind === 'image' || kind === 'video')
-      await page.getByRole('button', { name: `Send ${kind}`, exact: true }).click();
+    if (kind === 'image' || kind === 'video' || testInfo.project.name === 'desktop')
+      await page
+        .getByRole('button', {
+          name: `Send ${kind}`,
+          exact: true,
+        })
+        .click();
     const bubble = page.getByTestId(kind === 'music' ? 'upload-file' : 'upload-media');
     await expect(bubble).toBeVisible();
     const initialBounds = await bubble.boundingBox();

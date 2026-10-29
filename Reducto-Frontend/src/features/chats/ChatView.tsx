@@ -707,16 +707,19 @@ export default function ChatView({
     const replyToMessageId = replyTo?.id;
     const sequence = ++uploadSequence.current;
     const scope = uploadScope.current;
+    const desktop = Platform.OS === 'web' && window.innerWidth >= 768;
     const picked = await pickUpload();
     if (picked.canceled || scope?.signal.aborted || sequence !== uploadSequence.current) return;
     const file = picked.assets[0];
     const sizeError = uploadSizeError(file.size);
     if (sizeError) return setError(sizeError);
     if (
-      /^(image|video)\//i.test(file.mimeType ?? '') &&
-      uploadKind(file.mimeType, file.name) !== 'document'
+      desktop ||
+      (/^(image|video)\//i.test(file.mimeType ?? '') &&
+        uploadKind(file.mimeType, file.name) !== 'document')
     ) {
       Keyboard.dismiss();
+      voicePlayback.pause();
       setMediaDraft({ asset: file, conversationId, replyToMessageId });
       return;
     }

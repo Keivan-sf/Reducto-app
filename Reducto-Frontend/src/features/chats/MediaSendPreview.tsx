@@ -18,6 +18,8 @@ import type { VideoFile } from '../../api/video-cache';
 import { retainUpload } from '../../lib/local-attachments';
 import type { UploadAsset } from '../../lib/uploads';
 import { VideoPlayback } from './VideoPlayback';
+import { uploadKind } from '../../lib/upload-kind';
+import { videoBytes } from '../../lib/video-download.types';
 
 /** Own the original until Cancel disposes it or Send transfers it to the outbox. */
 export function MediaSendPreview({
@@ -33,8 +35,12 @@ export function MediaSendPreview({
   const { colors } = useTheme();
   const { width, height } = useWindowDimensions();
   const desktop = Platform.OS === 'web' && width >= 768;
-  const video = asset.mimeType?.toLowerCase().startsWith('video/') ?? false;
-  const mediaName = video ? 'video' : 'image';
+  const isDocument = uploadKind(asset.mimeType, asset.name) === 'document';
+  const video = !isDocument && !!asset.mimeType?.toLowerCase().startsWith('video/');
+  const image = !isDocument && !!asset.mimeType?.toLowerCase().startsWith('image/');
+  const music = !isDocument && !!asset.mimeType?.toLowerCase().startsWith('audio/');
+  const mediaName = video ? 'video' : image ? 'image' : music ? 'music' : 'file';
+  const captionLabel = `${mediaName[0].toUpperCase()}${mediaName.slice(1)} caption`;
   const insets = useSafeAreaInsets();
   const [caption, setCaption] = useState('');
   const [captionFocused, setCaptionFocused] = useState(false);
@@ -43,6 +49,12 @@ export function MediaSendPreview({
   const [error, setError] = useState('');
   const transferred = useRef(false);
   const captionInput = useRef<TextInput>(null);
+  const audio = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    const player = audio.current;
+    return () => player?.pause();
+  }, [file]);
   useEffect(() => {
     let alive = true;
     let owned: VideoFile | undefined;
@@ -76,7 +88,7 @@ export function MediaSendPreview({
     // Consume synchronously; double taps must never enqueue the same file twice.
     transferred.current = true;
     try {
-      if (!onSend(file, caption.trim(), !video && asDocument)) transferred.current = false;
+      if (!onSend(file, caption.trim(), image && asDocument)) transferred.current = false;
     } catch (err) {
       transferred.current = false;
       setError((err as Error).message);
@@ -117,7 +129,13 @@ export function MediaSendPreview({
         >
           <View style={s.header}>
             <Text style={[s.title, !desktop && s.white]}>
-              {video ? 'Send a video' : 'Send an image'}
+              {video
+                ? 'Send a video'
+                : image
+                  ? 'Send an image'
+                  : music
+                    ? 'Send music'
+                    : 'Send file'}
             </Text>
             <IconButton
               name="close"
@@ -126,31 +144,79 @@ export function MediaSendPreview({
               color={desktop ? colors.muted : 'white'}
             />
           </View>
-          <View
-            style={[s.preview, desktop ? { height: Math.min(340, height * 0.45) } : s.phonePreview]}
-          >
-            {file && video ? (
-              <View style={{ width: '100%', height: '100%' }}>
-                <VideoPlayback uri={file.uri} active={false} nativeControls />
+          {image || video ? (
+            <View
+              style={[
+                s.preview,
+                desktop ? { height: Math.min(340, height * 0.45) } : s.phonePreview,
+              ]}
+            >
+              {file && video ? (
+                <View style={{ width: '100%', height: '100%' }}>
+                  <VideoPlayback uri={file.uri} active={false} nativeControls />
+                </View>
+              ) : file ? (
+                <Image
+                  source={{ uri: file.uri }}
+                  resizeMode="contain"
+                  accessibilityLabel="Image to send"
+                  style={{ width: '100%', height: '100%' }}
+                />
+              ) : (
+                !error && <ActivityIndicator color={colors.blue} />
+              )}
+            </View>
+          ) : (
+            <View style={s.fileRow}>
+              <Pressable
+                accessibilityRole={music ? 'button' : undefined}
+                accessibilityLabel={music ? `${playing ? 'Pause' : 'Play'} music preview` : 'File'}
+                disabled={!music || !file}
+                style={s.fileIcon}
+                onPress={() => {
+                  if (playing) audio.current?.pause();
+                  else
+                    void audio.current
+                      ?.play()
+                      .catch(() => setError('Could not play this music file.'));
+                }}
+              >
+                {!file && !error ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Icon
+                    name={music ? (playing ? 'pause' : 'play') : 'document'}
+                    color="white"
+                    size={25}
+                  />
+                )}
+              </Pressable>
+              <View style={s.fileDetails}>
+                <Text numberOfLines={1} style={s.fileName}>
+                  {asset.name}
+                </Text>
+                <Text style={s.fileSize}>{file ? videoBytes(file.bytes) : 'Preparing file…'}</Text>
               </View>
-            ) : file ? (
-              <Image
-                source={{ uri: file.uri }}
-                resizeMode="contain"
-                accessibilityLabel="Image to send"
-                style={{ width: '100%', height: '100%' }}
-              />
-            ) : (
-              !error && <ActivityIndicator color={colors.blue} />
-            )}
-          </View>
+              {music && file && Platform.OS === 'web' && (
+                <audio
+                  ref={audio}
+                  src={file.uri}
+                  preload="metadata"
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                  onEnded={() => setPlaying(false)}
+                  onError={() => setError('Could not play this music file.')}
+                />
+              )}
+            </View>
+          )}
           <View style={s.controls}>
             {!!error && (
               <Text accessibilityRole="alert" style={{ color: colors.danger }}>
                 {error}
               </Text>
             )}
-            {!video && (
+            {image && (
               <Pressable
                 accessibilityRole="checkbox"
                 accessibilityLabel="Send as a document"
@@ -173,7 +239,7 @@ export function MediaSendPreview({
               <TextInput
                 ref={captionInput}
                 autoFocus={desktop}
-                accessibilityLabel={video ? 'Video caption' : 'Image caption'}
+                accessibilityLabel={captionLabel}
                 placeholder="Add a caption…"
                 placeholderTextColor={colors.muted}
                 value={caption}
@@ -246,6 +312,24 @@ const useStyles = createThemedStyles((colors) => ({
   },
   title: { fontSize: 20, fontWeight: '500', color: colors.dark },
   white: { color: 'white' },
+  fileRow: {
+    marginHorizontal: 28,
+    marginVertical: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  fileIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: colors.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fileDetails: { flex: 1, minWidth: 0, gap: 6 },
+  fileName: { fontSize: 15, fontWeight: '500', color: colors.dark },
+  fileSize: { fontSize: 14, color: colors.muted },
   preview: {
     marginHorizontal: 28,
     borderRadius: 6,
