@@ -10,6 +10,7 @@ import type { Conversation } from '../../api/types';
 import { useProfiles } from '../../context/ProfilesContext';
 import { conversationName, profileName } from '../../lib/messages';
 import { groupInviteToken, groupInviteUri } from '../../lib/links';
+import { GroupMemberMenu } from './GroupMemberMenu';
 
 export function GroupDialog({
   chat,
@@ -131,13 +132,20 @@ export function GroupDialog({
       {people.map((member) => (
         <View
           key={member.userId}
-          style={{ gap: 8, borderBottomWidth: 1, borderColor: colors.border, paddingBottom: 14 }}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            borderBottomWidth: 1,
+            borderColor: colors.border,
+            paddingBottom: 14,
+          }}
         >
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`View ${member.userId === session!.user.id ? session!.user.name : profileName(profiles[member.userId])} profile`}
             onPress={() => onViewUser(member.userId)}
-            style={{ gap: 8, minHeight: 44 }}
+            style={{ flex: 1, minWidth: 0, gap: 8, minHeight: 44 }}
           >
             <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
               <Avatar
@@ -170,38 +178,32 @@ export function GroupDialog({
             manager &&
             member.role !== 'owner' &&
             member.userId !== session!.user.id && (
-              <View style={{ gap: 8 }}>
-                {role === 'owner' && (
-                  <Button
-                    title={member.role === 'admin' ? 'Make member' : 'Make admin'}
-                    secondary
-                    disabled={busy}
-                    onPress={() =>
-                      void run(
-                        () =>
-                          api.patch(`/api/groups/${chat.id}/members/${member.userId}`, {
-                            role: member.role === 'admin' ? 'member' : 'admin',
-                          }),
-                        'Member role updated.',
-                      )
-                    }
-                  />
-                )}
-                <Button
-                  title="Remove member"
-                  danger
-                  disabled={busy}
-                  onPress={() =>
-                    void run(
-                      () =>
-                        api.request(`/api/groups/${chat.id}/members/${member.userId}`, {
-                          method: 'DELETE',
-                        }),
-                      'Member removed.',
-                    )
-                  }
-                />
-              </View>
+              <GroupMemberMenu
+                name={profileName(profiles[member.userId])}
+                busy={busy}
+                isAdmin={member.role === 'admin'}
+                onChangeRole={
+                  role === 'owner'
+                    ? () =>
+                        void run(
+                          () =>
+                            api.patch(`/api/groups/${chat.id}/members/${member.userId}`, {
+                              role: member.role === 'admin' ? 'member' : 'admin',
+                            }),
+                          'Member role updated.',
+                        )
+                    : undefined
+                }
+                onRemove={() =>
+                  void run(
+                    () =>
+                      api.request(`/api/groups/${chat.id}/members/${member.userId}`, {
+                        method: 'DELETE',
+                      }),
+                    'Member removed.',
+                  )
+                }
+              />
             )}
         </View>
       ))}
