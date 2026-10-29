@@ -136,6 +136,7 @@ export default function ChatList({
       <View style={s.search}>
         <Icon name="search-outline" size={19} />
         <TextInput
+          underlineColorAndroid="transparent"
           accessibilityLabel="Search conversations"
           placeholder="Search conversations"
           value={query}
@@ -322,7 +323,14 @@ const useStyles = createThemedStyles((colors) => ({
     marginHorizontal: 20,
     height: 44,
   },
-  searchInput: { flex: 1, fontSize: 14, color: colors.dark, height: '100%', outlineWidth: 0 },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.dark,
+    height: '100%',
+    outlineStyle: 'solid',
+    outlineWidth: 0,
+  },
   tabs: {
     flexDirection: 'row',
     paddingHorizontal: 20,

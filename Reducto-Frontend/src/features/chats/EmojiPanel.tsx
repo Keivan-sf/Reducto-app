@@ -123,6 +123,7 @@ export function EmojiPanel({ onSelect }: { onSelect: (emoji: string) => void }) 
       <View style={s.search}>
         <Icon name="search-outline" size={18} />
         <TextInput
+          underlineColorAndroid="transparent"
           accessibilityLabel="Search emoji"
           placeholder="Search"
           value={query}
@@ -269,6 +270,7 @@ const useStyles = createThemedStyles((colors) => ({
     height: 36,
     color: colors.dark,
     fontSize: 14,
+    outlineStyle: 'solid',
     outlineWidth: 0,
   },
   groupTitle: {

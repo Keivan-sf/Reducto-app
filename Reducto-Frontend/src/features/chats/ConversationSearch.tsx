@@ -32,6 +32,7 @@ export function SearchInput({
     <View style={s.inputRow}>
       <Icon name="search-outline" size={20} color={colors.muted} />
       <TextInput
+        underlineColorAndroid="transparent"
         autoFocus
         accessibilityLabel="Search in this conversation"
         placeholder="Search in this conversation"
@@ -268,7 +269,15 @@ const useStyles = createThemedStyles((colors) => ({
     borderColor: colors.border,
     minHeight: 58,
   },
-  input: { flex: 1, minWidth: 0, padding: 12, fontSize: 15, color: colors.dark, outlineWidth: 0 },
+  input: {
+    flex: 1,
+    minWidth: 0,
+    padding: 12,
+    fontSize: 15,
+    color: colors.dark,
+    outlineStyle: 'solid',
+    outlineWidth: 0,
+  },
   results: { flex: 1, minHeight: 0, backgroundColor: colors.surface },
   count: {
     fontSize: 12,
