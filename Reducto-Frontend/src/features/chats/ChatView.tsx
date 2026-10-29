@@ -39,6 +39,7 @@ import { messageUpload } from '../../lib/message-upload';
 import { uploadSizeError } from '../../lib/upload-limits';
 import { UploadMessage } from './UploadMessage';
 import { downloadAttachment } from '../../lib/download';
+import { canCopyImage, copyImage } from '../../lib/copy-image';
 import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
 import { ApiError } from '../../api/client';
@@ -814,12 +815,28 @@ export default function ChatView({
           ...(actionMessage?.text
             ? [
                 {
-                  label: 'Copy',
+                  label: 'Copy Text',
                   icon: 'copy-outline' as const,
                   onPress: () => {
                     const text = actionMessage.text!;
                     setActionsVisible(false);
                     void Clipboard.setStringAsync(text).catch((err) => setError(err.message));
+                  },
+                },
+              ]
+            : []),
+          ...(actionMessage?.attachment?.type === 'image' && canCopyImage()
+            ? [
+                {
+                  label: 'Copy Image',
+                  icon: 'copy-outline' as const,
+                  onPress: () => {
+                    const { conversationId, attachment } = actionMessage;
+                    if (attachment?.type !== 'image') return;
+                    setActionsVisible(false);
+                    void copyImage(() =>
+                      videoCache.get(videoKey(conversationId, attachment.mediaId)),
+                    ).catch((err) => setError(err.message));
                   },
                 },
               ]
