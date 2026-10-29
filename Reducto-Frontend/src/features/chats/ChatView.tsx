@@ -54,6 +54,9 @@ import { ReplyPreview, ReplyQuote } from './ReplyPreview';
 import { VoiceMessage } from './VoiceMessage';
 import { DocumentMessage } from './DocumentMessage';
 import { MessageComposer } from './MessageComposer';
+import { ImageSendPreview } from './ImageSendPreview';
+import type { UploadAsset } from '../../lib/uploads';
+import type { VideoFile } from '../../api/video-cache';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
 import { useVoicePlayback } from '../../context/VoicePlaybackContext';
 import { VoiceMiniPlayer } from './VoiceMiniPlayer';
@@ -113,6 +116,23 @@ export default function ChatView({
   const voicePlayback = useVoicePlayback();
   const routeFocused = useIsFocused();
   const focused = active && routeFocused;
+  const [imageDraft, setImageDraft] = useState<{
+    asset: UploadAsset;
+    conversationId: string;
+    replyToMessageId?: string;
+  }>();
+  const uploadSequence = useRef(0);
+  const uploadScope = useRef<AbortController | null>(null);
+  const [draftScope, setDraftScope] = useState({ id, focused });
+  if (draftScope.id !== id || draftScope.focused !== focused) {
+    setDraftScope({ id, focused });
+    setImageDraft(undefined);
+  }
+  useEffect(() => {
+    const controller = new AbortController();
+    uploadScope.current = controller;
+    return () => controller.abort();
+  }, [id, focused]);
   const chat = conversations.find((entry) => entry.id === id);
   const [jumpWindow, setJumpWindow] = useState<{
     messages: Message[];
@@ -684,11 +704,18 @@ export default function ChatView({
     // Capture the destination and reply before opening the asynchronous picker.
     const conversationId = id;
     const replyToMessageId = replyTo?.id;
+    const sequence = ++uploadSequence.current;
+    const scope = uploadScope.current;
     const picked = await pickUpload();
-    if (picked.canceled) return;
+    if (picked.canceled || scope?.signal.aborted || sequence !== uploadSequence.current) return;
     const file = picked.assets[0];
     const sizeError = uploadSizeError(file.size);
     if (sizeError) return setError(sizeError);
+    if (file.mimeType?.toLowerCase().startsWith('image/')) {
+      Keyboard.dismiss();
+      setImageDraft({ asset: file, conversationId, replyToMessageId });
+      return;
+    }
     outbox.enqueue(
       conversationId,
       { ...(replyToMessageId ? { replyToMessageId } : {}) },
@@ -704,6 +731,37 @@ export default function ChatView({
     );
     setReplyTo(null);
     void showLatest();
+  }
+  function sendImage(file: VideoFile, caption: string, asDocument: boolean) {
+    if (!imageDraft || busy || !focused || imageDraft.conversationId !== id) return false;
+    const { asset, conversationId, replyToMessageId } = imageDraft;
+    setError('');
+    outbox.enqueue(
+      conversationId,
+      {
+        ...(caption ? { text: caption } : {}),
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+      },
+      messageUpload(
+        conversationId,
+        asset,
+        {
+          api,
+          media: mediaMetadata,
+          gifs: gifCache,
+          files: videoCache,
+          onGifAdded: (gifId) => {
+            void gifRecencyStore(session!.user.id).record(gifId);
+          },
+        },
+        undefined,
+        { asDocument, file },
+      ),
+    );
+    setImageDraft(undefined);
+    setReplyTo(null);
+    void showLatest();
+    return true;
   }
   async function sendVoice(voice: RecordedVoice, signal: AbortSignal) {
     if (!id || signal.aborted) return;
@@ -1598,6 +1656,13 @@ export default function ChatView({
             />
           </View>
         </View>
+        {focused && imageDraft && imageDraft.conversationId === id && (
+          <ImageSendPreview
+            asset={imageDraft.asset}
+            onClose={() => setImageDraft(undefined)}
+            onSend={sendImage}
+          />
+        )}
         <GroupDialog
           chat={chat}
           visible={focused && details}

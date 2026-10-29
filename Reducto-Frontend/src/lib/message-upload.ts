@@ -23,8 +23,13 @@ export function messageUpload(
     onGifAdded?: (id: string) => void;
   },
   voice?: { file: VideoFile; duration: number },
+  options?: { asDocument?: boolean; file?: VideoFile },
 ): UploadJob {
-  const kind = voice ? 'voice' : uploadKind(asset.mimeType, asset.name);
+  const kind = voice
+    ? 'voice'
+    : options?.asDocument
+      ? 'document'
+      : uploadKind(asset.mimeType, asset.name);
   const mime = asset.mimeType?.toLowerCase() ?? '';
   const type: PendingUpload['type'] = voice
     ? 'voice'
@@ -37,7 +42,7 @@ export function messageUpload(
           : mime.startsWith('video/')
             ? 'video'
             : 'music';
-  let local = voice?.file;
+  let local = voice?.file ?? options?.file;
   let disposed = false;
   let compressed = false;
   const owner = caches.api.getSession();

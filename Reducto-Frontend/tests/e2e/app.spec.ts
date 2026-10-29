@@ -3898,6 +3898,92 @@ test('historical video metadata without dimensions or thumbnails keeps a square 
   expect(downloads).toBe(0);
 });
 
+test('image send preview cancels without uploading and sends original document bytes with a caption', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page, []);
+  const original = readFileSync(path.join(__dirname, '../fixtures/portrait.png'));
+  let uploads = 0;
+  await page.route('**/api/conversations/*/attachments', async (route) => {
+    uploads++;
+    const form = (await new Response(new Uint8Array(route.request().postDataBuffer()!), {
+      headers: { 'Content-Type': route.request().headers()['content-type'] },
+    }).formData()) as unknown as { get(name: string): File | string | null };
+    expect(form.get('kind')).toBe('document');
+    const file = form.get('file') as File;
+    expect(file.name).toBe('original.png');
+    expect(file.type).toBe('image/png');
+    expect(Buffer.from(await file.arrayBuffer())).toEqual(original);
+    await route.fulfill({
+      status: 201,
+      json: {
+        attachment: {
+          id: 'original-document',
+          type: 'document',
+          fileName: file.name,
+          contentType: file.type,
+          fileSize: original.length,
+        },
+      },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  async function choose() {
+    const picker = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+    await (
+      await picker
+    ).setFiles({ name: 'original.png', mimeType: 'image/png', buffer: original });
+    await expect(page.getByRole('button', { name: 'Send image', exact: true })).toBeEnabled();
+  }
+  await choose();
+  const preview = page.getByTestId('image-send-preview');
+  const bounds = await preview.boundingBox();
+  const viewport = page.viewportSize()!;
+  if (testInfo.project.name === 'mobile') {
+    expect(bounds!.width).toBe(viewport.width);
+    expect(bounds!.height).toBe(viewport.height);
+  } else {
+    expect(bounds!.width).toBe(456);
+    expect(bounds!.x).toBeGreaterThan(0);
+  }
+  await expect(preview.getByRole('checkbox', { name: 'Send as a document' })).not.toBeChecked();
+  await expect(preview.getByRole('button')).toHaveCount(3);
+  const uri = await preview.locator('img').getAttribute('src');
+  expect(uploads).toBe(0);
+  await page.getByRole('button', { name: 'Cancel image send', exact: true }).click();
+  await expect(preview).toHaveCount(0);
+  expect(uploads).toBe(0);
+  if (uri)
+    expect(
+      await page.evaluate(async (url) => {
+        try {
+          await fetch(url);
+          return false;
+        } catch {
+          return true;
+        }
+      }, uri),
+    ).toBe(true);
+  await choose();
+  await page
+    .getByRole('textbox', { name: 'Image caption', exact: true })
+    .fill('Original photo caption');
+  await page.getByRole('checkbox', { name: 'Send as a document' }).click();
+  const sent = page.waitForRequest(
+    (request) => request.method() === 'POST' && request.url().endsWith('/messages'),
+  );
+  await page.getByRole('button', { name: 'Send image', exact: true }).click();
+  expect((await sent).postDataJSON()).toMatchObject({
+    text: 'Original photo caption',
+    attachment: { type: 'document', mediaId: 'original-document' },
+  });
+  await expect(preview).toHaveCount(0);
+  expect(uploads).toBe(1);
+  await expect(page.getByText('original.png', { exact: true })).toBeVisible();
+});
+
 for (const selection of [
   'image',
   'image-wide',
@@ -4037,6 +4123,8 @@ for (const selection of [
     const picker = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
     await (await picker).setFiles({ name, mimeType, buffer });
+    if (kind === 'image')
+      await page.getByRole('button', { name: 'Send image', exact: true }).click();
     const message = page.getByTestId('message-44444444-4444-4444-8444-444444444444');
     await expect(message).toBeVisible();
     if (kind === 'image') {
@@ -4146,6 +4234,7 @@ test('uploaded GIFs preview from local bytes instead of fetching the converted s
     mimeType: 'image/gif',
     buffer: Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'),
   });
+  await page.getByRole('button', { name: 'Send image', exact: true }).click();
   const image = page.getByRole('img', { name: 'Uploaded GIF', exact: true });
   await expect(image).toHaveAttribute('src', /^blob:/);
   await expect
@@ -6382,6 +6471,8 @@ for (const kind of ['image', 'video', 'music'] as const) {
             buffer: Buffer.alloc(1024),
           },
     );
+    if (kind === 'image')
+      await page.getByRole('button', { name: 'Send image', exact: true }).click();
     const bubble = page.getByTestId(kind === 'music' ? 'upload-file' : 'upload-media');
     await expect(bubble).toBeVisible();
     await expect(bubble.getByRole('progressbar', { name: 'Upload progress' })).toBeVisible();
