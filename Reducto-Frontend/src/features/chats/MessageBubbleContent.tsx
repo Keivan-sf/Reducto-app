@@ -38,9 +38,14 @@ export function MessageBubbleContent({
       {!!header && <View style={[s.header, textWidth]}>{header}</View>}
       <View style={s.media} onLayout={({ nativeEvent }) => setMediaWidth(nativeEvent.layout.width)}>
         {children}
-        {meta}
+        {!caption && meta}
       </View>
-      {!!caption && <View style={[s.caption, textWidth]}>{caption}</View>}
+      {!!caption && (
+        <View style={[s.caption, textWidth]}>
+          {caption}
+          {meta}
+        </View>
+      )}
       {!!reactions && <View style={[s.reactions, textWidth]}>{reactions}</View>}
     </>
   );

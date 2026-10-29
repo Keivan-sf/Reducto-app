@@ -6,11 +6,14 @@ import { imageDensity } from '../../src/lib/image-density';
 const inviteToken = '32d48175eefe9c95142073e7c2ac93aadf87e126616733142362774c8c8ab40a';
 const inviteUri = `reducto:///api/groups/join/${inviteToken}`;
 
-async function expectMediaBubble(page: Page, frame: Locator) {
+async function expectMediaBubble(page: Page, frame: Locator, hasCaption = true) {
   const bubble = page.getByTestId(`message-${first.id}`);
   const meta = page.getByTestId(`message-meta-${first.id}`);
-  await expect(meta).toHaveCSS('position', 'absolute');
-  await expect(meta).toHaveCSS('background-color', 'rgba(0, 0, 0, 0.4)');
+  await expect(meta).toHaveCSS('position', hasCaption ? 'relative' : 'absolute');
+  await expect(meta).toHaveCSS(
+    'background-color',
+    hasCaption ? 'rgba(0, 0, 0, 0)' : 'rgba(0, 0, 0, 0.4)',
+  );
   await expect
     .poll(async () => {
       const [outer, media, badge] = await Promise.all([
@@ -24,8 +27,12 @@ async function expectMediaBubble(page: Page, frame: Locator) {
         !!badge &&
         Math.abs(media.x - outer.x - 2) < 1 &&
         Math.abs(outer.width - media.width - 4) < 1 &&
-        Math.abs(media.x + media.width - badge.x - badge.width - 6) < 1 &&
-        Math.abs(media.y + media.height - badge.y - badge.height - 6) < 1 &&
+        (hasCaption
+          ? badge.y >= media.y + media.height &&
+            badge.x + badge.width <= media.x + media.width &&
+            badge.y + badge.height <= outer.y + outer.height
+          : Math.abs(media.x + media.width - badge.x - badge.width - 6) < 1 &&
+            Math.abs(media.y + media.height - badge.y - badge.height - 6) < 1) &&
         badge.x >= media.x &&
         badge.y >= media.y
       );
@@ -44,6 +51,7 @@ for (const type of ['image', 'gif', 'video'] as const) {
       {
         ...first,
         senderId: user.id,
+        isEdited: true,
         text: caption,
         forwardedFrom: { senderId: friend.id, messageId: first.id, conversationId: chat.id },
         attachment: type === 'gif' ? { type, gifId: mediaId } : { type, mediaId },
@@ -69,6 +77,7 @@ for (const type of ['image', 'gif', 'video'] as const) {
         ? page.getByTestId(`video-card-${mediaId}`)
         : page.getByLabel(type === 'image' ? 'Image preview' : 'GIF preview', { exact: true });
     await expectMediaBubble(page, frame);
+    await expect(page.getByTestId(`message-meta-${first.id}`)).toContainText('edited');
     await expect(page.getByTestId(`message-status-${first.id}`)).toHaveAccessibleName(
       'Message sent',
     );
@@ -3393,7 +3402,7 @@ test('video cards use server thumbnails without downloading and open the full-pa
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const card = page.getByTestId(`video-card-${mediaId}`);
-  await expectMediaBubble(page, card);
+  await expectMediaBubble(page, card, false);
   await expect(card.getByRole('img', { name: 'Video thumbnail' })).toBeVisible();
   await expect(card.locator('[style*="background-image"]')).toHaveCSS('background-size', 'cover');
   await expect(card.locator('video')).toHaveCount(0);
@@ -3889,7 +3898,7 @@ test('historical video metadata without dimensions or thumbnails keeps a square 
   await signIn(page);
   await page.getByRole('button', { name: 'Open Weekend plans' }).click();
   const card = page.getByTestId(`video-card-${mediaId}`);
-  await expectMediaBubble(page, card);
+  await expectMediaBubble(page, card, false);
   await expect(card.getByRole('button', { name: 'Play video', exact: true })).toBeVisible();
   const box = (await card.boundingBox())!;
   expect(box.width / box.height).toBeCloseTo(1, 2);

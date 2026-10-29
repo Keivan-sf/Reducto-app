@@ -1181,6 +1181,7 @@ export default function ChatView({
                 const visualMedia = ['image', 'gif', 'video'].includes(
                   message.upload?.type ?? message.attachment?.type ?? '',
                 );
+                const overlayMeta = visualMedia && !message.text;
                 const hasMediaHeader =
                   (!mine && chat.type === 'group') ||
                   !!message.forwardedFrom ||
@@ -1205,10 +1206,10 @@ export default function ChatView({
                     testID={`message-meta-${message.id}`}
                     onPress={(event) => openMessageMenu(message, event)}
                     onLongPress={(event) => openMessageMenu(message, event)}
-                    style={visualMedia && s.mediaMeta}
+                    style={overlayMeta && s.mediaMeta}
                   >
-                    <View style={[s.meta, visualMedia && { marginTop: 0 }]}>
-                      <Text style={[s.time, visualMedia && s.mediaTime]}>
+                    <View style={[s.meta, overlayMeta && { marginTop: 0 }]}>
+                      <Text style={[s.time, overlayMeta && s.mediaTime]}>
                         {message.isEdited ? 'edited ' : ''}
                         {timeLabel(message.createdAt)}
                       </Text>
@@ -1241,7 +1242,7 @@ export default function ChatView({
                               }
                               size={15}
                               color={
-                                visualMedia
+                                overlayMeta
                                   ? 'white'
                                   : message.delivery === 'sending'
                                     ? colors.muted
