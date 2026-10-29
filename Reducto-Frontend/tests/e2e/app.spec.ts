@@ -622,6 +622,83 @@ async function signIn(page: Page) {
   await expect(page.getByRole('button', { name: 'Open Weekend plans' })).toBeVisible();
 }
 
+test('Saved Messages is available empty, accepts notes and forwards, and hides management', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page);
+  const saved = { ...chat, id: 'saved-messages', type: 'saved', name: 'Saved Messages' };
+  const notes: (typeof first)[] = [];
+  await page.route('**/api/conversations', (route) =>
+    route.fulfill({ json: { conversations: [chat, saved] } }),
+  );
+  await page.route('**/api/conversations/saved-messages**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    let body: unknown = {};
+    if (url.pathname.endsWith('/saved-messages')) body = { conversation: saved };
+    else if (url.pathname.endsWith('/members'))
+      body = { members: [{ userId: user.id, conversationId: saved.id, role: 'owner' }] };
+    else if (url.pathname.endsWith('/seen'))
+      body = { lastSeenMessageId: request.postDataJSON().messageId, unreadCount: 0 };
+    else if (request.method() === 'POST') {
+      const forwarded = url.pathname.endsWith('/forward');
+      const note = {
+        ...first,
+        id: forwarded ? 'saved-forward' : 'saved-note',
+        conversationId: saved.id,
+        senderId: user.id,
+        text: forwarded ? first.text : request.postDataJSON().text,
+        createdAt: '2026-10-29T12:00:00Z',
+      };
+      notes.push(note);
+      body = { message: note };
+    } else if (url.pathname.endsWith('/first')) body = { message: notes[0] ?? null };
+    else if (url.pathname.endsWith('/around'))
+      body = {
+        message: notes[0],
+        before: [],
+        after: notes.slice(1),
+        hasMoreBefore: false,
+        hasMoreAfter: false,
+      };
+    else body = { messages: [...notes].reverse(), nextCursor: null };
+    await route.fulfill({ json: body });
+  });
+  await signIn(page);
+  const savedRow = page.getByRole('button', { name: 'Open Saved Messages', exact: true });
+  await expect(savedRow).toBeVisible();
+  await expect(savedRow.getByTestId('saved-messages-avatar')).toBeVisible();
+  await savedRow.click();
+  await expect(page.getByText('Your personal cloud', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Save messages, photos and files here, or forward messages from any chat.'),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Conversation details', exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole('button', { name: 'View conversation details', exact: true }),
+  ).toBeDisabled();
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('A note to myself');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByTestId('message-saved-note')).toContainText('A note to myself');
+  await expect(page.getByTestId('message-status-saved-note')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Search messages', exact: true })).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath('saved-messages.png') });
+  if (testInfo.project.name === 'mobile')
+    await page.getByRole('button', { name: 'Back to chats' }).click();
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByTestId(`message-meta-${first.id}`).click();
+  await page.getByRole('button', { name: 'Forward', exact: true }).click();
+  const destination = page.getByRole('button', { name: 'Saved Messages', exact: true });
+  const other = page.getByRole('button', { name: 'Weekend plans', exact: true });
+  await expect(destination).toBeVisible();
+  expect((await destination.boundingBox())!.y).toBeLessThan((await other.boundingBox())!.y);
+  await destination.click();
+  await expect(page.getByTestId('message-saved-forward')).toContainText(first.text);
+  expect(notes).toHaveLength(2);
+});
+
 test('chat rows hide usernames and paint full-width selection before navigation', async ({
   page,
 }) => {

@@ -19,6 +19,7 @@ import { VoiceMiniPlayer } from './VoiceMiniPlayer';
 import { useProfiles } from '../../context/ProfilesContext';
 import { MentionIcon } from '../../components/MentionIcon';
 import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+import { SavedMessagesAvatar } from '../../components/SavedMessagesAvatar';
 
 function renderChatListScroll(props: ScrollViewProps) {
   return (
@@ -214,13 +215,17 @@ export default function ChatList({
               onPress={() => openChat(chat.id)}
               style={[s.row, selected && s.selected]}
             >
-              <Avatar
-                name={title(chat)}
-                uri={peer(chat)?.avatarUrl ?? undefined}
-                size={52}
-                online={peer(chat)?.online}
-                badgeBorderColor={colors.surface}
-              />
+              {chat.type === 'saved' ? (
+                <SavedMessagesAvatar />
+              ) : (
+                <Avatar
+                  name={title(chat)}
+                  uri={peer(chat)?.avatarUrl ?? undefined}
+                  size={52}
+                  online={peer(chat)?.online}
+                  badgeBorderColor={colors.surface}
+                />
+              )}
               <View style={{ flex: 1, gap: 7 }}>
                 <View style={s.rowLine}>
                   <Text numberOfLines={1} style={s.chatName}>
@@ -230,8 +235,16 @@ export default function ChatList({
                 </View>
                 <View style={s.rowLine}>
                   <Text testID={`preview-${chat.id}`} numberOfLines={1} style={s.preview}>
-                    {last?.senderId === session!.user.id ? 'You: ' : ''}
-                    {last ? preview(last) : last === null ? preview() : ''}
+                    {chat.type !== 'saved' && last?.senderId === session!.user.id ? 'You: ' : ''}
+                    {chat.type === 'saved' && !last
+                      ? 'Keep messages and files here'
+                      : chat.type === 'saved' && !last?.text && last?.attachment?.type === 'image'
+                        ? 'Photo'
+                        : last
+                          ? preview(last)
+                          : last === null
+                            ? preview()
+                            : ''}
                   </Text>
                   {!!chat.unseenMentions?.length && (
                     <View

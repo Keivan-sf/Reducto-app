@@ -34,7 +34,7 @@ export interface Session extends Tokens {
 }
 export interface Conversation {
   id: string;
-  type: 'private' | 'group';
+  type: 'private' | 'group' | 'saved';
   name: string | null;
   createdAt: string;
   inviteLink?: string;

@@ -11,6 +11,7 @@ export function profileName(profile?: Pick<UserProfile, 'name' | 'username'>) {
   return profile?.name.trim() || (profile?.username ? `@${profile.username}` : 'Unknown user');
 }
 export function conversationName(chat: Conversation, peer?: UserProfile) {
+  if (chat.type === 'saved') return 'Saved Messages';
   return chat.type === 'group' ? chat.name || 'Group' : peer ? profileName(peer) : 'Private chat';
 }
 export function initials(name: string) {

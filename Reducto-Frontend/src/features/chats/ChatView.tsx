@@ -43,6 +43,7 @@ import { downloadAttachment } from '../../lib/download';
 import { canCopyImage, copyImage } from '../../lib/copy-image';
 import { AttachmentImage } from './AttachmentImage';
 import { GroupDialog } from './GroupDialog';
+import { SavedMessagesAvatar } from '../../components/SavedMessagesAvatar';
 import { ApiError } from '../../api/client';
 import { UserProfileDialog } from './UserProfileDialog';
 import { MessageText } from './MessageText';
@@ -1038,7 +1039,7 @@ export default function ChatView({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="View conversation details"
-            disabled={chat.type === 'private' && !peerId}
+            disabled={chat.type === 'saved' || (chat.type === 'private' && !peerId)}
             onPress={() => {
               if (chat.type === 'private') {
                 if (peerId) setProfileUserId(peerId);
@@ -1046,7 +1047,11 @@ export default function ChatView({
             }}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}
           >
-            <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={40} />
+            {chat.type === 'saved' ? (
+              <SavedMessagesAvatar size={40} />
+            ) : (
+              <Avatar name={title} uri={peer?.avatarUrl ?? undefined} size={40} />
+            )}
             <View style={{ flex: 1 }}>
               <Text numberOfLines={1} style={s.headerTitle}>
                 {title}
@@ -1057,7 +1062,11 @@ export default function ChatView({
                   chat.type === 'private' && { color: peer?.online ? colors.blue : colors.muted },
                 ]}
               >
-                {chat.type === 'group' ? `${members[id]?.length ?? 0} members` : peerPresence}
+                {chat.type === 'saved'
+                  ? 'Your personal cloud'
+                  : chat.type === 'group'
+                    ? `${members[id]?.length ?? 0} members`
+                    : peerPresence}
               </Text>
             </View>
           </Pressable>
@@ -1066,16 +1075,18 @@ export default function ChatView({
             label="Search messages"
             onPress={() => changeSearch(search === null ? '' : null)}
           />
-          <IconButton
-            name="ellipsis-vertical"
-            label="Conversation details"
-            disabled={chat.type === 'private' && !peerId}
-            onPress={() => {
-              if (chat.type === 'private') {
-                if (peerId) setProfileUserId(peerId);
-              } else setDetails(true);
-            }}
-          />
+          {chat.type !== 'saved' && (
+            <IconButton
+              name="ellipsis-vertical"
+              label="Conversation details"
+              disabled={chat.type === 'private' && !peerId}
+              onPress={() => {
+                if (chat.type === 'private') {
+                  if (peerId) setProfileUserId(peerId);
+                } else setDetails(true);
+              }}
+            />
+          )}
         </View>
         {active && <VoiceMiniPlayer />}
         {!wide && searchOpen && <Notice text={error} onDismiss={() => setError('')} />}
@@ -1196,7 +1207,9 @@ export default function ChatView({
                   )}
                   {!history.length && (
                     <Text style={s.emptyText}>
-                      Say hello. This is the start of your conversation.
+                      {chat.type === 'saved'
+                        ? 'Save messages, photos and files here, or forward messages from any chat.'
+                        : 'Say hello. This is the start of your conversation.'}
                     </Text>
                   )}
                 </View>
@@ -1240,7 +1253,7 @@ export default function ChatView({
                         {message.isEdited ? 'edited ' : ''}
                         {timeLabel(message.createdAt)}
                       </Text>
-                      {mine && (
+                      {mine && (chat.type !== 'saved' || !!message.delivery) && (
                         <View
                           testID={`message-status-${message.id}`}
                           accessible
@@ -1688,15 +1701,17 @@ export default function ChatView({
             onSend={sendMedia}
           />
         )}
-        <GroupDialog
-          chat={chat}
-          visible={focused && details}
-          onClose={() => setDetails(false)}
-          onViewUser={(userId) => {
-            setDetails(false);
-            setProfileUserId(userId);
-          }}
-        />
+        {chat.type !== 'saved' && (
+          <GroupDialog
+            chat={chat}
+            visible={focused && details}
+            onClose={() => setDetails(false)}
+            onViewUser={(userId) => {
+              setDetails(false);
+              setProfileUserId(userId);
+            }}
+          />
+        )}
         {focused && profileUserId && (
           <UserProfileDialog
             key={profileUserId}
@@ -1705,37 +1720,73 @@ export default function ChatView({
           />
         )}
         <Dialog visible={focused && forward} title="Forward to…" onClose={() => setForward(false)}>
-          {conversations.map((destination) => (
-            <Button
-              key={destination.id}
-              title={conversationName(
-                destination,
-                profiles[
-                  members[destination.id]?.find((member) => member.userId !== session!.user.id)
-                    ?.userId ?? ''
-                ],
-              )}
-              secondary
-              disabled={busy}
-              onPress={() => {
-                setBusy(true);
-                void api
-                  .post<{ message: Message }>(`/api/conversations/${destination.id}/forward`, {
-                    messageId: actionMessage!.id,
-                  })
-                  .then(({ message }) => {
-                    acceptMessage(message);
-                    setForward(false);
-                    router.push(`/chat/${destination.id}`);
-                  })
-                  .catch((err) => {
-                    setError(err.message);
-                    setForward(false);
-                  })
-                  .finally(() => setBusy(false));
-              }}
-            />
-          ))}
+          {[...conversations]
+            .sort((a, b) => Number(b.type === 'saved') - Number(a.type === 'saved'))
+            .map((destination) => (
+              <Pressable
+                key={destination.id}
+                accessibilityRole="button"
+                accessibilityLabel={conversationName(
+                  destination,
+                  profiles[
+                    members[destination.id]?.find((member) => member.userId !== session!.user.id)
+                      ?.userId ?? ''
+                  ],
+                )}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: 8,
+                  borderRadius: 10,
+                  backgroundColor: pressed ? colors.menuHover : 'transparent',
+                  opacity: busy ? 0.5 : 1,
+                })}
+                disabled={busy}
+                onPress={() => {
+                  setBusy(true);
+                  void api
+                    .post<{ message: Message }>(`/api/conversations/${destination.id}/forward`, {
+                      messageId: actionMessage!.id,
+                    })
+                    .then(({ message }) => {
+                      acceptMessage(message);
+                      setForward(false);
+                      router.push(`/chat/${destination.id}`);
+                    })
+                    .catch((err) => {
+                      setError(err.message);
+                      setForward(false);
+                    })
+                    .finally(() => setBusy(false));
+                }}
+              >
+                {destination.type === 'saved' ? (
+                  <SavedMessagesAvatar size={40} />
+                ) : (
+                  <Avatar
+                    name={conversationName(
+                      destination,
+                      profiles[
+                        members[destination.id]?.find(
+                          (member) => member.userId !== session!.user.id,
+                        )?.userId ?? ''
+                      ],
+                    )}
+                    size={40}
+                  />
+                )}
+                <Text numberOfLines={1} style={{ flex: 1, color: colors.dark, fontSize: 15 }}>
+                  {conversationName(
+                    destination,
+                    profiles[
+                      members[destination.id]?.find((member) => member.userId !== session!.user.id)
+                        ?.userId ?? ''
+                    ],
+                  )}
+                </Text>
+              </Pressable>
+            ))}
         </Dialog>
         <MessageMenu
           anchor={focused && actionsVisible ? actionAnchor : null}

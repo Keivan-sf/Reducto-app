@@ -1,7 +1,23 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mergeMessages, replySnippet } from '../src/lib/messages';
-import type { Message } from '../src/api/types';
+import { conversationName, mergeMessages, replySnippet } from '../src/lib/messages';
+import type { Conversation, Message } from '../src/api/types';
+
+test('Saved Messages has a fixed title without needing another member profile', () => {
+  const saved: Conversation = {
+    id: 'saved',
+    type: 'saved',
+    name: null,
+    createdAt: '2026-10-29T00:00:00Z',
+  };
+  assert.equal(conversationName(saved), 'Saved Messages');
+  assert.equal(
+    conversationName(saved, { id: 'self', name: 'Ada', username: 'ada', avatarUrl: null }),
+    'Saved Messages',
+  );
+  assert.equal(conversationName({ ...saved, type: 'group', name: 'Friends' }), 'Friends');
+  assert.equal(conversationName({ ...saved, type: 'private' }), 'Private chat');
+});
 function message(id: string, createdAt: string): Message {
   return {
     id,
