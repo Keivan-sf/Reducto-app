@@ -2902,6 +2902,10 @@ for (const outgoing of [false, true]) {
         reactions: [
           { userId: friend.id, emoji: '👍' },
           { userId: user.id, emoji: '❤️' },
+          ...['👎', '😂', '😮', '😢', '🔥', '🎉'].map((emoji) => ({
+            userId: friend.id,
+            emoji,
+          })),
         ],
       },
     ]);
@@ -2919,6 +2923,24 @@ for (const outgoing of [false, true]) {
     const addThumb = bubble.getByRole('button', { name: 'Add 👍 reaction', exact: true });
     const removeThumb = bubble.getByRole('button', { name: 'Remove 👍 reaction', exact: true });
     const removeHeart = bubble.getByRole('button', { name: 'Remove ❤️ reaction', exact: true });
+    await expect
+      .poll(async () => {
+        const [firstReaction, lastReaction, meta] = await Promise.all([
+          addThumb.boundingBox(),
+          bubble.getByRole('button', { name: 'Add 🎉 reaction', exact: true }).boundingBox(),
+          page.getByTestId(`message-meta-${first.id}`).boundingBox(),
+        ]);
+        return (
+          !!firstReaction &&
+          !!lastReaction &&
+          !!meta &&
+          lastReaction.y >= firstReaction.y &&
+          meta.x >= lastReaction.x + lastReaction.width &&
+          meta.y >= lastReaction.y &&
+          Math.abs(meta.y + meta.height - lastReaction.y - lastReaction.height) < 1
+        );
+      })
+      .toBe(true);
     await expect(addThumb).toHaveAttribute('aria-selected', 'false');
     await expect(removeHeart).toHaveAttribute('aria-selected', 'true');
     const unselectedColor = await addThumb.evaluate(

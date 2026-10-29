@@ -1181,7 +1181,6 @@ export default function ChatView({
                 const visualMedia = ['image', 'gif', 'video'].includes(
                   message.upload?.type ?? message.attachment?.type ?? '',
                 );
-                const overlayMeta = visualMedia && !message.text;
                 const hasMediaHeader =
                   (!mine && chat.type === 'group') ||
                   !!message.forwardedFrom ||
@@ -1199,6 +1198,7 @@ export default function ChatView({
                   count:
                     message.reactions?.filter((reaction) => reaction.emoji === emoji).length ?? 0,
                 })).filter((entry) => entry.count);
+                const overlayMeta = visualMedia && !message.text && !reactions.length;
                 const messageMeta = (
                   <Pressable
                     accessibilityRole="button"

@@ -19,14 +19,19 @@ export function MessageBubbleContent({
 }) {
   const s = useStyles();
   const [mediaWidth, setMediaWidth] = useState(0);
+  const footer = (
+    <View style={s.footer}>
+      {!!reactions && <View style={s.reactions}>{reactions}</View>}
+      <View style={s.meta}>{meta}</View>
+    </View>
+  );
   if (!visualMedia)
     return (
       <>
         {header}
         {children}
         {caption}
-        {meta}
-        {reactions}
+        {footer}
       </>
     );
 
@@ -38,15 +43,14 @@ export function MessageBubbleContent({
       {!!header && <View style={[s.header, textWidth]}>{header}</View>}
       <View style={s.media} onLayout={({ nativeEvent }) => setMediaWidth(nativeEvent.layout.width)}>
         {children}
-        {!caption && meta}
+        {!caption && !reactions && meta}
       </View>
-      {!!caption && (
+      {(!!caption || !!reactions) && (
         <View style={[s.caption, textWidth]}>
           {caption}
-          {meta}
+          {footer}
         </View>
       )}
-      {!!reactions && <View style={[s.reactions, textWidth]}>{reactions}</View>}
     </>
   );
 }
@@ -55,5 +59,7 @@ const useStyles = createThemedStyles((colors) => ({
   media: { alignSelf: 'flex-start', maxWidth: '100%' },
   header: { paddingHorizontal: 10, paddingTop: 10 },
   caption: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8 },
-  reactions: { paddingHorizontal: 8, paddingBottom: 6 },
+  footer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  reactions: { flex: 1, minWidth: 0 },
+  meta: { marginLeft: 'auto', flexShrink: 0 },
 }));
