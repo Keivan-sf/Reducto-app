@@ -17,9 +17,10 @@ import { createThemedStyles, useTheme } from '../../context/ThemeContext';
 import type { VideoFile } from '../../api/video-cache';
 import { retainUpload } from '../../lib/local-attachments';
 import type { UploadAsset } from '../../lib/uploads';
+import { VideoPlayback } from './VideoPlayback';
 
 /** Own the original until Cancel disposes it or Send transfers it to the outbox. */
-export function ImageSendPreview({
+export function MediaSendPreview({
   asset,
   onClose,
   onSend,
@@ -32,6 +33,8 @@ export function ImageSendPreview({
   const { colors } = useTheme();
   const { width, height } = useWindowDimensions();
   const desktop = Platform.OS === 'web' && width >= 768;
+  const video = asset.mimeType?.toLowerCase().startsWith('video/') ?? false;
+  const mediaName = video ? 'video' : 'image';
   const insets = useSafeAreaInsets();
   const [caption, setCaption] = useState('');
   const [captionFocused, setCaptionFocused] = useState(false);
@@ -73,7 +76,7 @@ export function ImageSendPreview({
     // Consume synchronously; double taps must never enqueue the same file twice.
     transferred.current = true;
     try {
-      if (!onSend(file, caption.trim(), asDocument)) transferred.current = false;
+      if (!onSend(file, caption.trim(), !video && asDocument)) transferred.current = false;
     } catch (err) {
       transferred.current = false;
       setError((err as Error).message);
@@ -97,7 +100,7 @@ export function ImageSendPreview({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View
-          testID="image-send-preview"
+          testID={`${mediaName}-send-preview`}
           accessibilityViewIsModal
           style={[
             s.panel,
@@ -113,10 +116,12 @@ export function ImageSendPreview({
           ]}
         >
           <View style={s.header}>
-            <Text style={[s.title, !desktop && s.white]}>Send an image</Text>
+            <Text style={[s.title, !desktop && s.white]}>
+              {video ? 'Send a video' : 'Send an image'}
+            </Text>
             <IconButton
               name="close"
-              label="Cancel image send"
+              label={`Cancel ${mediaName} send`}
               onPress={onClose}
               color={desktop ? colors.muted : 'white'}
             />
@@ -124,7 +129,11 @@ export function ImageSendPreview({
           <View
             style={[s.preview, desktop ? { height: Math.min(340, height * 0.45) } : s.phonePreview]}
           >
-            {file ? (
+            {file && video ? (
+              <View style={{ width: '100%', height: '100%' }}>
+                <VideoPlayback uri={file.uri} active={false} nativeControls />
+              </View>
+            ) : file ? (
               <Image
                 source={{ uri: file.uri }}
                 resizeMode="contain"
@@ -141,28 +150,30 @@ export function ImageSendPreview({
                 {error}
               </Text>
             )}
-            <Pressable
-              accessibilityRole="checkbox"
-              accessibilityLabel="Send as a document"
-              accessibilityState={{ checked: asDocument }}
-              onPress={() => setAsDocument(!asDocument)}
-              style={s.checkboxRow}
-            >
-              <View
-                style={[
-                  s.checkbox,
-                  asDocument && { backgroundColor: colors.blue, borderColor: colors.blue },
-                ]}
+            {!video && (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityLabel="Send as a document"
+                accessibilityState={{ checked: asDocument }}
+                onPress={() => setAsDocument(!asDocument)}
+                style={s.checkboxRow}
               >
-                {asDocument && <Icon name="checkmark" size={18} color={colors.surface} />}
-              </View>
-              <Text style={[s.label, !desktop && s.white]}>Send as a document</Text>
-            </Pressable>
+                <View
+                  style={[
+                    s.checkbox,
+                    asDocument && { backgroundColor: colors.blue, borderColor: colors.blue },
+                  ]}
+                >
+                  {asDocument && <Icon name="checkmark" size={18} color={colors.surface} />}
+                </View>
+                <Text style={[s.label, !desktop && s.white]}>Send as a document</Text>
+              </Pressable>
+            )}
             <View style={[s.captionField, captionFocused && { borderBottomColor: colors.blue }]}>
               <TextInput
                 ref={captionInput}
                 autoFocus={desktop}
-                accessibilityLabel="Image caption"
+                accessibilityLabel={video ? 'Video caption' : 'Image caption'}
                 placeholder="Add a caption…"
                 placeholderTextColor={colors.muted}
                 value={caption}
@@ -193,7 +204,7 @@ export function ImageSendPreview({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Send image"
+                accessibilityLabel={`Send ${mediaName}`}
                 disabled={!file}
                 onPress={submit}
                 style={[s.action, !file && { opacity: 0.4 }]}

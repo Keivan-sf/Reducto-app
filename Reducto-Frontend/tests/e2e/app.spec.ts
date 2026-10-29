@@ -3988,6 +3988,93 @@ test('desktop pasted images focus the caption and send with Enter, while Shift+E
   expect(uploads).toBe(2);
 });
 
+test('video send preview plays locally, cancels without uploading, and sends with a caption', async ({
+  page,
+}, testInfo) => {
+  await mockApi(page, []);
+  const original = readFileSync(path.join(__dirname, '../fixtures/portrait.mp4'));
+  let uploads = 0;
+  await page.route('**/api/conversations/*/attachments', async (route) => {
+    uploads++;
+    const form = (await new Response(new Uint8Array(route.request().postDataBuffer()!), {
+      headers: { 'Content-Type': route.request().headers()['content-type'] },
+    }).formData()) as unknown as { get(name: string): File | string | null };
+    expect(form.get('kind')).toBeNull();
+    const file = form.get('file') as File;
+    expect(Buffer.from(await file.arrayBuffer())).toEqual(original);
+    await route.fulfill({
+      status: 201,
+      json: {
+        attachment: {
+          id: 'preview-video',
+          type: 'video',
+          fileName: file.name,
+          contentType: file.type,
+          fileSize: original.length,
+          width: 180,
+          height: 320,
+          durationSeconds: 1,
+        },
+      },
+    });
+  });
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  async function choose() {
+    const picker = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
+    await (await picker).setFiles({ name: 'video.mp4', mimeType: 'video/mp4', buffer: original });
+    await expect(page.getByRole('button', { name: 'Send video', exact: true })).toBeEnabled();
+  }
+  await choose();
+  const preview = page.getByTestId('video-send-preview');
+  await expect(preview.getByRole('checkbox')).toHaveCount(0);
+  const video = preview.locator('video');
+  await expect(video).toHaveAttribute('src', /^blob:/);
+  await expect(video).toHaveAttribute('controls', '');
+  await video.evaluate((element: HTMLVideoElement) => element.play());
+  await expect
+    .poll(() => video.evaluate((element: HTMLVideoElement) => element.paused))
+    .toBe(false);
+  const uri = await video.getAttribute('src');
+  expect(uploads).toBe(0);
+  await preview.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(preview).toHaveCount(0);
+  expect(uploads).toBe(0);
+  await expect
+    .poll(() =>
+      page.evaluate(async (uri) => {
+        try {
+          await fetch(uri!);
+          return false;
+        } catch {
+          return true;
+        }
+      }, uri),
+    )
+    .toBe(true);
+  await choose();
+  const caption = preview.getByRole('textbox', { name: 'Video caption', exact: true });
+  if (testInfo.project.name === 'desktop') await expect(caption).toBeFocused();
+  await caption.fill('Video caption');
+  const sent = page.waitForRequest(
+    (request) => request.method() === 'POST' && request.url().endsWith('/messages'),
+  );
+  if (testInfo.project.name === 'desktop') {
+    await caption.press('Shift+Enter');
+    await expect(caption).toHaveValue('Video caption\n');
+    await caption.press('Enter');
+  } else {
+    await preview.getByRole('button', { name: 'Send video', exact: true }).click();
+  }
+  expect((await sent).postDataJSON()).toMatchObject({
+    text: 'Video caption',
+    attachment: { type: 'video', mediaId: 'preview-video' },
+  });
+  await expect(preview).toHaveCount(0);
+  expect(uploads).toBe(1);
+});
+
 test('image send preview cancels without uploading and sends original document bytes with a caption', async ({
   page,
 }, testInfo) => {
@@ -4213,8 +4300,8 @@ for (const selection of [
     const picker = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
     await (await picker).setFiles({ name, mimeType, buffer });
-    if (kind === 'image')
-      await page.getByRole('button', { name: 'Send image', exact: true }).click();
+    if (kind === 'image' || kind === 'video')
+      await page.getByRole('button', { name: `Send ${kind}`, exact: true }).click();
     const message = page.getByTestId('message-44444444-4444-4444-8444-444444444444');
     await expect(message).toBeVisible();
     if (kind === 'image') {
@@ -6561,8 +6648,8 @@ for (const kind of ['image', 'video', 'music'] as const) {
             buffer: Buffer.alloc(1024),
           },
     );
-    if (kind === 'image')
-      await page.getByRole('button', { name: 'Send image', exact: true }).click();
+    if (kind === 'image' || kind === 'video')
+      await page.getByRole('button', { name: `Send ${kind}`, exact: true }).click();
     const bubble = page.getByTestId(kind === 'music' ? 'upload-file' : 'upload-media');
     await expect(bubble).toBeVisible();
     const initialBounds = await bubble.boundingBox();
@@ -6673,6 +6760,7 @@ test('large video upload keeps file handling and progress work away from chattin
     const picker = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Attach a file', exact: true }).click();
     await (await picker).setFiles(videoPath);
+    await page.getByRole('button', { name: 'Send video', exact: true }).click();
     await expect(
       page.getByRole('button', { name: 'Cancel video upload', exact: true }),
     ).toBeVisible();

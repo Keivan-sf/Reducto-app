@@ -37,6 +37,7 @@ import { useProfiles } from '../../context/ProfilesContext';
 import { retainUpload, saveLocalFile } from '../../lib/local-attachments';
 import { messageUpload } from '../../lib/message-upload';
 import { uploadSizeError } from '../../lib/upload-limits';
+import { uploadKind } from '../../lib/upload-kind';
 import { UploadMessage } from './UploadMessage';
 import { downloadAttachment } from '../../lib/download';
 import { canCopyImage, copyImage } from '../../lib/copy-image';
@@ -54,7 +55,7 @@ import { ReplyPreview, ReplyQuote } from './ReplyPreview';
 import { VoiceMessage } from './VoiceMessage';
 import { DocumentMessage } from './DocumentMessage';
 import { MessageComposer } from './MessageComposer';
-import { ImageSendPreview } from './ImageSendPreview';
+import { MediaSendPreview } from './MediaSendPreview';
 import type { UploadAsset } from '../../lib/uploads';
 import type { VideoFile } from '../../api/video-cache';
 import type { RecordedVoice } from '../../lib/voice-recording.types';
@@ -116,7 +117,7 @@ export default function ChatView({
   const voicePlayback = useVoicePlayback();
   const routeFocused = useIsFocused();
   const focused = active && routeFocused;
-  const [imageDraft, setImageDraft] = useState<{
+  const [mediaDraft, setMediaDraft] = useState<{
     asset: UploadAsset;
     conversationId: string;
     replyToMessageId?: string;
@@ -126,7 +127,7 @@ export default function ChatView({
   const [draftScope, setDraftScope] = useState({ id, focused });
   if (draftScope.id !== id || draftScope.focused !== focused) {
     setDraftScope({ id, focused });
-    setImageDraft(undefined);
+    setMediaDraft(undefined);
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -711,9 +712,12 @@ export default function ChatView({
     const file = picked.assets[0];
     const sizeError = uploadSizeError(file.size);
     if (sizeError) return setError(sizeError);
-    if (file.mimeType?.toLowerCase().startsWith('image/')) {
+    if (
+      /^(image|video)\//i.test(file.mimeType ?? '') &&
+      uploadKind(file.mimeType, file.name) !== 'document'
+    ) {
       Keyboard.dismiss();
-      setImageDraft({ asset: file, conversationId, replyToMessageId });
+      setMediaDraft({ asset: file, conversationId, replyToMessageId });
       return;
     }
     outbox.enqueue(
@@ -732,9 +736,9 @@ export default function ChatView({
     setReplyTo(null);
     void showLatest();
   }
-  function sendImage(file: VideoFile, caption: string, asDocument: boolean) {
-    if (!imageDraft || busy || !focused || imageDraft.conversationId !== id) return false;
-    const { asset, conversationId, replyToMessageId } = imageDraft;
+  function sendMedia(file: VideoFile, caption: string, asDocument: boolean) {
+    if (!mediaDraft || busy || !focused || mediaDraft.conversationId !== id) return false;
+    const { asset, conversationId, replyToMessageId } = mediaDraft;
     setError('');
     outbox.enqueue(
       conversationId,
@@ -758,7 +762,7 @@ export default function ChatView({
         { asDocument, file },
       ),
     );
-    setImageDraft(undefined);
+    setMediaDraft(undefined);
     setReplyTo(null);
     void showLatest();
     return true;
@@ -1649,7 +1653,7 @@ export default function ChatView({
                 if (sizeError) return setError(sizeError);
                 ++uploadSequence.current;
                 setError('');
-                setImageDraft({
+                setMediaDraft({
                   // The preview owns the blob URL created from this file.
                   asset: { uri: '', name: file.name || 'image.png', mimeType: file.type, file },
                   conversationId: id,
@@ -1666,11 +1670,11 @@ export default function ChatView({
             />
           </View>
         </View>
-        {focused && imageDraft && imageDraft.conversationId === id && (
-          <ImageSendPreview
-            asset={imageDraft.asset}
-            onClose={() => setImageDraft(undefined)}
-            onSend={sendImage}
+        {focused && mediaDraft && mediaDraft.conversationId === id && (
+          <MediaSendPreview
+            asset={mediaDraft.asset}
+            onClose={() => setMediaDraft(undefined)}
+            onSend={sendMedia}
           />
         )}
         <GroupDialog
