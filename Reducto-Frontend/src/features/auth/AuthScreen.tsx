@@ -79,7 +79,7 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
         <LinearGradient colors={['#2995ED', '#2378D1']} style={s.story}>
           <View style={s.brand}>
             <Icon name="paper-plane" color="white" size={27} />
-            <Text style={s.brandName}>reducto</Text>
+            <Text style={s.brandName}>Reducto</Text>
           </View>
           <View style={s.storyBody}>
             <View style={s.orbit}>
@@ -87,20 +87,15 @@ export default function AuthScreen({ inviteToken }: { inviteToken?: string }) {
                 <Icon name="paper-plane" size={78} color="white" />
               </View>
             </View>
-            <Text style={s.headline}>A little closer.{'\n'}Every conversation.</Text>
+            <Text style={s.headline}>Free and Open-source Messenger</Text>
             <Text style={s.storyText}>
-              Your people, your groups, your everyday moments. All together in one simple place.
             </Text>
             <View style={s.feature}>
               <Icon name="flash-outline" color="#D7ECFF" size={20} />
-              <Text style={s.featureText}>Instant messages. Real connections.</Text>
-            </View>
-            <View style={s.feature}>
-              <Icon name="phone-portrait-outline" color="#D7ECFF" size={20} />
-              <Text style={s.featureText}>At home on every screen.</Text>
+              <Text style={s.featureText}>Instant messages</Text>
             </View>
           </View>
-          <Text style={s.storyFoot}>MADE FOR THE WAY YOU CONNECT</Text>
+          <Text style={s.storyFoot}></Text>
         </LinearGradient>
       )}
       <ScrollView
