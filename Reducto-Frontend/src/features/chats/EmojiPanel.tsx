@@ -15,15 +15,11 @@ import { Icon } from '../../components/ui';
 import { emojiGroups, emojiVariants, searchEmojis, type PickerEmoji } from '../../lib/emoji-picker';
 import { mostUsedEmojis } from '../../lib/emoji-usage';
 import { useEmojiUsage } from './useEmojiUsage';
-import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+import { OverlayScrollView } from '../../components/OverlayScrollView';
 
 function renderEmojiScroll(props: ScrollViewProps) {
   return (
-    <ChatHistoryScrollView
-      {...props}
-      scrollbarInverted={false}
-      scrollbarLabel="Emoji menu scrollbar"
-    />
+    <OverlayScrollView {...props} scrollbarInverted={false} scrollbarLabel="Emoji menu scrollbar" />
   );
 }
 

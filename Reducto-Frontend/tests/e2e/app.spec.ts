@@ -2549,6 +2549,61 @@ for (const anchored of [true, false]) {
   });
 }
 
+test('group details use the shared overlay scrollbar with drag, keyboard and fade behavior', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await mockRealtime(page);
+  await page.route(`**/api/conversations/${chat.id}/members`, (route) =>
+    route.fulfill({
+      json: {
+        members: [
+          { userId: user.id, conversationId: chat.id, role: 'owner' },
+          ...Array.from({ length: 30 }, (_, index) => ({
+            userId: `member-${index}`,
+            conversationId: chat.id,
+            role: 'member',
+          })),
+        ],
+      },
+    }),
+  );
+  await signIn(page);
+  await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+  await page.getByRole('button', { name: 'View conversation details' }).click();
+  const thumb = page.getByRole('scrollbar', { name: 'Group details scrollbar' });
+  const scrollId = await thumb.getAttribute('aria-controls');
+  const content = page.locator(`[id="${scrollId}"]`);
+  await content.hover();
+  await expect(thumb).toHaveCSS('opacity', '1');
+  await expect(thumb).toHaveCSS('width', '6px');
+  await expect(thumb).toHaveCSS('background-color', 'rgba(92, 119, 139, 0.45)');
+  expect(
+    await content.evaluate((element: HTMLElement) => element.offsetWidth - element.clientWidth),
+  ).toBe(0);
+  const bounds = (await thumb.boundingBox())!;
+  await page.mouse.move(bounds.x + 3, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x - 30, bounds.y + bounds.height / 2 + 80);
+  await page.mouse.up();
+  await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+  await thumb.press('Home');
+  await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBe(0);
+  await thumb.press('ArrowDown');
+  await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBe(40);
+  await thumb.press('End');
+  await expect
+    .poll(() =>
+      content.evaluate((element) =>
+        Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop),
+      ),
+    )
+    .toBeLessThan(1);
+  await expect(thumb).toHaveCSS('opacity', '0');
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(thumb).toHaveCount(0);
+});
+
 test('conversation list scrollbar overlays rows and scrolls in the list direction', async ({
   page,
 }) => {

@@ -23,15 +23,11 @@ import { useGifs } from '../../context/GifsContext';
 import { EmojiPanel } from './EmojiPanel';
 import { gifRecencyStore } from '../../lib/gif-recency-store';
 import { sortGifsByRecency } from '../../lib/gif-recency';
-import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+import { OverlayScrollView } from '../../components/OverlayScrollView';
 
 function renderGifScroll(props: ScrollViewProps) {
   return (
-    <ChatHistoryScrollView
-      {...props}
-      scrollbarInverted={false}
-      scrollbarLabel="GIF menu scrollbar"
-    />
+    <OverlayScrollView {...props} scrollbarInverted={false} scrollbarLabel="GIF menu scrollbar" />
   );
 }
 

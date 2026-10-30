@@ -8,12 +8,12 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { OverlayScrollView } from './OverlayScrollView';
 import { initials } from '../lib/messages';
 export { Notice } from './Notice';
 
@@ -194,12 +194,14 @@ export function Dialog({
               <Text style={styles.title}>{title}</Text>
               <IconButton name="close" label="Close dialog" onPress={onClose} />
             </View>
-            <ScrollView
+            <OverlayScrollView
+              scrollbarLabel={`${title} scrollbar`}
+              containerStyle={{ flexGrow: 0, flexShrink: 1, flexBasis: 'auto' }}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ gap: 18, padding: 24, paddingTop: 8 }}
             >
               {children}
-            </ScrollView>
+            </OverlayScrollView>
           </NoticeProvider>
         </View>
       </KeyboardAvoidingView>

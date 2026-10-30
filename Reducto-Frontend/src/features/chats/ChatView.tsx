@@ -69,7 +69,7 @@ import { useVideos, videoKey, voiceFileKey, documentFileKey } from '../../contex
 import { useMediaMetadata } from '../../context/MediaMetadataContext';
 import { saveVideoFile } from '../../lib/video-download';
 import { MessageMenu, type MessageMenuAction } from './MessageMenu';
-import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+import { OverlayScrollView } from '../../components/OverlayScrollView';
 import { comparePosition } from '../../api/read-state';
 import { messageGif, messageMedia } from '../../lib/message-attachment';
 import { seenByAnotherMember } from '../../api/receipts';
@@ -348,7 +348,12 @@ export default function ChatView({
   }, [setJumpTarget, setOpeningHistory, tailFollow]);
   const renderChatHistoryScroll = useCallback(
     (props: ScrollViewProps) => (
-      <ChatHistoryScrollView {...props} onUserScroll={cancelPositioning} />
+      <OverlayScrollView
+        {...props}
+        scrollbarInverted
+        scrollbarLabel="Chat scrollbar"
+        onUserScroll={cancelPositioning}
+      />
     ),
     [cancelPositioning],
   );

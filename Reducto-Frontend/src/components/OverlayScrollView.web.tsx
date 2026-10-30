@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useRef } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import type { ChatHistoryScrollProps } from './ChatHistoryScrollView.types';
+import type { OverlayScrollViewProps } from './OverlayScrollView.types';
 
 interface ThumbDrag {
   pointerId: number;
@@ -10,11 +10,17 @@ interface ThumbDrag {
   height: number;
 }
 
-/** A transparent overlay shared by chat history and the conversation list. Paint once per
- * animation frame so scrolling never waits for a React render. */
-export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollProps>(
-  function ChatHistoryScrollView(
-    { onUserScroll, scrollbarInverted = true, scrollbarLabel = 'Chat scrollbar', ...props },
+/** A reusable overlay scrollbar. Paint once per animation frame so scrolling never
+ * waits for a React render. Native platforms keep their standard scroll indicators. */
+export const OverlayScrollView = forwardRef<ScrollView, OverlayScrollViewProps>(
+  function OverlayScrollView(
+    {
+      onUserScroll,
+      scrollbarInverted = false,
+      scrollbarLabel = 'Scrollbar',
+      containerStyle,
+      ...props
+    },
     ref,
   ) {
     const scrollId = useId();
@@ -149,7 +155,7 @@ export const ChatHistoryScrollView = forwardRef<ScrollView, ChatHistoryScrollPro
       schedulePaint();
     };
     return (
-      <View style={{ flex: 1, minHeight: 0 }}>
+      <View style={[{ flex: 1, minHeight: 0 }, containerStyle]}>
         <ScrollView
           {...props}
           nativeID={scrollId}

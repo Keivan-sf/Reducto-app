@@ -18,12 +18,12 @@ import { NewChatDialog } from './NewChatDialog';
 import { VoiceMiniPlayer } from './VoiceMiniPlayer';
 import { useProfiles } from '../../context/ProfilesContext';
 import { MentionIcon } from '../../components/MentionIcon';
-import { ChatHistoryScrollView } from './ChatHistoryScrollView';
+import { OverlayScrollView } from '../../components/OverlayScrollView';
 import { SavedMessagesAvatar } from '../../components/SavedMessagesAvatar';
 
 function renderChatListScroll(props: ScrollViewProps) {
   return (
-    <ChatHistoryScrollView
+    <OverlayScrollView
       {...props}
       scrollbarInverted={false}
       scrollbarLabel="Conversation list scrollbar"
