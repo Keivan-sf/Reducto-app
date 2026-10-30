@@ -10,6 +10,7 @@ import type { Conversation } from '../../api/types';
 import { useProfiles } from '../../context/ProfilesContext';
 import { conversationName, profileName } from '../../lib/messages';
 import { groupInviteToken, groupInviteUri } from '../../lib/links';
+import { isValidUsername, normalizeUsername } from '../../lib/usernames';
 import { GroupMemberMenu } from './GroupMemberMenu';
 
 export function GroupDialog({
@@ -36,7 +37,7 @@ export function GroupDialog({
   const manager = role === 'owner' || role === 'admin';
   const [editedName, setName] = useState<string | null>(null);
   const name = editedName ?? chat.name ?? '';
-  const [userId, setUserId] = useState('');
+  const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [busy, setBusy] = useState(false);
@@ -109,20 +110,24 @@ export function GroupDialog({
             }
           />
           <Field
-            label="Add member by user ID"
-            value={userId}
-            onChangeText={setUserId}
+            label="Add member by username"
+            value={username}
+            onChangeText={setUsername}
             autoCapitalize="none"
-            placeholder="Paste their user ID"
+            autoCorrect={false}
+            placeholder="@username"
           />
           <Button
             title="Add member"
             secondary
-            disabled={busy || !userId.trim()}
+            disabled={busy || !normalizeUsername(username)}
             onPress={() =>
               void run(async () => {
-                await api.post(`/api/groups/${chat.id}/members`, { userId: userId.trim() });
-                setUserId('');
+                const normalizedUsername = normalizeUsername(username);
+                if (!isValidUsername(normalizedUsername))
+                  throw new Error('Enter a username with 1–32 letters, numbers, or underscores.');
+                await api.post(`/api/groups/${chat.id}/members`, { username: normalizedUsername });
+                setUsername('');
               }, 'Member added.')
             }
           />

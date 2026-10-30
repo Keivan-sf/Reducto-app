@@ -6645,6 +6645,58 @@ for (const entry of ['message avatar', 'member avatar'] as const) {
   });
 }
 
+for (const role of ['owner', 'admin'] as const) {
+  test(`group ${role} adds members by username and can retry lookup errors`, async ({ page }) => {
+    await mockApi(page);
+    await mockRealtime(page);
+    let added = false;
+    const recipients: object[] = [];
+    await page.route(`**/api/conversations/${chat.id}/members`, (route) =>
+      route.fulfill({
+        json: {
+          members: [
+            { userId: user.id, conversationId: chat.id, role },
+            ...(added ? [{ userId: friend.id, conversationId: chat.id, role: 'member' }] : []),
+          ],
+        },
+      }),
+    );
+    await page.route(`**/api/groups/${chat.id}/members`, (route) => {
+      const recipient = route.request().postDataJSON();
+      recipients.push(recipient);
+      if (recipient.username === 'missing')
+        return route.fulfill({ status: 404, json: { error: 'User not found' } });
+      added = true;
+      return route.fulfill({ status: 204 });
+    });
+    await signIn(page);
+    await page.getByRole('button', { name: 'Open Weekend plans' }).click();
+    await page.getByRole('button', { name: 'View conversation details' }).click();
+    const username = page.getByRole('textbox', { name: 'Add member by username', exact: true });
+    const add = page.getByRole('button', { name: 'Add member', exact: true });
+    await expect(add).toBeDisabled();
+    await username.fill('invalid name');
+    await add.click();
+    await expect(
+      page.getByText('Enter a username with 1–32 letters, numbers, or underscores.'),
+    ).toBeVisible();
+    expect(recipients).toEqual([]);
+    await username.fill('missing');
+    await add.click();
+    await expect(page.getByText('User not found', { exact: true })).toBeVisible();
+    await expect(username).toHaveValue('missing');
+    await username.fill('  @GrAcE  ');
+    await add.click();
+    await expect(page.getByText('Member added.', { exact: true })).toBeVisible();
+    expect(recipients).toEqual([{ username: 'missing' }, { username: 'grace' }]);
+    await expect(username).toHaveValue('');
+    await expect(add).toBeDisabled();
+    await expect(
+      page.getByRole('button', { name: 'View Grace Hopper profile', exact: true }).last(),
+    ).toBeVisible();
+  });
+}
+
 test('group member names and your own member row open user details', async ({ page }) => {
   await mockApi(page);
   await mockRealtime(page);
