@@ -4078,10 +4078,7 @@ test('historical video metadata without dimensions or thumbnails keeps a square 
   expect(downloads).toBe(0);
 });
 
-test('desktop file drops show the overlay and preview only the first file', async ({
-  page,
-  isMobile,
-}) => {
+test('web file drops show the overlay and preview only the first file', async ({ page }) => {
   await mockApi(page, []);
   let uploads = 0;
   await page.route('**/api/conversations/*/attachments', async (route) => {
@@ -4112,13 +4109,6 @@ test('desktop file drops show the overlay and preview only the first file', asyn
   const history = page.getByTestId('positioned-chat-history');
   await history.dispatchEvent('dragenter', { dataTransfer });
   const overlay = page.getByTestId('chat-file-drop-overlay');
-  if (isMobile) {
-    await expect(overlay).toHaveCount(0);
-    await history.dispatchEvent('drop', { dataTransfer });
-    await expect(page.getByTestId('file-send-preview')).toHaveCount(0);
-    expect(uploads).toBe(0);
-    return;
-  }
   await expect(overlay).toBeVisible();
   await expect(overlay).toContainText('Drop files here');
   await expect(overlay).toContainText('to send them');

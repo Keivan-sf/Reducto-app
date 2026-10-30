@@ -60,7 +60,7 @@ export function MessageComposer({
     return () => cancelAnimationFrame(frame);
   }, [desktop, active, busy, recording]);
   useEffect(() => {
-    if (!desktop || !active || busy || editing || recording || !onPasteFile) return;
+    if (Platform.OS !== 'web' || !active || busy || editing || recording || !onPasteFile) return;
     const element = input.current as unknown as HTMLTextAreaElement | null;
     if (!element) return;
     function paste(event: ClipboardEvent) {
@@ -71,7 +71,7 @@ export function MessageComposer({
     }
     element.addEventListener('paste', paste);
     return () => element.removeEventListener('paste', paste);
-  }, [desktop, active, busy, editing, recording, onPasteFile]);
+  }, [active, busy, editing, recording, onPasteFile]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMounted, setPickerMounted] = useState(false);
   const pickerElement = useRef<View>(null);

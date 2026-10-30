@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
-import { Platform, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 import { Icon } from '../../components/ui';
 import { createThemedStyles, useTheme } from '../../context/ThemeContext';
 import { bindChatFileDrop } from '../../lib/chat-file-drop';
@@ -11,18 +11,17 @@ export function ChatFileDropArea({
 }: PropsWithChildren<{ enabled: boolean; onFile: (file: File) => void }>) {
   const s = useStyles();
   const { colors } = useTheme();
-  const { width } = useWindowDimensions();
-  const desktop = Platform.OS === 'web' && width >= 768;
+  const web = Platform.OS === 'web';
   const root = useRef<View>(null);
   const [hoverType, setHoverType] = useState<string | null>(null);
   useEffect(() => {
-    if (!desktop || !enabled || !root.current) return;
+    if (!web || !enabled || !root.current) return;
     return bindChatFileDrop(root.current as unknown as HTMLElement, setHoverType, onFile);
-  }, [desktop, enabled, onFile]);
+  }, [web, enabled, onFile]);
   return (
     <View ref={root} style={s.root}>
       {children}
-      {desktop && enabled && hoverType !== null && (
+      {web && enabled && hoverType !== null && (
         <View pointerEvents="none" style={s.overlay} testID="chat-file-drop-overlay">
           <View style={s.box}>
             <Icon

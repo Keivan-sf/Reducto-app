@@ -1,4 +1,4 @@
-/** Bind only to the active desktop chat; file bytes are available on drop. */
+/** Bind only to the active web chat; file bytes are available on drop. */
 export function bindChatFileDrop(
   element: HTMLElement,
   onHover: (mimeType: string | null) => void,
