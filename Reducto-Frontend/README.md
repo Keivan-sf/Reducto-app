@@ -26,6 +26,89 @@ pnpm proxy http://YOUR_BACKEND_HOST:3000
 
 Then enter the proxy’s address (port 3001 by default) as the **Server URL** on the web login screen. The proxy target is supplied as a command argument; it is never taken from `API_TARGET`. `PROXY_PORT` controls only the local listening port. This proxy is a local development tool, not required for servers that support CORS.
 
+## Production web server
+
+Use Node.js 22.13+ (or a supported newer LTS) and pnpm. Install build dependencies,
+then build and run the optimized website:
+
+```sh
+cd Reducto-Frontend
+pnpm install --frozen-lockfile --prod=false
+pnpm production
+```
+
+Open `http://YOUR_SERVER:8080`. `HOST` defaults to `0.0.0.0` and `PORT` defaults to
+`8080`; for example, `HOST=127.0.0.1 PORT=8080 pnpm production` binds locally for a
+reverse proxy. These commands implement Expo's [production web export](https://docs.expo.dev/guides/publishing-websites/).
+
+The script exports with `NODE_ENV=production` to `dist/web`, using Expo's default
+minification and production optimizations. It then generates Brotli/gzip files
+and starts a static HTTP server. There is no Metro server, file watching, Fast
+Refresh, or on-demand JavaScript bundling. Content-hashed assets get one-year
+immutable caching; HTML is revalidated so clients can discover updates. Direct
+links such as `/api/groups/join/<token>` serve the application. Android APKs in
+`dist/` are separate and are not exposed by the web server.
+
+For deployment, build once and start the saved output separately:
+
+```sh
+pnpm build:production
+HOST=127.0.0.1 PORT=8080 pnpm start:production
+```
+
+The runtime needs only Node.js, `scripts/production.mjs`, and `dist/web/`;
+`node scripts/production.mjs start` works without pnpm or `node_modules`. Build
+dependencies must be installed for each new export. Stop the existing service
+before rebuilding in the same directory, then start it again. For uninterrupted
+deployments, build in a separate release directory and switch the service to it.
+
+For automatic restarts and startup after reboot on a systemd server, save this as
+`/etc/systemd/system/reducto-web.service`. Replace the example project path, user,
+and Node executable with your server's values (`command -v node` shows its path):
+
+```ini
+[Unit]
+Description=Reducto production web
+After=network.target
+
+[Service]
+Type=simple
+User=reducto
+WorkingDirectory=/srv/reducto/Reducto-Frontend
+ExecStart=/usr/bin/node scripts/production.mjs start
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8080
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+After building, run `sudo systemctl daemon-reload` and
+`sudo systemctl enable --now reducto-web`. View logs with
+`journalctl -u reducto-web -f`. Put your HTTPS reverse proxy (such as Nginx or
+Caddy) in front of `127.0.0.1:8080`, forwarding the frontend's paths to this
+server. HTTPS enables browser microphone access on public domains.
+
+The API and object storage run separately. Enter the reachable HTTPS API origin
+on the login screen, and allow the frontend origin in API CORS configuration.
+The production script does not start or proxy the backend. Keep frontend invite
+routes on the frontend host; don't blindly forward every `/api/` path there to
+the backend.
+
+For Android production use, install the standalone APK from `pnpm android:release`
+(see below). Expo Go is a development client; a production web server does not
+provide an Expo Go QR code or native updates. The existing APK builder makes a
+release-mode sideload build; its local signing key is not a Play Store signing
+setup.
+
+Validate the server with `pnpm test:production`.
+
 ## Live Android debugging over ADB
 
 Connect your phone with USB or pair it using Android's Wireless debugging. Once

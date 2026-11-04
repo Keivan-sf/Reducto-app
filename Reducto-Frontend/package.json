@@ -47,6 +47,10 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "build:production": "node scripts/production.mjs build",
+    "start:production": "node scripts/production.mjs start",
+    "production": "node scripts/production.mjs deploy",
+    "test:production": "node --test tests/production.test.mjs",
     "proxy": "node scripts/proxy.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
