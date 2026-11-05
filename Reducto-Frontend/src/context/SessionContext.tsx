@@ -6,7 +6,6 @@ import {
   readSession,
   writeSession,
   sessionCoordination,
-  withSessionLock,
   watchStoredSession,
   readServerUrl,
   writeServerUrl,
@@ -53,8 +52,10 @@ export function SessionProvider({ children }: PropsWithChildren) {
         api.baseUrl = restoredUrl;
         setServerUrl(restoredUrl);
         api.setSession(stored);
-        if (!stored) return;
         setSession(stored);
+        // Local restoration is enough to open the app, including settings while offline.
+        setReady(true);
+        if (!stored) return;
         try {
           const { user } = await api.get<{ user: User }>('/api/auth/me');
           if (
@@ -85,25 +86,8 @@ export function SessionProvider({ children }: PropsWithChildren) {
     };
   }, []);
   async function signOut() {
-    await withSessionLock(async () => {
-      const stored = await readSession();
-      const current = api.getSession();
-      if (
-        stored &&
-        current &&
-        (stored.serverUrl !== current.serverUrl || stored.user.id !== current.user.id)
-      )
-        throw new Error('Your session changed. Please try again.');
-      const token = stored?.refreshToken ?? current?.refreshToken;
-      // Revoke remotely first so a failed request can be retried by the user.
-      if (token)
-        await api.request(
-          '/api/auth/sign-out',
-          { method: 'POST', body: JSON.stringify({ refreshToken: token }) },
-          false,
-        );
-      await establish(null);
-    });
+    // Sign-out is local: neither a missing route nor an in-flight refresh may block it.
+    await establish(null);
   }
   return (
     <Context.Provider

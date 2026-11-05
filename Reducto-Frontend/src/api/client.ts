@@ -66,6 +66,18 @@ export class ApiClient {
             },
             false,
           );
+          if (this.coordination) {
+            const stored = await this.coordination.readSession();
+            // Sign-out does not wait for the refresh lock. Recheck storage before
+            // persisting a response that may arrive after another tab signed out.
+            if (
+              !stored ||
+              stored.serverUrl !== previous.serverUrl ||
+              stored.user.id !== previous.user.id ||
+              stored.refreshToken !== previous.refreshToken
+            )
+              return;
+          }
           // A logout during refresh must never restore the old account.
           if (
             this.session?.refreshToken !== previous.refreshToken ||

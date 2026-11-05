@@ -70,6 +70,36 @@ test('logout during token refresh cannot restore the session', async () => {
   assert.equal(client.getSession(), null);
 });
 
+test('a refresh finishing after another tab signs out cannot persist the old session', async () => {
+  let stored: Session | null = session;
+  const client = new ApiClient('http://test', {
+    readSession: async () => stored,
+    withRefreshLock: (action) => action(),
+  });
+  client.setSession(session);
+  let complete!: (response: Response) => void;
+  const started = new Promise<void>((resolve) => {
+    globalThis.fetch = () => {
+      resolve();
+      return new Promise((finish) => {
+        complete = finish;
+      });
+    };
+  });
+  let writes = 0;
+  client.onSession = async () => {
+    writes++;
+  };
+  const refreshing = client.refresh();
+  await started;
+  stored = null;
+  // The storage event may not have reached this tab before the HTTP response.
+  complete(json({ accessToken: 'new', refreshToken: 'new' }));
+  await refreshing;
+  assert.equal(writes, 0);
+  assert.equal(stored, null);
+});
+
 test('multipart uploads keep the browser-generated boundary and 204 returns void', async () => {
   const client = new ApiClient('http://test');
   client.setSession(session);
